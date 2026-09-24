@@ -5,10 +5,13 @@ import {
   Pagination, TableToolbar, UpdatedNote, ViewModeSelect, applyColumnFilters, exportSelectionOrAll,
   fetchAllPages, serverFilters, useSectionMeta, useSelection, useSimProgress,
 } from './components'
+import { TagBadge, TagFilterDropdown, useTagFilterState } from './TagFilterDropdown'
+import { enrichRowTag } from './tagConfig'
 
 const PAGE_SIZE = 50
 
 const ALL_COLS = [
+  { key: 'tagId', label: 'Trạng thái', filter: 'select', nowrap: true, width: 160 },
   { key: 'soDangKy', label: 'Số đăng ký', mono: true, nowrap: true },
   { key: 'ngayCap', label: 'Ngày cấp', text: (r) => fmtDate(r.ngayCap), nowrap: true },
   { key: 'tenThuoc', label: 'Tên thuốc', width: 180 },
@@ -19,6 +22,7 @@ const ALL_COLS = [
   { key: 'hanDung', label: 'Hạn dùng', align: 'right' },
   { key: 'soQuyetDinh', label: 'Số quyết định', mono: true },
   { key: 'ngayHetHan', label: 'Ngày hết hạn', text: (r) => fmtDate(r.ngayHetHan), nowrap: true },
+  { key: 'monthsLeft', label: 'Còn (tháng)', align: 'right' },
   { key: 'phanLoai', label: 'Phân loại', filter: 'select' },
   { key: 'ctySanXuat', label: 'Công ty sản xuất', width: 200 },
   { key: 'diaChiSanXuat', label: 'Địa chỉ SX' },
@@ -33,7 +37,7 @@ const ALL_COLS = [
 ]
 
 const COMPACT = [
-  'soDangKy', 'ngayCap', 'tenThuoc', 'hoatChat', 'hamLuong', 'dangBaoChe',
+  'tagId', 'soDangKy', 'ngayCap', 'tenThuoc', 'hoatChat', 'hamLuong', 'dangBaoChe',
   'dongGoi', 'ngayHetHan', 'ctyDangKy', 'ctySanXuat', 'nuocSanXuat',
 ]
 
@@ -50,11 +54,12 @@ const EMPTY_FILTERS = {
   dosageFormCount: '', dosageFormCountOther: '',
   strengthCount: '', strengthCountOther: '',
   conHieuLuc: false,
+  tags: null, // filled from tag filter state
 }
 
 /** Static (GitHub Pages) fallback filtering — mirrors the server as far as the export allows. */
 function filterStatic(items, f) {
-  let out = items
+  let out = items.map(enrichRowTag)
   const q = (f.q || '').trim()
   if (q) out = out.filter((r) => containsWords(`${r.tenThuoc} ${r.soDangKy} ${r.hoatChat} ${r.hamLuong}`, q))
   out = applyClientFilters(out, [
@@ -69,6 +74,11 @@ function filterStatic(items, f) {
   const n = f.ingredientCount === 'other' ? Number(f.ingredientCountOther) : Number(f.ingredientCount)
   if (f.ingredientCount && Number.isFinite(n) && n > 0) out = out.filter((r) => r.ingredientCount === n)
   if (f.conHieuLuc) out = out.filter((r) => r.conHieuLuc)
+  const tags = f.tags
+  if (Array.isArray(tags)) {
+    if (tags.length === 0) return []
+    out = out.filter((r) => tags.includes(r.tagId))
+  }
   return out
 }
 
@@ -92,6 +102,7 @@ export default function DavSection({ localMode }) {
   const sel = useSelection()
   const reqSeq = useRef(0)
   const meta = useSectionMeta('dav', localMode, staticFallback, refreshKey)
+  const { selectedTags, setSelectedTags, configs, refreshConfigs } = useTagFilterState()
 
   useEffect(() => {
     if (viewMode === 'compact') setVisible(COMPACT)
@@ -99,6 +110,13 @@ export default function DavSection({ localMode }) {
   }, [viewMode])
 
   const cols = useMemo(() => ALL_COLS.filter((c) => visible.includes(c.key)).map((c) => {
+    if (c.key === 'tagId') {
+      return {
+        ...c,
+        text: (r) => configs.find((t) => t.id === r.tagId)?.label || r.tagId || '',
+        render: (v, row) => <TagBadge tagId={row.tagId} configs={configs} />,
+      }
+    }
     if (c.key === 'soDangKy') {
       return { ...c, render: (v) => <a className="sdk" href={DAV_LOOKUP} target="_blank" rel="noreferrer">{v}</a> }
     }
@@ -116,11 +134,15 @@ export default function DavSection({ localMode }) {
       }
     }
     return c
-  }), [visible])
+  }), [visible, configs])
 
   const mergedFilters = useCallback(
-    (cf = columnFilters) => ({ ...filters, ...serverFilters(cf, SERVER_MAP) }),
-    [filters, columnFilters],
+    (cf = columnFilters) => ({
+      ...filters,
+      ...serverFilters(cf, SERVER_MAP),
+      tags: selectedTags,
+    }),
+    [filters, columnFilters, selectedTags],
   )
 
   const search = useCallback(async (p = 0, cf) => {
@@ -144,7 +166,7 @@ export default function DavSection({ localMode }) {
         return
       }
       setStaticFallback({ updated: staticUpdated(dumped, ['ngayCap']), count: dumped.total || dumped.items.length })
-      const items = filterStatic(dumped.items, filters)
+      const items = filterStatic(dumped.items, { ...filters, tags: selectedTags })
       setData({ total: items.length, items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE), page: p, size: PAGE_SIZE })
       setPage(p)
     } catch (e) {
@@ -155,9 +177,9 @@ export default function DavSection({ localMode }) {
         setRefreshKey((k) => k + 1)
       }
     }
-  }, [filters, localMode, mergedFilters])
+  }, [filters, localMode, mergedFilters, selectedTags])
 
-  useEffect(() => { search(0) }, []) // initial load
+  useEffect(() => { search(0) }, [selectedTags]) // initial + when tags change
 
   const setF = (key, val) => setFilters((f) => ({ ...f, [key]: val }))
   const setCF = (key, val) => setColumnFilters((f) => ({ ...f, [key]: val }))
@@ -171,8 +193,8 @@ export default function DavSection({ localMode }) {
       return fetchAllPages((p, size) => api.davSearch({ filters: mergedFilters(), page: p, size }), { onProgress: setExportPct })
     }
     const dumped = await loadStaticGz('dav')
-    return filterStatic(dumped?.items || [], filters)
-  }, [localMode, mergedFilters, filters])
+    return filterStatic(dumped?.items || [], { ...filters, tags: selectedTags })
+  }, [localMode, mergedFilters, filters, selectedTags])
 
   const doExport = async () => {
     setExporting(true)
@@ -227,6 +249,11 @@ export default function DavSection({ localMode }) {
             </Field>
           </div>
           <div className="filter-actions">
+            <TagFilterDropdown
+              selectedTags={selectedTags}
+              onChange={(ids) => { setSelectedTags(ids); refreshConfigs() }}
+              configs={configs}
+            />
             <button type="button" className="btn" onClick={() => search(0)}>{Icons.search} Tìm kiếm</button>
             <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
             {localMode && (
@@ -236,8 +263,11 @@ export default function DavSection({ localMode }) {
             )}
             {!localMode && <span className="muted small">Chế độ tĩnh: lọc nhóm hoạt chất (dạng bào chế / hàm lượng) chỉ khả dụng khi chạy local.</span>}
             <div className="spacer" />
-            <span className="muted small">Enter trong ô lọc để tìm</span>
+            <span className="muted small">Enter trong ô lọc để tìm · Đôi-click tên tag để đổi tên</span>
           </div>
+          {selectedTags.length === 0 && (
+            <div className="tag-empty-hint">Vui lòng chọn ít nhất một phân loại tag để hiển thị kết quả.</div>
+          )}
         </div>
 
         <TableToolbar
@@ -292,12 +322,17 @@ export default function DavSection({ localMode }) {
 
       <DetailModal
         row={detail}
-        fields={[...ALL_COLS, { key: 'soDangKyCu', label: 'Số ĐK cũ' }, { key: 'ngayGiaHan', label: 'Ngày gia hạn', text: (r) => fmtDate(r.ngayGiaHan) }, { key: 'dotCap', label: 'Đợt cấp' }, { key: 'conHieuLuc', label: 'Còn hiệu lực' }, { key: 'ingredientCount', label: 'Số hoạt chất' }, { key: 'ghiChu', label: 'Ghi chú' }]}
+        fields={[...ALL_COLS, { key: 'soDangKyCu', label: 'Số ĐK cũ' }, { key: 'ngayGiaHan', label: 'Ngày gia hạn', text: (r) => fmtDate(r.ngayGiaHan) }, { key: 'dotCap', label: 'Đợt cấp' }, { key: 'conHieuLuc', label: 'Còn hiệu lực' }, { key: 'dm93', label: 'Khớp DM93' }, { key: 'hasGiaHanPending', label: 'Đang nộp gia hạn' }, { key: 'ingredientCount', label: 'Số hoạt chất' }, { key: 'ghiChu', label: 'Ghi chú' }]}
         title={detail?.tenThuoc || 'Chi tiết thuốc'}
         subtitle={detail ? `SĐK ${detail.soDangKy}` : ''}
         sourceUrl={DAV_LOOKUP}
         onClose={() => setDetail(null)}
-        renderValue={(f, row, val) => (f.key === 'hoatChat' ? <IngredientText text={row.hoatChat} /> : val)}
+        renderValue={(f, row, val) => {
+          if (f.key === 'hoatChat') return <IngredientText text={row.hoatChat} />
+          if (f.key === 'tagId') return <TagBadge tagId={row.tagId} configs={configs} />
+          if (f.key === 'hasGiaHanPending') return row.hasGiaHanPending ? 'Có' : 'Không'
+          return val
+        }}
       />
       <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} />
       <LoadingOverlay show={exporting} percent={exportPct} message="Đang gom dữ liệu để xuất Excel…" />

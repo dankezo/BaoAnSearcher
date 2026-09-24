@@ -16,6 +16,7 @@ from .common import (
 )
 
 _dm93_cache = None
+_dm93_index_cache = None
 _validity_cache = None  # set of soDangKy that pass validity pipeline
 _downloader = None
 _download_thread = None
@@ -97,7 +98,11 @@ def flatten(record: dict) -> dict:
         dong_goi_cs = m.group(1).strip()
         xuat_xuong = (m.group(2) or "").strip()
 
-    return {
+    months_left = None
+    if end:
+        months_left = (end - now).total_seconds() / (30.4375 * 24 * 3600)
+
+    flat = {
         "id": record.get("id"),
         "soDangKy": record.get("soDangKy") or "",
         "soDangKyCu": record.get("soDangKyCu") or "",
@@ -128,13 +133,65 @@ def flatten(record: dict) -> dict:
         "isHetHan": bool(record.get("isHetHan")),
         "conHieuLuc": con_hl,
         "kyCapNam": round(ky_nam, 2) if ky_nam is not None else None,
+        "monthsLeft": round(months_left, 1) if months_left is not None else None,
+        "hasGiaHanPending": bool(record.get("maSoHoSoGiaHan") or record.get("ngayTiepNhanHSGiaHan") or record.get("urlGiayTiepNhanGiaHan")),
         "ingredientCount": len([x for x in ingredients if x]),
         "ingredients": ingredients,
         "ghiChu": record.get("ghiChu") or "",
+        "dm93": None,  # filled below
+        "tagId": None,
     }
+    dm = match_dm93(flat)
+    flat["dm93"] = dm
+    flat["tagId"] = classify_sdk_tag(flat)
+    return flat
+
+
+TAG_XANH = "TAG_XANH_LA"
+TAG_VANG = "TAG_VANG_XAC_MINH"
+TAG_CAM = "TAG_CAM_CMO"
+TAG_XAM = "TAG_XAM_LICH_SU"
+
+
+def classify_sdk_tag(flat: dict) -> str:
+    """Primary commercial status tag for an SĐK row (mutually exclusive)."""
+    end = parse_date(flat.get("ngayHetHan"))
+    now = datetime.now(VN)
+    expired = bool(flat.get("isHetHan")) or (end is not None and end < now)
+    if flat.get("isDeleted") or flat.get("isDaRut") or expired or flat.get("isActive") is False:
+        return TAG_XAM
+
+    if flat.get("dm93") == "match":
+        return TAG_CAM
+
+    ky = flat.get("kyCapNam")
+    months = flat.get("monthsLeft")
+    pending = bool(flat.get("hasGiaHanPending"))
+    cycle3 = ky is not None and 2.5 <= float(ky) < 4.0
+    cycle5 = ky is not None and 4.5 <= float(ky) <= 6.0
+    short = months is not None and float(months) < 18
+
+    if short or cycle3 or pending:
+        return TAG_VANG
+
+    if (
+        months is not None
+        and float(months) >= 18
+        and cycle5
+        and flat.get("dm93") != "match"
+        and (flat.get("hoatChat") or "").strip()
+        and end is not None
+    ):
+        return TAG_XANH
+
+    # Incomplete dates / odd cycle → verify
+    return TAG_VANG
 
 
 def _dm93_index():
+    global _dm93_index_cache
+    if _dm93_index_cache is not None:
+        return _dm93_index_cache
     rows = []
     for item in load_dm93():
         rows.append({
@@ -144,6 +201,7 @@ def _dm93_index():
             "raw_dang": fold(item["dangBaoChe"]),
             "parts": split_ingredients(item["hoatChat"]),
         })
+    _dm93_index_cache = rows
     return rows
 
 
@@ -307,10 +365,24 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
     strength_n = filters.get("strengthCount")
     strength_other = filters.get("strengthCountOther")
     con_hieu_luc = bool(filters.get("conHieuLuc"))
+    raw_tags = filters["tags"] if "tags" in filters else filters.get("selectedTags", None)
+    tags_set = None
+    if raw_tags is not None:
+        if isinstance(raw_tags, str):
+            raw_tags = [t for t in raw_tags.split(",") if t.strip()]
+        tags_set = {str(t).strip() for t in (raw_tags or []) if str(t).strip()}
 
     validity = set()
     if con_hieu_luc:
         validity = get_validity_set()
+
+    if tags_set is not None and len(tags_set) == 0:
+        con = connect()
+        try:
+            total_db = con.execute("SELECT count(*) FROM drugs").fetchone()[0]
+        finally:
+            con.close()
+        return {"total": 0, "page": max(0, int(page)), "size": max(1, min(200, int(size))), "items": [], "dbTotal": total_db}
 
     need_group = any([dosage_n, strength_n])
     # Fast path: SQL prefilter when no group stats needed
@@ -383,6 +455,8 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
         rec = json.loads(raw)
         flat = flatten(rec)
         if con_hieu_luc and flat["soDangKy"] not in validity:
+            continue
+        if tags_set is not None and flat.get("tagId") not in tags_set:
             continue
         if ingredient_n and not match_count(flat["ingredientCount"], ingredient_n, ingredient_other):
             continue
