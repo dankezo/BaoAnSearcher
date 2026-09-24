@@ -40,10 +40,13 @@ Import Excel BHYT: đặt file hoặc dùng nút **Import Excel mặc định** 
 ## Export & GitHub Pages
 
 1. Cập nhật data local (crawl trong tab Quản trị).
-2. `python scripts/export_for_pages.py 5000` → tạo `web/public/data/*.json.gz`
-3. Commit + push nhánh `main`/`master`.
-4. Bật **Settings → Pages → GitHub Actions**.
-5. Chia sẻ URL Pages cho sếp (chế độ xem; crawl chỉ trên máy bạn).
+2. `python scripts/export_for_pages.py 5000`
+3. `cd web && npm run build` rồi copy `web/dist` → `docs/` (hoặc chạy lại build + copy).
+4. Commit + push nhánh `master`.
+5. GitHub → **Settings → Pages → Deploy from a branch** → `master` / `/docs`.
+6. Link dạng: `https://dankezo.github.io/BaoAnSearcher/`
+
+Pages chỉ xem data đã export; crawl chạy trên máy bạn.
 
 ## Danh mục 93
 
