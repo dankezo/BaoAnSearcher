@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, applyClientFilters, containsWords, fmtDate, loadStaticGz, openDavLookup, staticUpdated, DAV_LOOKUP } from './api'
 import {
   ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, Field, Icons, IngredientText, LoadingOverlay,
-  Pagination, TableToolbar, UpdatedNote, ViewModeSelect, applyColumnFilters, exportSelectionOrAll,
+  Pagination, SearchSuggestBar, TableToolbar, UpdatedNote, ViewModeSelect, applyColumnFilters, exportSelectionOrAll,
   fetchAllPages, serverFilters, useSectionMeta, useSelection, useSimProgress,
 } from './components'
 import { TagBadge, TagFilterDropdown, useTagFilterState } from './TagFilterDropdown'
@@ -89,6 +89,7 @@ export default function DavSection({ localMode }) {
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(true)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(false)
@@ -98,9 +99,14 @@ export default function DavSection({ localMode }) {
   const [detail, setDetail] = useState(null)
   const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [suggests, setSuggests] = useState([])
+  const [suggestOpen, setSuggestOpen] = useState(false)
+  const [suggesting, setSuggesting] = useState(false)
   const sim = useSimProgress(loading, 'Đang lọc thuốc DAV')
   const sel = useSelection()
   const reqSeq = useRef(0)
+  const suggestSeq = useRef(0)
+  const suggestTimer = useRef(null)
   const meta = useSectionMeta('dav', localMode, staticFallback, refreshKey)
   const { selectedTags, setSelectedTags, configs, refreshConfigs } = useTagFilterState()
 
@@ -145,14 +151,15 @@ export default function DavSection({ localMode }) {
     [filters, columnFilters, selectedTags],
   )
 
-  const search = useCallback(async (p = 0, cf) => {
+  const search = useCallback(async (p = 0, cf, override = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
     setLoading(true)
     setErr('')
+    const active = { ...mergedFilters(cf), ...(override || {}) }
     try {
       if (localMode) {
-        const res = await api.davSearch({ filters: mergedFilters(cf), page: p, size: PAGE_SIZE })
+        const res = await api.davSearch({ filters: active, page: p, size: PAGE_SIZE })
         if (stale()) return
         setData(res)
         setPage(p)
@@ -166,7 +173,7 @@ export default function DavSection({ localMode }) {
         return
       }
       setStaticFallback({ updated: staticUpdated(dumped, ['ngayCap']), count: dumped.total || dumped.items.length })
-      const items = filterStatic(dumped.items, { ...filters, tags: selectedTags })
+      const items = filterStatic(dumped.items, active)
       setData({ total: items.length, items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE), page: p, size: PAGE_SIZE })
       setPage(p)
     } catch (e) {
@@ -177,13 +184,63 @@ export default function DavSection({ localMode }) {
         setRefreshKey((k) => k + 1)
       }
     }
-  }, [filters, localMode, mergedFilters, selectedTags])
+  }, [localMode, mergedFilters])
 
   useEffect(() => { search(0) }, [selectedTags]) // initial + when tags change
+
+  const toSuggest = useCallback((items) => (
+    (items || []).slice(0, 4).map((r, i) => ({
+      id: r.id ?? `${r.soDangKy}-${i}`,
+      title: r.tenThuoc || r.soDangKy || '—',
+      subtitle: [r.soDangKy, r.hoatChat].filter(Boolean).join(' · '),
+      meta: r.hamLuong || '',
+      row: r,
+    }))
+  ), [])
+
+  useEffect(() => {
+    const q = (filters.q || '').trim()
+    clearTimeout(suggestTimer.current)
+    if (q.length < 2) {
+      setSuggests([])
+      setSuggesting(false)
+      return
+    }
+    suggestTimer.current = setTimeout(async () => {
+      const id = ++suggestSeq.current
+      setSuggesting(true)
+      try {
+        let items = []
+        if (localMode) {
+          const res = await api.davSearch({
+            filters: { ...mergedFilters(), q, tenThuoc: '', soDangKy: '', hoatChat: '' },
+            page: 0,
+            size: 4,
+          })
+          items = res?.items || []
+        } else {
+          const dumped = await loadStaticGz('dav')
+          items = filterStatic(dumped?.items || [], { ...filters, q, tags: selectedTags }).slice(0, 4)
+        }
+        if (id === suggestSeq.current) setSuggests(toSuggest(items))
+      } catch {
+        if (id === suggestSeq.current) setSuggests([])
+      } finally {
+        if (id === suggestSeq.current) setSuggesting(false)
+      }
+    }, 260)
+    return () => clearTimeout(suggestTimer.current)
+  }, [filters.q, filters, localMode, mergedFilters, selectedTags, toSuggest])
 
   const setF = (key, val) => setFilters((f) => ({ ...f, [key]: val }))
   const setCF = (key, val) => setColumnFilters((f) => ({ ...f, [key]: val }))
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
+  const advancedActive = [
+    filters.tenThuoc, filters.soDangKy, filters.hoatChat, filters.dangBaoChe,
+    filters.sanXuat, filters.dangKy, filters.nuocSanXuat,
+    filters.ingredientCount, filters.dosageFormCount, filters.strengthCount,
+    filters.conHieuLuc,
+  ].filter((v) => v === true || String(v ?? '').trim()).length
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.id != null ? `id:${r.id}` : `${r.soDangKy}|${page}|${i}`), [page])
@@ -224,47 +281,74 @@ export default function DavSection({ localMode }) {
 
       <div className="panel">
         <div className="filters">
-          <div className="filter-grid">
-            <Field label="Từ khóa" hint="tên · SĐK · hoạt chất · hàm lượng">
-              <input value={filters.q} onChange={(e) => setF('q', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} placeholder="Nhập nhiều từ, cách nhau bằng dấu cách" />
-            </Field>
-            <Field label="Tên thuốc"><input value={filters.tenThuoc} onChange={(e) => setF('tenThuoc', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-            <Field label="Số ĐK"><input value={filters.soDangKy} onChange={(e) => setF('soDangKy', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-            <Field label="Hoạt chất"><input value={filters.hoatChat} onChange={(e) => setF('hoatChat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-            <Field label="Dạng bào chế"><input value={filters.dangBaoChe} onChange={(e) => setF('dangBaoChe', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-            <Field label="Công ty SX"><input value={filters.sanXuat} onChange={(e) => setF('sanXuat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-            <Field label="Công ty ĐK"><input value={filters.dangKy} onChange={(e) => setF('dangKy', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-            <Field label="Nước SX"><input value={filters.nuocSanXuat} onChange={(e) => setF('nuocSanXuat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-            <CountSelect label="Số hoạt chất" value={filters.ingredientCount} otherValue={filters.ingredientCountOther}
-              options={[1, 2, 3, 4, 5]} onChange={(v) => setF('ingredientCount', v)} onOther={(v) => setF('ingredientCountOther', v)} />
-            <CountSelect label="Số dạng bào chế (nhóm HC)" value={filters.dosageFormCount} otherValue={filters.dosageFormCountOther}
-              options={[1, 2, 3, 4, 5, 6, 7]} onChange={(v) => setF('dosageFormCount', v)} onOther={(v) => setF('dosageFormCountOther', v)} />
-            <CountSelect label="Mức hàm lượng (nhóm HC)" value={filters.strengthCount} otherValue={filters.strengthCountOther}
-              options={[1, 3, 4, 5]} onChange={(v) => setF('strengthCount', v)} onOther={(v) => setF('strengthCountOther', v)} />
-            <Field label="Còn hiệu lực (tiêu chí KD)">
-              <select value={filters.conHieuLuc ? '1' : '0'} onChange={(e) => setF('conHieuLuc', e.target.value === '1')}>
-                <option value="0">Tắt</option>
-                <option value="1">Bật — kỳ cấp ≥ 3 năm, loại DM93…</option>
-              </select>
-            </Field>
-          </div>
-          <div className="filter-actions">
+          <SearchSuggestBar
+            value={filters.q}
+            onChange={(v) => setF('q', v)}
+            onSubmit={() => { setSuggestOpen(false); search(0) }}
+            suggestions={suggests}
+            open={suggestOpen}
+            onOpenChange={setSuggestOpen}
+            loading={loading || suggesting}
+            onPick={(s) => {
+              const row = s.row
+              const q = row?.tenThuoc || s.title || filters.q
+              setFilters((f) => ({ ...f, q }))
+              setSuggestOpen(false)
+              if (row) setDetail(row)
+              search(0, undefined, { q })
+            }}
+          />
+          <div className="filter-actions filter-actions-center">
             <TagFilterDropdown
               selectedTags={selectedTags}
               onChange={(ids) => { setSelectedTags(ids); refreshConfigs() }}
               configs={configs}
             />
-            <button type="button" className="btn" onClick={() => search(0)}>{Icons.search} Tìm kiếm</button>
-            <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
+            <button
+              type="button"
+              className={`btn ghost${advancedOpen ? ' on' : ''}`}
+              onClick={() => setAdvancedOpen((v) => !v)}
+            >
+              {Icons.filter} Bộ lọc chi tiết
+              {advancedActive > 0 && <span className="pill">{advancedActive}</span>}
+            </button>
+            <button type="button" className="btn secondary" onClick={() => {
+              setFilters(EMPTY_FILTERS)
+              setColumnFilters({})
+              setSuggests([])
+            }}
+            >
+              Xóa lọc
+            </button>
             {localMode && (
               <button type="button" className="btn ghost" onClick={() => api.davValidity().then(() => search(0)).catch((e) => setErr(e.message))}>
                 Rebuild tập hiệu lực
               </button>
             )}
-            {!localMode && <span className="muted small">Chế độ tĩnh: lọc nhóm hoạt chất (dạng bào chế / hàm lượng) chỉ khả dụng khi chạy local.</span>}
-            <div className="spacer" />
-            <span className="muted small">Enter trong ô lọc để tìm · Đôi-click tên tag để đổi tên</span>
           </div>
+          {advancedOpen && (
+            <div className="filter-grid">
+              <Field label="Tên thuốc"><input value={filters.tenThuoc} onChange={(e) => setF('tenThuoc', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+              <Field label="Số ĐK"><input value={filters.soDangKy} onChange={(e) => setF('soDangKy', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+              <Field label="Hoạt chất"><input value={filters.hoatChat} onChange={(e) => setF('hoatChat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+              <Field label="Dạng bào chế"><input value={filters.dangBaoChe} onChange={(e) => setF('dangBaoChe', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+              <Field label="Công ty SX"><input value={filters.sanXuat} onChange={(e) => setF('sanXuat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+              <Field label="Công ty ĐK"><input value={filters.dangKy} onChange={(e) => setF('dangKy', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+              <Field label="Nước SX"><input value={filters.nuocSanXuat} onChange={(e) => setF('nuocSanXuat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+              <CountSelect label="Số hoạt chất" value={filters.ingredientCount} otherValue={filters.ingredientCountOther}
+                options={[1, 2, 3, 4, 5]} onChange={(v) => setF('ingredientCount', v)} onOther={(v) => setF('ingredientCountOther', v)} />
+              <CountSelect label="Số dạng bào chế (nhóm HC)" value={filters.dosageFormCount} otherValue={filters.dosageFormCountOther}
+                options={[1, 2, 3, 4, 5, 6, 7]} onChange={(v) => setF('dosageFormCount', v)} onOther={(v) => setF('dosageFormCountOther', v)} />
+              <CountSelect label="Mức hàm lượng (nhóm HC)" value={filters.strengthCount} otherValue={filters.strengthCountOther}
+                options={[1, 3, 4, 5]} onChange={(v) => setF('strengthCount', v)} onOther={(v) => setF('strengthCountOther', v)} />
+              <Field label="Còn hiệu lực (tiêu chí KD)">
+                <select value={filters.conHieuLuc ? '1' : '0'} onChange={(e) => setF('conHieuLuc', e.target.value === '1')}>
+                  <option value="0">Tắt</option>
+                  <option value="1">Bật — kỳ cấp ≥ 3 năm, loại DM93…</option>
+                </select>
+              </Field>
+            </div>
+          )}
           {selectedTags.length === 0 && (
             <div className="tag-empty-hint">Vui lòng chọn ít nhất một phân loại tag để hiển thị kết quả.</div>
           )}

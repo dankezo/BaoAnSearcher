@@ -62,6 +62,126 @@ export function Field({ label, children, hint, className = '' }) {
   )
 }
 
+/**
+ * Centered hero search bar with optional typeahead (3–4 rows).
+ * suggestions: [{ id, title, subtitle, meta? }]
+ */
+export function SearchSuggestBar({
+  value,
+  onChange,
+  onSubmit,
+  placeholder = 'Tìm theo tên · SĐK · hoạt chất · hàm lượng…',
+  hint = 'Gõ để xem gợi ý · Enter để tìm',
+  suggestions = [],
+  open = false,
+  onOpenChange,
+  onPick,
+  loading = false,
+  submitLabel = 'Tìm kiếm',
+}) {
+  const wrapRef = useRef(null)
+  const [hi, setHi] = useState(-1)
+
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) onOpenChange?.(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [onOpenChange])
+
+  useEffect(() => { setHi(-1) }, [suggestions])
+
+  const show = open && suggestions.length > 0
+
+  const pick = (item) => {
+    onPick?.(item)
+    onOpenChange?.(false)
+  }
+
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown') {
+      if (!show) return
+      e.preventDefault()
+      setHi((i) => (i + 1) % suggestions.length)
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      if (!show) return
+      e.preventDefault()
+      setHi((i) => (i <= 0 ? suggestions.length - 1 : i - 1))
+      return
+    }
+    if (e.key === 'Escape') {
+      onOpenChange?.(false)
+      return
+    }
+    if (e.key === 'Enter') {
+      if (show && hi >= 0 && suggestions[hi]) {
+        e.preventDefault()
+        pick(suggestions[hi])
+        return
+      }
+      onSubmit?.()
+    }
+  }
+
+  return (
+    <div className="search-hero" ref={wrapRef}>
+      {hint && <div className="search-hero-hint">{hint}</div>}
+      <div className={`search-hero-bar${show ? ' open' : ''}`}>
+        <span className="search-hero-icon" aria-hidden>{I.search}</span>
+        <input
+          className="search-hero-input"
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value)
+            onOpenChange?.(true)
+          }}
+          onFocus={() => onOpenChange?.(true)}
+          onKeyDown={onKey}
+          placeholder={placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          aria-autocomplete="list"
+          aria-expanded={show}
+        />
+        {value ? (
+          <button
+            type="button"
+            className="search-hero-clear"
+            aria-label="Xóa"
+            onClick={() => { onChange(''); onOpenChange?.(false) }}
+          >
+            {I.x}
+          </button>
+        ) : null}
+        <button type="button" className="btn search-hero-btn" onClick={() => onSubmit?.()} disabled={loading}>
+          {I.search} {submitLabel}
+        </button>
+      </div>
+      {show && (
+        <ul className="search-suggest" role="listbox">
+          {suggestions.map((s, i) => (
+            <li key={s.id ?? i} role="option" aria-selected={i === hi}>
+              <button
+                type="button"
+                className={`search-suggest-item${i === hi ? ' hi' : ''}`}
+                onMouseEnter={() => setHi(i)}
+                onClick={() => pick(s)}
+              >
+                <span className="search-suggest-title">{s.title}</span>
+                {s.subtitle && <span className="search-suggest-sub">{s.subtitle}</span>}
+                {s.meta && <span className="search-suggest-meta">{s.meta}</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export function CountSelect({ label, value, onChange, options, otherValue, onOther }) {
   return (
     <div className="field">
