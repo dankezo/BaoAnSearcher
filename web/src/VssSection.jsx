@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, loadStaticGz, staticUpdated } from './api'
 import {
-  ColumnPicker, DataTable, DetailModal, ErrorNote, Field, Icons, IngredientText, LoadingOverlay, Pagination,
-  TableToolbar, UpdatedNote, ViewModeSelect, applyColumnFilters, exportSelectionOrAll, fetchAllPages,
-  serverFilters, useSectionMeta, useSelection, useSimProgress,
+  ColumnPicker, DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons,
+  IngredientText, LoadingOverlay, Pagination, TableToolbar, UpdatedNote, ViewModeSelect,
+  applyColumnFilters, exportSelectionOrAll, fetchAllPages, serverFilters, useSectionMeta,
+  useSelection, useSimProgress, useTt20,
 } from './components'
+import { ingredientAllowedAtGrade } from './tt20'
 
 const PAGE_SIZE = 50
 
@@ -36,7 +38,6 @@ const ALL_COLS = [
   { key: 'tungay_hd', label: 'Từ ngày HĐ', nowrap: true, text: (r) => fmtDate(r.tungay_hd), render: (v) => fmtDate(v) },
   { key: 'denngay_hd', label: 'Đến ngày HĐ', nowrap: true, text: (r) => fmtDate(r.denngay_hd), render: (v) => fmtDate(v) },
   { key: 'loai_thau', label: 'Loại thầu', filter: 'select' },
-  { key: 'loai', label: 'Loại', filter: 'select' },
   { key: 'dangbaoche', label: 'Dạng bào chế' },
   { key: 'donggoi', label: 'Đóng gói' },
   { key: 'tennhathau', label: 'Nhà thầu', width: 170 },
@@ -58,7 +59,8 @@ const EXTRA_DETAIL = [
   { key: 'madd_gy', label: 'Mã ĐD GY' }, { key: 'ten_don_vi', label: 'Đơn vị' },
   { key: 'tungay', label: 'Từ ngày', text: (r) => fmtDate(r.tungay) }, { key: 'denngay', label: 'Đến ngày', text: (r) => fmtDate(r.denngay) },
   { key: 'tieuchuan', label: 'Tiêu chuẩn' }, { key: 'sttpheduyet', label: 'STT phê duyệt' }, { key: 'hieuluc', label: 'Hiệu lực' },
-  { key: 'ht_thau', label: 'Hình thức thầu' }, { key: 'created_date', label: 'Ngày tạo', text: (r) => fmtDateTime(r.created_date) },
+  { key: 'ht_thau', label: 'Hình thức thầu' }, { key: 'loai', label: 'Loại' },
+  { key: 'created_date', label: 'Ngày tạo', text: (r) => fmtDateTime(r.created_date) },
 ]
 
 const SERVER_MAP = {
@@ -68,10 +70,10 @@ const SERVER_MAP = {
 
 const EMPTY_FILTERS = {
   q: '', loai_thau: '', loai: 'Tân dược', nhomthau: '', hoatchat: '', sodk: '',
-  tuNgay: '', denNgay: '', nam: '', duongdung: '', ma_tinh: '', nuocsx: '',
+  tuNgay: '', denNgay: '', nam: '', duongdung: '', ma_tinh: '', nuocsx: '', hangBenhVien: '',
 }
 
-function filterStatic(items, f) {
+function filterStatic(items, f, tt20Index) {
   let out = items
   if ((f.q || '').trim()) {
     out = out.filter((r) => containsWords(`${r.ten} ${r.hoatchat} ${r.sodk} ${r.nhasx} ${r.tennhathau} ${r.ten_cskcb} ${r.ten_tinh}`, f.q))
@@ -84,17 +86,21 @@ function filterStatic(items, f) {
   if (f.nam) out = out.filter((r) => String(r.congbo || r.tungay || r.tungay_hd || '').startsWith(String(f.nam)))
   if (f.tuNgay) out = out.filter((r) => String(r.tungay_hd || '') >= f.tuNgay)
   if (f.denNgay) out = out.filter((r) => String(r.denngay_hd || '') <= `${f.denNgay} 23:59:59`)
+  if (f.hangBenhVien) {
+    out = out.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, f.hangBenhVien))
+  }
   return out
 }
 
-export default function VssSection({ localMode }) {
-  const [adv, setAdv] = useState(false)
+export default function VssSection({ localMode, embedded = false, filtersInModal = false }) {
+  const { index: tt20Index } = useTt20()
   const [colPicker, setColPicker] = useState(false)
   const [viewMode, setViewMode] = useState('compact')
   const [visible, setVisible] = useState(DEFAULT)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(true)
+  const [filterModalOpen, setFilterModalOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(false)
@@ -117,7 +123,7 @@ export default function VssSection({ localMode }) {
   const cols = useMemo(() => ALL_COLS.filter((c) => visible.includes(c.key)), [visible])
 
   const mergedFilters = useCallback(
-    (cf = columnFilters) => ({ ...filters, ...serverFilters(cf, SERVER_MAP) }),
+    (cf = columnFilters) => ({ ...filters, ...serverFilters(cf, SERVER_MAP), loai: 'Tân dược' }),
     [filters, columnFilters],
   )
 
@@ -126,11 +132,23 @@ export default function VssSection({ localMode }) {
     const stale = () => id !== reqSeq.current
     setLoading(true)
     setErr('')
+    const active = mergedFilters(cf)
     try {
       if (localMode) {
-        const res = await api.vssSearch({ filters: mergedFilters(cf), page: p, size: PAGE_SIZE })
+        const needGrade = !!active.hangBenhVien
+        const res = await api.vssSearch({
+          filters: active,
+          page: needGrade ? 0 : p,
+          size: needGrade ? 400 : PAGE_SIZE,
+        })
         if (stale()) return
-        setData(res)
+        let items = res.items || []
+        if (active.hangBenhVien) {
+          items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, active.hangBenhVien))
+          setData({ total: items.length, items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE) })
+        } else {
+          setData(res)
+        }
         setPage(p)
         return
       }
@@ -142,7 +160,7 @@ export default function VssSection({ localMode }) {
         return
       }
       setStaticFallback({ updated: staticUpdated(dumped, ['created_date', 'congbo']), count: dumped.total || dumped.items.length })
-      const items = filterStatic(dumped.items, filters)
+      const items = filterStatic(dumped.items, active, tt20Index)
       setData({ total: items.length, items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE) })
       setPage(p)
     } catch (e) {
@@ -153,26 +171,31 @@ export default function VssSection({ localMode }) {
         setRefreshKey((k) => k + 1)
       }
     }
-  }, [filters, localMode, mergedFilters])
+  }, [localMode, mergedFilters, tt20Index])
 
-  useEffect(() => { search(0) }, []) // initial load
+  useEffect(() => { search(0) }, [filters.hangBenhVien]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const setF = (k, v) => setFilters((f) => ({ ...f, [k]: v }))
   const setCF = (k, v) => setColumnFilters((f) => ({ ...f, [k]: v }))
   const onEnter = (e) => e.key === 'Enter' && search(0)
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
-  const advActive = ['duongdung', 'ma_tinh', 'nuocsx'].filter((k) => filters[k]).length
+  const detailActive = ['duongdung', 'ma_tinh', 'nuocsx', 'hangBenhVien', 'loai_thau', 'nhomthau', 'hoatchat', 'sodk', 'tuNgay', 'denNgay', 'nam']
+    .filter((k) => String(filters[k] ?? '').trim()).length
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => `${r.sodk}|${r.ma}|${r.ma_tinh}|${r.quyetdinh}|${r.stt ?? `${page}-${i}`}`, [page])
 
   const fetchAll = useCallback(async () => {
     if (localMode) {
-      return fetchAllPages((p, size) => api.vssSearch({ filters: mergedFilters(), page: p, size }), { onProgress: setExportPct })
+      const all = await fetchAllPages((p, size) => api.vssSearch({ filters: mergedFilters(), page: p, size }), { onProgress: setExportPct })
+      if (filters.hangBenhVien) {
+        return all.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, filters.hangBenhVien))
+      }
+      return all
     }
     const dumped = await loadStaticGz('vss')
-    return filterStatic(dumped?.items || [], filters)
-  }, [localMode, mergedFilters, filters])
+    return filterStatic(dumped?.items || [], filters, tt20Index)
+  }, [localMode, mergedFilters, filters, tt20Index])
 
   const doExport = async () => {
     setExporting(true)
@@ -189,63 +212,103 @@ export default function VssSection({ localMode }) {
     }
   }
 
+  const primaryFilters = (
+    <div className="filter-grid">
+      <Field label="Từ khóa"><input value={filters.q} onChange={(e) => setF('q', e.target.value)} onKeyDown={onEnter} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" /></Field>
+      <Field label="Nhóm thầu">
+        <select value={filters.nhomthau} onChange={(e) => setF('nhomthau', e.target.value)}>
+          <option value="">Tất cả</option>
+          {['N1', 'N2', 'N3', 'N4', 'N5'].map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+      </Field>
+      <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
+      <Field label="Hoạt chất"><input value={filters.hoatchat} onChange={(e) => setF('hoatchat', e.target.value)} onKeyDown={onEnter} /></Field>
+      <Field label="Số ĐK"><input value={filters.sodk} onChange={(e) => setF('sodk', e.target.value)} onKeyDown={onEnter} /></Field>
+    </div>
+  )
+
+  const detailFilters = (
+    <div className="filter-grid">
+      <Field label="Loại thầu"><input value={filters.loai_thau} onChange={(e) => setF('loai_thau', e.target.value)} onKeyDown={onEnter} placeholder="vd: thau_tinh, thau_rieng_le" /></Field>
+      <Field label="HĐ từ ngày"><input type="date" value={filters.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
+      <Field label="HĐ đến ngày"><input type="date" value={filters.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
+      <Field label="Năm"><input value={filters.nam} onChange={(e) => setF('nam', e.target.value)} onKeyDown={onEnter} placeholder="2024" inputMode="numeric" /></Field>
+      <Field label="Đường dùng"><input value={filters.duongdung} onChange={(e) => setF('duongdung', e.target.value)} onKeyDown={onEnter} /></Field>
+      <Field label="Mã tỉnh"><input value={filters.ma_tinh} onChange={(e) => setF('ma_tinh', e.target.value)} onKeyDown={onEnter} /></Field>
+      <Field label="Nước SX"><input value={filters.nuocsx} onChange={(e) => setF('nuocsx', e.target.value)} onKeyDown={onEnter} /></Field>
+    </div>
+  )
+
+  /** In multi-view: everything except keyword goes into the modal. */
+  const modalFilters = (
+    <div className="filter-grid">
+      <Field label="Nhóm thầu">
+        <select value={filters.nhomthau} onChange={(e) => setF('nhomthau', e.target.value)}>
+          <option value="">Tất cả</option>
+          {['N1', 'N2', 'N3', 'N4', 'N5'].map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+      </Field>
+      <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
+      <Field label="Hoạt chất"><input value={filters.hoatchat} onChange={(e) => setF('hoatchat', e.target.value)} onKeyDown={onEnter} /></Field>
+      <Field label="Số ĐK"><input value={filters.sodk} onChange={(e) => setF('sodk', e.target.value)} onKeyDown={onEnter} /></Field>
+      <Field label="Loại thầu"><input value={filters.loai_thau} onChange={(e) => setF('loai_thau', e.target.value)} onKeyDown={onEnter} placeholder="vd: thau_tinh" /></Field>
+      <Field label="HĐ từ ngày"><input type="date" value={filters.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
+      <Field label="HĐ đến ngày"><input type="date" value={filters.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
+      <Field label="Năm"><input value={filters.nam} onChange={(e) => setF('nam', e.target.value)} onKeyDown={onEnter} placeholder="2024" inputMode="numeric" /></Field>
+      <Field label="Đường dùng"><input value={filters.duongdung} onChange={(e) => setF('duongdung', e.target.value)} onKeyDown={onEnter} /></Field>
+      <Field label="Mã tỉnh"><input value={filters.ma_tinh} onChange={(e) => setF('ma_tinh', e.target.value)} onKeyDown={onEnter} /></Field>
+      <Field label="Nước SX"><input value={filters.nuocsx} onChange={(e) => setF('nuocsx', e.target.value)} onKeyDown={onEnter} /></Field>
+    </div>
+  )
+
   return (
-    <div className="section">
-      <header className="section-head">
-        <div>
-          <span className="kicker">Bảo hiểm xã hội Việt Nam · Kết quả đấu thầu thuốc</span>
-          <h1>Thuốc trúng thầu BHYT (VSS)</h1>
-          <p>Danh mục kết quả lựa chọn nhà thầu thuốc BHYT — lọc theo loại thầu, nhóm, SĐK và thời hạn hợp đồng.</p>
-        </div>
-        <UpdatedNote updated={meta.updated} count={meta.count} />
-      </header>
+    <div className={`section${embedded ? ' embedded' : ''}`}>
+      {!embedded && (
+        <header className="section-head">
+          <div>
+            <span className="kicker">Bảo hiểm xã hội Việt Nam · Kết quả đấu thầu thuốc</span>
+            <h1>Thuốc trúng thầu BHYT (VSS)</h1>
+            <p>Danh mục kết quả lựa chọn nhà thầu thuốc BHYT (Tân dược) — lọc theo nhóm thầu, hạng bệnh viện TT20, SĐK và thời hạn hợp đồng.</p>
+          </div>
+          <UpdatedNote updated={meta.updated} count={meta.count} />
+        </header>
+      )}
 
       <div className="panel">
         <div className="filters">
-          <div className="filter-grid">
-            <Field label="Từ khóa"><input value={filters.q} onChange={(e) => setF('q', e.target.value)} onKeyDown={onEnter} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" /></Field>
-            <Field label="Loại thầu"><input value={filters.loai_thau} onChange={(e) => setF('loai_thau', e.target.value)} onKeyDown={onEnter} placeholder="vd: thau_tinh, thau_rieng_le" /></Field>
-            <Field label="Loại">
-              <select value={filters.loai} onChange={(e) => setF('loai', e.target.value)}>
-                <option value="">Tất cả</option>
-                <option value="Tân dược">Tân dược</option>
-                <option value="Đông dược">Đông dược</option>
-                <option value="Vị thuốc">Vị thuốc</option>
-              </select>
-            </Field>
-            <Field label="Nhóm thầu"><input value={filters.nhomthau} onChange={(e) => setF('nhomthau', e.target.value)} onKeyDown={onEnter} placeholder="N1 … N5" /></Field>
-            <Field label="Hoạt chất"><input value={filters.hoatchat} onChange={(e) => setF('hoatchat', e.target.value)} onKeyDown={onEnter} /></Field>
-            <Field label="Số ĐK"><input value={filters.sodk} onChange={(e) => setF('sodk', e.target.value)} onKeyDown={onEnter} /></Field>
-            <Field label="HĐ từ ngày"><input type="date" value={filters.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
-            <Field label="HĐ đến ngày"><input type="date" value={filters.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
-            <Field label="Năm"><input value={filters.nam} onChange={(e) => setF('nam', e.target.value)} onKeyDown={onEnter} placeholder="2024" inputMode="numeric" /></Field>
-          </div>
-
-          <div className="filter-sub">
-            <button type="button" className={`btn ghost sm${adv ? ' on' : ''}`} onClick={() => setAdv((v) => !v)}>
-              {adv ? 'Ẩn nâng cao' : 'Nâng cao'}
-              {advActive > 0 && <span className="pill">{advActive}</span>}
-            </button>
-            {adv && (
-              <div className="filter-grid">
-                <Field label="Đường dùng"><input value={filters.duongdung} onChange={(e) => setF('duongdung', e.target.value)} onKeyDown={onEnter} /></Field>
-                <Field label="Mã tỉnh"><input value={filters.ma_tinh} onChange={(e) => setF('ma_tinh', e.target.value)} onKeyDown={onEnter} /></Field>
-                <Field label="Nước SX"><input value={filters.nuocsx} onChange={(e) => setF('nuocsx', e.target.value)} onKeyDown={onEnter} /></Field>
-              </div>
-            )}
-          </div>
-
+          {filtersInModal ? (
+            <div className="filter-grid">
+              <Field label="Từ khóa"><input value={filters.q} onChange={(e) => setF('q', e.target.value)} onKeyDown={onEnter} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" /></Field>
+            </div>
+          ) : (
+            <>
+              {primaryFilters}
+              {detailFilters}
+            </>
+          )}
           <div className="filter-actions">
+            {filtersInModal && (
+              <button
+                type="button"
+                className={`btn ghost${detailActive ? ' on' : ''}`}
+                onClick={() => setFilterModalOpen(true)}
+              >
+                {Icons.filter} Bộ lọc chi tiết
+                {detailActive > 0 && <span className="pill">{detailActive}</span>}
+              </button>
+            )}
             <button type="button" className="btn" onClick={() => search(0)}>{Icons.search} Tìm kiếm</button>
             <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
-            <div className="spacer" />
-            <span className="muted small">Enter trong ô lọc để tìm</span>
           </div>
         </div>
 
         <TableToolbar
           kicker="Bảng chính"
-          title="Kết quả trúng thầu"
+          title={embedded ? 'VSS BHYT' : 'Kết quả trúng thầu'}
           selectedCount={sel.size}
           onClearSelection={sel.clear}
           onExport={doExport}
@@ -279,11 +342,19 @@ export default function VssSection({ localMode }) {
           onRowDoubleClick={setDetail}
           loading={loading}
           emptyText="Không có dữ liệu — import Excel hoặc crawl VSS trong mục Quản trị"
-          minWidth={1300}
+          minWidth={embedded ? 720 : 1300}
         />
         <Pagination page={page} size={PAGE_SIZE} total={data.total || 0} shown={rows.length} onPage={(p) => search(p)}
           extra={sel.size > 0 && <span className="chip">{sel.size} dòng đã chọn</span>} />
       </div>
+
+      <FilterModal
+        open={filtersInModal && filterModalOpen}
+        onClose={() => setFilterModalOpen(false)}
+        onApply={() => search(0)}
+      >
+        {modalFilters}
+      </FilterModal>
 
       <DetailModal
         row={detail}

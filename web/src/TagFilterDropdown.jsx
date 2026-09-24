@@ -160,10 +160,20 @@ export function TagFilterDropdown({
   )
 }
 
-export function TagBadge({ tagId, configs }) {
+export function TagBadge({ tagId, configs, detailed = false }) {
   const list = configs || loadTagConfigs()
   const t = list.find((c) => c.id === tagId)
   if (!t) return <span className="muted">—</span>
+  if (!detailed) {
+    return (
+      <span
+        className="tag-dot-only"
+        style={{ background: t.colorHex }}
+        title={`${t.label} — ${t.shortTitle}`}
+        aria-label={t.label}
+      />
+    )
+  }
   return (
     <span className="tag-badge" title={t.shortTitle} style={{ '--tag-c': t.colorHex }}>
       <span className="tag-dot" style={{ background: t.colorHex }} />

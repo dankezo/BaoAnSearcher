@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fold, fmtDateTime, getStaticStatus, getStatus, relativeTime, sectionMeta } from './api'
 import { exportXlsx } from './export'
+import { HOSPITAL_GRADES } from './tt20'
 
 export { IngredientLink, IngredientText, Tt20Provider, useTt20 } from './tt20'
 
@@ -58,6 +59,45 @@ export function Field({ label, children, hint, className = '' }) {
     <div className={`field ${className}`}>
       <label>{label}{hint && <span className="hint"> {hint}</span>}</label>
       {children}
+    </div>
+  )
+}
+
+export function HospitalGradeField({ value, onChange }) {
+  return (
+    <Field label="Hạng bệnh viện" hint="TT 20/2022">
+      <select value={value || ''} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Tất cả</option>
+        {HOSPITAL_GRADES.map((g) => (
+          <option key={g.id} value={g.id}>{g.label}</option>
+        ))}
+      </select>
+    </Field>
+  )
+}
+
+/** Modal shell for secondary filters (used in multi-view). */
+export function FilterModal({ open, title = 'Bộ lọc chi tiết', onClose, onApply, children }) {
+  useEffect(() => {
+    if (!open) return undefined
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+  if (!open) return null
+  return (
+    <div className="filter-modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
+      <div className="filter-modal" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="filter-modal-head">
+          <strong>{title}</strong>
+          <button type="button" className="icon-btn" aria-label="Đóng" onClick={onClose}>{I.x}</button>
+        </div>
+        <div className="filter-modal-body">{children}</div>
+        <div className="filter-modal-foot">
+          <button type="button" className="btn secondary" onClick={onClose}>Đóng</button>
+          <button type="button" className="btn" onClick={() => { onApply?.(); onClose?.() }}>{I.search} Áp dụng</button>
+        </div>
+      </div>
     </div>
   )
 }

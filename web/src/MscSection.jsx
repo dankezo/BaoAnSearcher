@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, loadStaticGz, staticUpdated } from './api'
 import {
-  DataTable, DetailModal, ErrorNote, Field, Icons, IngredientText, LoadingOverlay, Pagination, TableToolbar,
+  DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, IngredientText, LoadingOverlay, Pagination, TableToolbar,
   UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, serverFilters, useSectionMeta,
   useSelection, useSimProgress,
 } from './components'
@@ -90,11 +90,12 @@ function filterStatic(items, f) {
   ])
 }
 
-export default function MscSection({ localMode }) {
+export default function MscSection({ localMode, embedded = false, filtersInModal = false }) {
   const [kind, setKind] = useState('prices')
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(true)
+  const [filterModalOpen, setFilterModalOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(false)
@@ -161,6 +162,7 @@ export default function MscSection({ localMode }) {
   const setCF = (k, v) => setColumnFilters((f) => ({ ...f, [k]: v }))
   const onEnter = (e) => e.key === 'Enter' && search(0)
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
+  const detailActive = Object.entries(filters).filter(([k, v]) => k !== 'q' && String(v ?? '').trim()).length
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.source_id ? `${kind}:${r.source_id}` : `${kind}:${r.tender_no}|${page}|${i}`), [kind, page])
@@ -189,55 +191,67 @@ export default function MscSection({ localMode }) {
     }
   }
 
+  const secondaryGrid = (
+    <div className="filter-grid">
+      {kind === 'prices' ? (
+        <>
+          <Field label="Tên thuốc"><input value={filters.name} onChange={(e) => setF('name', e.target.value)} onKeyDown={onEnter} /></Field>
+          <Field label="Hoạt chất"><input value={filters.ingredient} onChange={(e) => setF('ingredient', e.target.value)} onKeyDown={onEnter} /></Field>
+          <Field label="SĐK"><input value={filters.registration} onChange={(e) => setF('registration', e.target.value)} onKeyDown={onEnter} /></Field>
+          <Field label="Nhà sản xuất"><input value={filters.manufacturer} onChange={(e) => setF('manufacturer', e.target.value)} onKeyDown={onEnter} /></Field>
+          <Field label="Nhóm"><input value={filters.group_name} onChange={(e) => setF('group_name', e.target.value)} onKeyDown={onEnter} placeholder="1 … 5" /></Field>
+          <Field label="Loại thuốc"><input value={filters.medicine_type} onChange={(e) => setF('medicine_type', e.target.value)} onKeyDown={onEnter} /></Field>
+          <Field label="Nhà thầu"><input value={filters.winner} onChange={(e) => setF('winner', e.target.value)} onKeyDown={onEnter} /></Field>
+        </>
+      ) : (
+        <Field label="Tên gói"><input value={filters.name} onChange={(e) => setF('name', e.target.value)} onKeyDown={onEnter} /></Field>
+      )}
+      <Field label="TBMT"><input value={filters.tender_no} onChange={(e) => setF('tender_no', e.target.value)} onKeyDown={onEnter} placeholder="IB…" /></Field>
+      <Field label="Tỉnh / TP"><input value={filters.province} onChange={(e) => setF('province', e.target.value)} onKeyDown={onEnter} /></Field>
+      <Field label="Bệnh viện / CĐT"><input value={filters.buyer} onChange={(e) => setF('buyer', e.target.value)} onKeyDown={onEnter} /></Field>
+    </div>
+  )
+
   return (
-    <div className="section">
-      <header className="section-head">
-        <div>
-          <span className="kicker">Hệ thống mạng đấu thầu quốc gia · muasamcong.mpi.gov.vn</span>
-          <h1>Tra cứu thầu MSC</h1>
-          <p>Đơn giá trúng thầu và gói thầu thuốc. Nhấp đôi một dòng để xem đầy đủ trường và mở trang nguồn.</p>
-        </div>
-        <UpdatedNote updated={meta.updated} count={meta.count} />
-      </header>
+    <div className={`section${embedded ? ' embedded' : ''}`}>
+      {!embedded && (
+        <header className="section-head">
+          <div>
+            <span className="kicker">Hệ thống mạng đấu thầu quốc gia · muasamcong.mpi.gov.vn</span>
+            <h1>Tra cứu thầu MSC</h1>
+            <p>Đơn giá trúng thầu và gói thầu thuốc. Nhấp đôi một dòng để xem đầy đủ trường và mở trang nguồn.</p>
+          </div>
+          <UpdatedNote updated={meta.updated} count={meta.count} />
+        </header>
+      )}
 
       <div className="panel">
         <div className="filters">
           <div className="filter-top">
             <div className="segmented" role="tablist" aria-label="Loại dữ liệu">
-              <button type="button" role="tab" aria-selected={kind === 'prices'} className={kind === 'prices' ? 'on' : ''} onClick={() => setKind('prices')}>Đơn giá trúng thầu</button>
+              <button type="button" role="tab" aria-selected={kind === 'prices'} className={kind === 'prices' ? 'on' : ''} onClick={() => setKind('prices')}>Đơn giá</button>
               <button type="button" role="tab" aria-selected={kind === 'tenders'} className={kind === 'tenders' ? 'on' : ''} onClick={() => setKind('tenders')}>Gói thầu</button>
             </div>
           </div>
           <div className="filter-grid">
             <Field label="Từ khóa"><input value={filters.q} onChange={(e) => setF('q', e.target.value)} onKeyDown={onEnter} placeholder="Tìm trong mọi trường" /></Field>
-            {kind === 'prices' ? (
-              <>
-                <Field label="Tên thuốc"><input value={filters.name} onChange={(e) => setF('name', e.target.value)} onKeyDown={onEnter} /></Field>
-                <Field label="Hoạt chất"><input value={filters.ingredient} onChange={(e) => setF('ingredient', e.target.value)} onKeyDown={onEnter} /></Field>
-                <Field label="SĐK"><input value={filters.registration} onChange={(e) => setF('registration', e.target.value)} onKeyDown={onEnter} /></Field>
-                <Field label="Nhà sản xuất"><input value={filters.manufacturer} onChange={(e) => setF('manufacturer', e.target.value)} onKeyDown={onEnter} /></Field>
-                <Field label="Nhóm"><input value={filters.group_name} onChange={(e) => setF('group_name', e.target.value)} onKeyDown={onEnter} placeholder="1 … 5" /></Field>
-                <Field label="Loại thuốc"><input value={filters.medicine_type} onChange={(e) => setF('medicine_type', e.target.value)} onKeyDown={onEnter} /></Field>
-                <Field label="Nhà thầu"><input value={filters.winner} onChange={(e) => setF('winner', e.target.value)} onKeyDown={onEnter} /></Field>
-              </>
-            ) : (
-              <Field label="Tên gói"><input value={filters.name} onChange={(e) => setF('name', e.target.value)} onKeyDown={onEnter} /></Field>
-            )}
-            <Field label="TBMT"><input value={filters.tender_no} onChange={(e) => setF('tender_no', e.target.value)} onKeyDown={onEnter} placeholder="IB…" /></Field>
-            <Field label="Tỉnh / TP"><input value={filters.province} onChange={(e) => setF('province', e.target.value)} onKeyDown={onEnter} /></Field>
-            <Field label="Bệnh viện / CĐT"><input value={filters.buyer} onChange={(e) => setF('buyer', e.target.value)} onKeyDown={onEnter} /></Field>
           </div>
+          {!filtersInModal && secondaryGrid}
           <div className="filter-actions">
+            {filtersInModal && (
+              <button type="button" className={`btn ghost${detailActive ? ' on' : ''}`} onClick={() => setFilterModalOpen(true)}>
+                {Icons.filter} Bộ lọc chi tiết
+                {detailActive > 0 && <span className="pill">{detailActive}</span>}
+              </button>
+            )}
             <button type="button" className="btn" onClick={() => search(0)}>{Icons.search} Tìm kiếm</button>
             <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
-            <div className="spacer" />
-            <span className="muted small">Enter trong ô lọc để tìm</span>
           </div>
         </div>
 
         <TableToolbar
           kicker={kind === 'prices' ? 'Kết quả lựa chọn nhà thầu' : 'Thông báo mời thầu'}
-          title={kind === 'prices' ? 'Đơn giá thuốc trúng thầu' : 'Gói thầu thuốc'}
+          title={embedded ? (kind === 'prices' ? 'MSC · Đơn giá' : 'MSC · Gói thầu') : (kind === 'prices' ? 'Đơn giá thuốc trúng thầu' : 'Gói thầu thuốc')}
           selectedCount={sel.size}
           onClearSelection={sel.clear}
           onExport={doExport}
@@ -263,7 +277,7 @@ export default function MscSection({ localMode }) {
           onFilterEnter={() => localMode && search(0)}
           onRowDoubleClick={setDetail}
           loading={loading}
-          minWidth={kind === 'prices' ? 1400 : 1100}
+          minWidth={embedded ? 720 : (kind === 'prices' ? 1400 : 1100)}
           trailing={{
             label: 'Nguồn',
             render: (row) => row.source_url ? (
@@ -274,6 +288,10 @@ export default function MscSection({ localMode }) {
         <Pagination page={page} size={PAGE_SIZE} total={data.total || 0} shown={rows.length} onPage={(p) => search(p)}
           extra={sel.size > 0 && <span className="chip">{sel.size} dòng đã chọn</span>} />
       </div>
+
+      <FilterModal open={filtersInModal && filterModalOpen} onClose={() => setFilterModalOpen(false)} onApply={() => search(0)}>
+        {secondaryGrid}
+      </FilterModal>
 
       <DetailModal
         row={detail}

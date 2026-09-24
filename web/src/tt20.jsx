@@ -141,6 +141,31 @@ export function useTt20() {
   return useContext(Tt20Context)
 }
 
+/** Hospital-grade columns in TT 20/2022 Phụ lục I. */
+export const HOSPITAL_GRADES = [
+  { id: 'hangDB_I', label: 'Hạng ĐB, I' },
+  { id: 'hangII', label: 'Hạng II' },
+  { id: 'hangIII_IV', label: 'Hạng III, IV' },
+  { id: 'tramYT', label: 'Trạm y tế' },
+]
+
+/**
+ * True when at least one ingredient token matches TT20 and is marked for the grade.
+ * Empty grade → always true. Missing catalog → keep row (don't over-filter).
+ */
+export function ingredientAllowedAtGrade(index, text, gradeKey) {
+  if (!gradeKey) return true
+  if (!index) return true
+  const segs = tokenizeIngredients(text).filter((s) => !s.sep && String(s.text || '').trim())
+  if (!segs.length) return false
+  for (const s of segs) {
+    const group = matchToken(index, s.text)
+    if (!group) continue
+    if (group.entries.some((e) => String(e[gradeKey] || '').trim())) return true
+  }
+  return false
+}
+
 /* ------------------------------------------------------------------ */
 /* Rendering                                                           */
 /* ------------------------------------------------------------------ */

@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, applyClientFilters, containsWords, fmtDate, loadStaticGz, openDavLookup, staticUpdated, DAV_LOOKUP } from './api'
 import {
-  ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, Field, Icons, IngredientText, LoadingOverlay,
-  Pagination, SearchSuggestBar, TableToolbar, UpdatedNote, ViewModeSelect, applyColumnFilters, exportSelectionOrAll,
-  fetchAllPages, serverFilters, useSectionMeta, useSelection, useSimProgress,
+  ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField,
+  Icons, IngredientText, LoadingOverlay, Pagination, SearchSuggestBar, TableToolbar, UpdatedNote,
+  ViewModeSelect, applyColumnFilters, exportSelectionOrAll, fetchAllPages, serverFilters,
+  useSectionMeta, useSelection, useSimProgress, useTt20,
 } from './components'
 import { TagBadge, TagFilterDropdown, useTagFilterState } from './TagFilterDropdown'
 import { enrichRowTag } from './tagConfig'
+import { ingredientAllowedAtGrade } from './tt20'
 
 const PAGE_SIZE = 50
 
 const ALL_COLS = [
-  { key: 'tagId', label: 'Trạng thái', filter: 'select', nowrap: true, width: 160 },
+  { key: 'tagId', label: 'Trạng thái', filter: 'select', nowrap: true, width: 52, align: 'center' },
   { key: 'soDangKy', label: 'Số đăng ký', mono: true, nowrap: true },
   { key: 'ngayCap', label: 'Ngày cấp', text: (r) => fmtDate(r.ngayCap), nowrap: true },
   { key: 'tenThuoc', label: 'Tên thuốc', width: 180 },
@@ -22,17 +24,12 @@ const ALL_COLS = [
   { key: 'hanDung', label: 'Hạn dùng', align: 'right' },
   { key: 'soQuyetDinh', label: 'Số quyết định', mono: true },
   { key: 'ngayHetHan', label: 'Ngày hết hạn', text: (r) => fmtDate(r.ngayHetHan), nowrap: true },
-  { key: 'monthsLeft', label: 'Còn (tháng)', align: 'right' },
-  { key: 'phanLoai', label: 'Phân loại', filter: 'select' },
   { key: 'ctySanXuat', label: 'Công ty sản xuất', width: 200 },
   { key: 'diaChiSanXuat', label: 'Địa chỉ SX' },
   { key: 'nuocSanXuat', label: 'Nước SX', filter: 'select' },
   { key: 'ctyDangKy', label: 'Công ty đăng ký', width: 180 },
-  { key: 'diaChiDangKy', label: 'Địa chỉ ĐK' },
   { key: 'nuocDangKy', label: 'Nước ĐK', filter: 'select' },
   { key: 'tieuChuan', label: 'Tiêu chuẩn' },
-  { key: 'csDongGoi', label: 'CS đóng gói' },
-  { key: 'csXuatXuong', label: 'CS xuất xưởng' },
   { key: 'kyCapNam', label: 'Kỳ cấp (năm)', align: 'right', filter: 'select' },
 ]
 
@@ -41,7 +38,6 @@ const COMPACT = [
   'dongGoi', 'ngayHetHan', 'ctyDangKy', 'ctySanXuat', 'nuocSanXuat',
 ]
 
-/** Column key → server filter key (pass-through when running against local API). */
 const SERVER_MAP = {
   tenThuoc: 'tenThuoc', soDangKy: 'soDangKy', hoatChat: 'hoatChat', dangBaoChe: 'dangBaoChe',
   ctySanXuat: 'sanXuat', ctyDangKy: 'dangKy', nuocSanXuat: 'nuocSanXuat',
@@ -53,12 +49,11 @@ const EMPTY_FILTERS = {
   ingredientCount: '', ingredientCountOther: '',
   dosageFormCount: '', dosageFormCountOther: '',
   strengthCount: '', strengthCountOther: '',
-  conHieuLuc: false,
-  tags: null, // filled from tag filter state
+  hangBenhVien: '',
+  tags: null,
 }
 
-/** Static (GitHub Pages) fallback filtering — mirrors the server as far as the export allows. */
-function filterStatic(items, f) {
+function filterStatic(items, f, tt20Index) {
   let out = items.map(enrichRowTag)
   const q = (f.q || '').trim()
   if (q) out = out.filter((r) => containsWords(`${r.tenThuoc} ${r.soDangKy} ${r.hoatChat} ${r.hamLuong}`, q))
@@ -73,7 +68,9 @@ function filterStatic(items, f) {
   ])
   const n = f.ingredientCount === 'other' ? Number(f.ingredientCountOther) : Number(f.ingredientCount)
   if (f.ingredientCount && Number.isFinite(n) && n > 0) out = out.filter((r) => r.ingredientCount === n)
-  if (f.conHieuLuc) out = out.filter((r) => r.conHieuLuc)
+  if (f.hangBenhVien) {
+    out = out.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, f.hangBenhVien))
+  }
   const tags = f.tags
   if (Array.isArray(tags)) {
     if (tags.length === 0) return []
@@ -82,14 +79,15 @@ function filterStatic(items, f) {
   return out
 }
 
-export default function DavSection({ localMode }) {
+export default function DavSection({ localMode, embedded = false, filtersInModal = false }) {
+  const { index: tt20Index } = useTt20()
   const [colPicker, setColPicker] = useState(false)
   const [viewMode, setViewMode] = useState('compact')
   const [visible, setVisible] = useState(COMPACT)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(true)
-  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [filterModalOpen, setFilterModalOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(false)
@@ -159,9 +157,25 @@ export default function DavSection({ localMode }) {
     const active = { ...mergedFilters(cf), ...(override || {}) }
     try {
       if (localMode) {
-        const res = await api.davSearch({ filters: active, page: p, size: PAGE_SIZE })
+        const needGrade = !!active.hangBenhVien
+        const res = await api.davSearch({
+          filters: active,
+          page: needGrade ? 0 : p,
+          size: needGrade ? 400 : PAGE_SIZE,
+        })
         if (stale()) return
-        setData(res)
+        let items = (res.items || []).map(enrichRowTag)
+        if (active.hangBenhVien) {
+          items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, active.hangBenhVien))
+          setData({
+            total: items.length,
+            items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE),
+            page: p,
+            size: PAGE_SIZE,
+          })
+        } else {
+          setData(res)
+        }
         setPage(p)
         return
       }
@@ -173,7 +187,7 @@ export default function DavSection({ localMode }) {
         return
       }
       setStaticFallback({ updated: staticUpdated(dumped, ['ngayCap']), count: dumped.total || dumped.items.length })
-      const items = filterStatic(dumped.items, active)
+      const items = filterStatic(dumped.items, active, tt20Index)
       setData({ total: items.length, items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE), page: p, size: PAGE_SIZE })
       setPage(p)
     } catch (e) {
@@ -184,9 +198,9 @@ export default function DavSection({ localMode }) {
         setRefreshKey((k) => k + 1)
       }
     }
-  }, [localMode, mergedFilters])
+  }, [localMode, mergedFilters, tt20Index])
 
-  useEffect(() => { search(0) }, [selectedTags]) // initial + when tags change
+  useEffect(() => { search(0) }, [selectedTags, filters.hangBenhVien]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toSuggest = useCallback((items) => (
     (items || []).slice(0, 4).map((r, i) => ({
@@ -220,7 +234,7 @@ export default function DavSection({ localMode }) {
           items = res?.items || []
         } else {
           const dumped = await loadStaticGz('dav')
-          items = filterStatic(dumped?.items || [], { ...filters, q, tags: selectedTags }).slice(0, 4)
+          items = filterStatic(dumped?.items || [], { ...filters, q, tags: selectedTags }, tt20Index).slice(0, 4)
         }
         if (id === suggestSeq.current) setSuggests(toSuggest(items))
       } catch {
@@ -230,7 +244,7 @@ export default function DavSection({ localMode }) {
       }
     }, 260)
     return () => clearTimeout(suggestTimer.current)
-  }, [filters.q, filters, localMode, mergedFilters, selectedTags, toSuggest])
+  }, [filters.q, filters, localMode, mergedFilters, selectedTags, toSuggest, tt20Index])
 
   const setF = (key, val) => setFilters((f) => ({ ...f, [key]: val }))
   const setCF = (key, val) => setColumnFilters((f) => ({ ...f, [key]: val }))
@@ -239,19 +253,23 @@ export default function DavSection({ localMode }) {
     filters.tenThuoc, filters.soDangKy, filters.hoatChat, filters.dangBaoChe,
     filters.sanXuat, filters.dangKy, filters.nuocSanXuat,
     filters.ingredientCount, filters.dosageFormCount, filters.strengthCount,
-    filters.conHieuLuc,
-  ].filter((v) => v === true || String(v ?? '').trim()).length
+    filters.hangBenhVien,
+  ].filter((v) => String(v ?? '').trim()).length
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.id != null ? `id:${r.id}` : `${r.soDangKy}|${page}|${i}`), [page])
 
   const fetchAll = useCallback(async () => {
     if (localMode) {
-      return fetchAllPages((p, size) => api.davSearch({ filters: mergedFilters(), page: p, size }), { onProgress: setExportPct })
+      const all = await fetchAllPages((p, size) => api.davSearch({ filters: mergedFilters(), page: p, size }), { onProgress: setExportPct })
+      if (filters.hangBenhVien) {
+        return all.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, filters.hangBenhVien))
+      }
+      return all
     }
     const dumped = await loadStaticGz('dav')
-    return filterStatic(dumped?.items || [], { ...filters, tags: selectedTags })
-  }, [localMode, mergedFilters, filters, selectedTags])
+    return filterStatic(dumped?.items || [], { ...filters, tags: selectedTags }, tt20Index)
+  }, [localMode, mergedFilters, filters, selectedTags, tt20Index])
 
   const doExport = async () => {
     setExporting(true)
@@ -268,16 +286,37 @@ export default function DavSection({ localMode }) {
     }
   }
 
+  const detailFields = (
+    <div className="filter-grid">
+      <Field label="Tên thuốc"><input value={filters.tenThuoc} onChange={(e) => setF('tenThuoc', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+      <Field label="Số ĐK"><input value={filters.soDangKy} onChange={(e) => setF('soDangKy', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+      <Field label="Hoạt chất"><input value={filters.hoatChat} onChange={(e) => setF('hoatChat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+      <Field label="Dạng bào chế"><input value={filters.dangBaoChe} onChange={(e) => setF('dangBaoChe', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+      <Field label="Công ty SX"><input value={filters.sanXuat} onChange={(e) => setF('sanXuat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+      <Field label="Công ty ĐK"><input value={filters.dangKy} onChange={(e) => setF('dangKy', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+      <Field label="Nước SX"><input value={filters.nuocSanXuat} onChange={(e) => setF('nuocSanXuat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+      <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
+      <CountSelect label="Số hoạt chất" value={filters.ingredientCount} otherValue={filters.ingredientCountOther}
+        options={[1, 2, 3, 4, 5]} onChange={(v) => setF('ingredientCount', v)} onOther={(v) => setF('ingredientCountOther', v)} />
+      <CountSelect label="Số dạng bào chế (nhóm HC)" value={filters.dosageFormCount} otherValue={filters.dosageFormCountOther}
+        options={[1, 2, 3, 4, 5, 6, 7]} onChange={(v) => setF('dosageFormCount', v)} onOther={(v) => setF('dosageFormCountOther', v)} />
+      <CountSelect label="Mức hàm lượng (nhóm HC)" value={filters.strengthCount} otherValue={filters.strengthCountOther}
+        options={[1, 3, 4, 5]} onChange={(v) => setF('strengthCount', v)} onOther={(v) => setF('strengthCountOther', v)} />
+    </div>
+  )
+
   return (
-    <div className="section">
-      <header className="section-head">
-        <div>
-          <span className="kicker">Cục Quản lý Dược · dichvucong.dav.gov.vn</span>
-          <h1>Tra cứu thuốc DAV</h1>
-          <p>Danh mục số đăng ký — lọc còn hiệu lực theo tiêu chí kinh doanh, khớp danh mục 93, nhấp kính lúp để copy tên thuốc và mở trang công bố.</p>
-        </div>
-        <UpdatedNote updated={meta.updated} count={meta.count} />
-      </header>
+    <div className={`section${embedded ? ' embedded' : ''}`}>
+      {!embedded && (
+        <header className="section-head">
+          <div>
+            <span className="kicker">Cục Quản lý Dược · dichvucong.dav.gov.vn</span>
+            <h1>Tra cứu thuốc DAV</h1>
+            <p>Danh mục số đăng ký — tag trạng thái SĐK, khớp danh mục 93 / TT20, nhấp kính lúp để copy tên thuốc và mở trang công bố.</p>
+          </div>
+          <UpdatedNote updated={meta.updated} count={meta.count} />
+        </header>
+      )}
 
       <div className="panel">
         <div className="filters">
@@ -304,14 +343,16 @@ export default function DavSection({ localMode }) {
               onChange={(ids) => { setSelectedTags(ids); refreshConfigs() }}
               configs={configs}
             />
-            <button
-              type="button"
-              className={`btn ghost${advancedOpen ? ' on' : ''}`}
-              onClick={() => setAdvancedOpen((v) => !v)}
-            >
-              {Icons.filter} Bộ lọc chi tiết
-              {advancedActive > 0 && <span className="pill">{advancedActive}</span>}
-            </button>
+            {filtersInModal ? (
+              <button
+                type="button"
+                className={`btn ghost${advancedActive ? ' on' : ''}`}
+                onClick={() => setFilterModalOpen(true)}
+              >
+                {Icons.filter} Bộ lọc chi tiết
+                {advancedActive > 0 && <span className="pill">{advancedActive}</span>}
+              </button>
+            ) : null}
             <button type="button" className="btn secondary" onClick={() => {
               setFilters(EMPTY_FILTERS)
               setColumnFilters({})
@@ -320,35 +361,13 @@ export default function DavSection({ localMode }) {
             >
               Xóa lọc
             </button>
-            {localMode && (
+            {localMode && !embedded && (
               <button type="button" className="btn ghost" onClick={() => api.davValidity().then(() => search(0)).catch((e) => setErr(e.message))}>
                 Rebuild tập hiệu lực
               </button>
             )}
           </div>
-          {advancedOpen && (
-            <div className="filter-grid">
-              <Field label="Tên thuốc"><input value={filters.tenThuoc} onChange={(e) => setF('tenThuoc', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-              <Field label="Số ĐK"><input value={filters.soDangKy} onChange={(e) => setF('soDangKy', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-              <Field label="Hoạt chất"><input value={filters.hoatChat} onChange={(e) => setF('hoatChat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-              <Field label="Dạng bào chế"><input value={filters.dangBaoChe} onChange={(e) => setF('dangBaoChe', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-              <Field label="Công ty SX"><input value={filters.sanXuat} onChange={(e) => setF('sanXuat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-              <Field label="Công ty ĐK"><input value={filters.dangKy} onChange={(e) => setF('dangKy', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-              <Field label="Nước SX"><input value={filters.nuocSanXuat} onChange={(e) => setF('nuocSanXuat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-              <CountSelect label="Số hoạt chất" value={filters.ingredientCount} otherValue={filters.ingredientCountOther}
-                options={[1, 2, 3, 4, 5]} onChange={(v) => setF('ingredientCount', v)} onOther={(v) => setF('ingredientCountOther', v)} />
-              <CountSelect label="Số dạng bào chế (nhóm HC)" value={filters.dosageFormCount} otherValue={filters.dosageFormCountOther}
-                options={[1, 2, 3, 4, 5, 6, 7]} onChange={(v) => setF('dosageFormCount', v)} onOther={(v) => setF('dosageFormCountOther', v)} />
-              <CountSelect label="Mức hàm lượng (nhóm HC)" value={filters.strengthCount} otherValue={filters.strengthCountOther}
-                options={[1, 3, 4, 5]} onChange={(v) => setF('strengthCount', v)} onOther={(v) => setF('strengthCountOther', v)} />
-              <Field label="Còn hiệu lực (tiêu chí KD)">
-                <select value={filters.conHieuLuc ? '1' : '0'} onChange={(e) => setF('conHieuLuc', e.target.value === '1')}>
-                  <option value="0">Tắt</option>
-                  <option value="1">Bật — kỳ cấp ≥ 3 năm, loại DM93…</option>
-                </select>
-              </Field>
-            </div>
-          )}
+          {!filtersInModal && detailFields}
           {selectedTags.length === 0 && (
             <div className="tag-empty-hint">Vui lòng chọn ít nhất một phân loại tag để hiển thị kết quả.</div>
           )}
@@ -356,7 +375,7 @@ export default function DavSection({ localMode }) {
 
         <TableToolbar
           kicker="Bảng chính"
-          title="Danh mục số đăng ký"
+          title={embedded ? 'DAV' : 'Danh mục số đăng ký'}
           selectedCount={sel.size}
           onClearSelection={sel.clear}
           onExport={doExport}
@@ -390,7 +409,7 @@ export default function DavSection({ localMode }) {
           onRowDoubleClick={setDetail}
           loading={loading}
           emptyText="Không có dữ liệu phù hợp"
-          minWidth={1100}
+          minWidth={embedded ? 720 : 1100}
           trailing={{
             label: 'Tra cứu',
             render: (row) => (
@@ -404,16 +423,24 @@ export default function DavSection({ localMode }) {
           extra={sel.size > 0 && <span className="chip">{sel.size} dòng đã chọn</span>} />
       </div>
 
+      <FilterModal
+        open={filtersInModal && filterModalOpen}
+        onClose={() => setFilterModalOpen(false)}
+        onApply={() => search(0)}
+      >
+        {detailFields}
+      </FilterModal>
+
       <DetailModal
         row={detail}
-        fields={[...ALL_COLS, { key: 'soDangKyCu', label: 'Số ĐK cũ' }, { key: 'ngayGiaHan', label: 'Ngày gia hạn', text: (r) => fmtDate(r.ngayGiaHan) }, { key: 'dotCap', label: 'Đợt cấp' }, { key: 'conHieuLuc', label: 'Còn hiệu lực' }, { key: 'dm93', label: 'Khớp DM93' }, { key: 'hasGiaHanPending', label: 'Đang nộp gia hạn' }, { key: 'ingredientCount', label: 'Số hoạt chất' }, { key: 'ghiChu', label: 'Ghi chú' }]}
+        fields={[...ALL_COLS, { key: 'soDangKyCu', label: 'Số ĐK cũ' }, { key: 'ngayGiaHan', label: 'Ngày gia hạn', text: (r) => fmtDate(r.ngayGiaHan) }, { key: 'dotCap', label: 'Đợt cấp' }, { key: 'diaChiDangKy', label: 'Địa chỉ ĐK' }, { key: 'phanLoai', label: 'Phân loại' }, { key: 'conHieuLuc', label: 'Còn hiệu lực' }, { key: 'dm93', label: 'Khớp DM93' }, { key: 'hasGiaHanPending', label: 'Đang nộp gia hạn' }, { key: 'ingredientCount', label: 'Số hoạt chất' }, { key: 'ghiChu', label: 'Ghi chú' }]}
         title={detail?.tenThuoc || 'Chi tiết thuốc'}
         subtitle={detail ? `SĐK ${detail.soDangKy}` : ''}
         sourceUrl={DAV_LOOKUP}
         onClose={() => setDetail(null)}
         renderValue={(f, row, val) => {
           if (f.key === 'hoatChat') return <IngredientText text={row.hoatChat} />
-          if (f.key === 'tagId') return <TagBadge tagId={row.tagId} configs={configs} />
+          if (f.key === 'tagId') return <TagBadge tagId={row.tagId} configs={configs} detailed />
           if (f.key === 'hasGiaHanPending') return row.hasGiaHanPending ? 'Có' : 'Không'
           return val
         }}
