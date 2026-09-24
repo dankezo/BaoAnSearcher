@@ -1,0 +1,49 @@
+# Local secrets & full databases (do not commit)
+server/secrets.local.json
+**/secrets.local.json
+*.sqlite3
+*.sqlite3-*
+**/*.sqlite3
+**/*.sqlite3-*
+
+# Large source dumps
+*.xls
+*.xlsx
+!web/public/data/.gitkeep
+test zone/data/
+test zone/procurement/data/
+test zone/procurement/vendor/
+data/*.sqlite3
+data/raw/
+data/crawl_status.json
+
+# Empty / unrelated
+be432a96ed36e48d05f44bf375864355f62263f9/
+
+# Node / Python
+node_modules/
+web/dist/
+web/node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+*.lock
+!package-lock.json
+
+# Temp / HAR
+_inspect_tmp.py
+*.har
+test zone/*.har
+test zone/*.html
+
