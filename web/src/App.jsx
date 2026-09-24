@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
+import { useAuth } from './auth'
 import { Tt20Provider } from './components'
 import { supabaseConfigured } from './supabaseCloud'
 import DavSection from './DavSection'
@@ -83,6 +84,7 @@ function SplitPane({ side, appId, onSelect, onClear, localMode }) {
 }
 
 export default function App() {
+  const { user, signOut } = useAuth()
   const [tab, setTab] = useState(() => {
     const h = window.location.hash.replace('#', '')
     if (h === 'multi') return 'multi'
@@ -116,6 +118,14 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
+  const onSignOut = async () => {
+    await signOut()
+    const base = import.meta.env.BASE_URL || '/'
+    const login = `${base.endsWith('/') ? base : `${base}/`}login`
+    window.history.replaceState(null, '', login)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }
+
   return (
     <Tt20Provider>
       <div className={`app-shell${multi ? ' multi' : ''}`}>
@@ -146,24 +156,34 @@ export default function App() {
               Đa khung
             </button>
           </nav>
-          <div
-            className={`mode-pill ${localMode ? 'local' : supabaseConfigured ? 'cloud' : 'static'}`}
-            title={
-              localMode
-                ? 'Kết nối API local 127.0.0.1:8787'
-                : supabaseConfigured
-                  ? 'GitHub Pages → Supabase (đủ data, query theo trang)'
-                  : 'Thiếu VITE_SUPABASE_* — cấu hình rồi build lại'
-            }
-          >
-            <span className="dot" />
-            {!checked
-              ? 'Đang kiểm tra…'
-              : localMode
-                ? 'Local API'
-                : supabaseConfigured
-                  ? 'Cloud · Supabase'
-                  : 'Chưa cấu hình Cloud'}
+          <div className="topbar-end">
+            <div
+              className={`mode-pill ${localMode ? 'local' : supabaseConfigured ? 'cloud' : 'static'}`}
+              title={
+                localMode
+                  ? 'Kết nối API local 127.0.0.1:8787'
+                  : supabaseConfigured
+                    ? 'Cloud → Supabase (đã đăng nhập)'
+                    : 'Thiếu VITE_SUPABASE_* — cấu hình rồi build lại'
+              }
+            >
+              <span className="dot" />
+              {!checked
+                ? 'Đang kiểm tra…'
+                : localMode
+                  ? 'Local API'
+                  : supabaseConfigured
+                    ? 'Cloud · Supabase'
+                    : 'Chưa cấu hình Cloud'}
+            </div>
+            {user?.email && (
+              <div className="user-chip" title={user.email}>
+                <span className="user-chip-mail">{user.email}</span>
+                <button type="button" className="btn ghost sm" onClick={onSignOut}>
+                  Đăng xuất
+                </button>
+              </div>
+            )}
           </div>
         </header>
         <main className={`page${multi ? ' page-split' : ''}`}>

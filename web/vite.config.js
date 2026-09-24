@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Vercel / app.baoanpharma.com → base '/'. GitHub Pages docs → VITE_BASE=./
 export default defineConfig({
   plugins: [react()],
-  base: './',
+  base: process.env.VITE_BASE || '/',
   server: {
     port: 5173,
     proxy: {

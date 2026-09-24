@@ -1,22 +1,10 @@
-import { createClient } from '@supabase/supabase-js'
+import { getSupabase, supabaseConfigured } from './supabaseClient'
+
+export { supabaseConfigured, getSupabase }
 
 function fold(text) {
   const s = String(text ?? '').toLowerCase().replace(/đ/g, 'd')
   return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-}
-
-const url = (import.meta.env.VITE_SUPABASE_URL || '').trim()
-const anon = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim()
-
-export const supabaseConfigured = !!(url && anon)
-
-let client = null
-export function getSupabase() {
-  if (!supabaseConfigured) return null
-  if (!client) client = createClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
-  return client
 }
 
 function foldParam(v) {

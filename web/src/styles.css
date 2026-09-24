@@ -110,10 +110,23 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
 }
 
 .mode-pill {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
+  margin-left: 0; display: inline-flex; align-items: center; gap: 7px;
   font-size: 12px; font-weight: 500; color: var(--ink-2);
   padding: 4px 10px 4px 8px; border-radius: 999px;
   border: 1px solid var(--line); background: var(--surface);
+}
+.topbar-end {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+}
+.user-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  max-width: min(280px, 36vw);
+}
+.user-chip-mail {
+  font-size: 12px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mode-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .mode-pill.local .dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
@@ -947,4 +960,112 @@ table.data a.sdk { font-family: var(--mono); font-size: .92em; font-weight: 500;
   .brand-text { display: none; }
   .nav button { padding: 0 8px; font-size: 13px; }
   .mode-pill { font-size: 11px; }
+  .user-chip-mail { display: none; }
+}
+
+/* ---------------------------------------------------------------------
+   Login (internal auth)
+--------------------------------------------------------------------- */
+.auth-boot {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+.auth-boot-card {
+  padding: 14px 18px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: var(--shadow-1);
+}
+
+.login-shell {
+  min-height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  background: var(--bg);
+}
+.login-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(28px, 6vw, 56px);
+  max-width: 460px;
+  width: 100%;
+  margin: 0 auto;
+  animation: rise .35s var(--ease);
+}
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.login-title { font-weight: 650; font-size: 16px; letter-spacing: -0.02em; }
+.login-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.login-h1 {
+  margin: 0 0 8px;
+  font-size: clamp(1.55rem, 2.4vw, 1.85rem);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+.login-lead { margin: 0 0 22px; font-size: 14px; line-height: 1.5; }
+.login-form { display: flex; flex-direction: column; gap: 14px; }
+.login-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.login-field input {
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.login-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.login-error {
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid rgba(179, 38, 30, .18);
+  font-size: 13px;
+}
+.login-submit {
+  height: 42px;
+  margin-top: 4px;
+  width: 100%;
+  justify-content: center;
+}
+.login-foot { margin: 18px 0 0; line-height: 1.45; }
+.login-aside {
+  position: relative;
+  background:
+    linear-gradient(160deg, rgba(15, 92, 107, 0.92), rgba(11, 71, 83, 0.88)),
+    radial-gradient(ellipse at 30% 20%, rgba(255,255,255,.12), transparent 55%);
+  color: #fff;
+}
+.login-aside-inner {
+  position: sticky;
+  top: 0;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: clamp(28px, 6vw, 56px);
+}
+.login-aside-inner strong {
+  font-size: clamp(1.4rem, 2.5vw, 1.75rem);
+  letter-spacing: -0.03em;
+}
+.login-aside-inner span { opacity: .85; font-size: 14px; }
+
+@media (max-width: 840px) {
+  .login-shell { grid-template-columns: 1fr; }
+  .login-aside { display: none; }
 }

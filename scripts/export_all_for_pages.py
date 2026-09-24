@@ -72,9 +72,12 @@ def write_status_stub():
 
 
 def rebuild_docs():
+    import os
     print("Build web…")
     web = ROOT / "web"
-    subprocess.check_call(["npm", "run", "build"], cwd=str(web), shell=True)
+    env = os.environ.copy()
+    env["VITE_BASE"] = "./"
+    subprocess.check_call(["npm", "run", "build"], cwd=str(web), shell=True, env=env)
     docs = ROOT / "docs"
     dist = web / "dist"
     docs.mkdir(exist_ok=True)

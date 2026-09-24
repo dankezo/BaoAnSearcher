@@ -20,5 +20,12 @@ python scripts/sync_to_supabase.py
 
 VSS syncs `nam >= 2024` (full years through current). DAV/MSC sync full tables.
 
-## Pages
-Rebuild with Vite env set, then push `docs/`. Search goes to Supabase RPCs — no large `*.json.gz`.
+## Auth (nội bộ @baoanpharma.com)
+
+1. Chạy thêm SQL [`migrations/002_auth_rls.sql`](migrations/002_auth_rls.sql) (chỉ `authenticated` đọc data).
+2. Authentication → Providers → Email: bật Email, **tắt** “Allow new users to sign up”.
+3. Users → Add user: tạo `ten@baoanpharma.com` + mật khẩu.
+4. URL Configuration: Site URL `https://app.baoanpharma.com`, Redirect URLs cùng domain.
+5. Frontend: `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` (hoặc `NEXT_PUBLIC_*`).
+
+SPA Vite chặn email ngoài `@baoanpharma.com` và bắt đăng nhập trước khi vào tool.

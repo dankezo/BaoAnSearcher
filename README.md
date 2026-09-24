@@ -37,17 +37,30 @@ Mở http://127.0.0.1:8787
 
 Import Excel BHYT: đặt file hoặc dùng nút **Import Excel mặc định** (đường dẫn Desktop HAR folder).
 
-## GitHub Pages + Supabase (đủ data, không lag)
+## Auth nội bộ + Vercel (`app.baoanpharma.com`)
 
-Pages **không** nhúng JSON.gz lớn. Search gọi Postgres qua Supabase (VSS đủ từ 2024→nay).
+App là **Vite SPA** (không phải Next.js). Auth dùng `@supabase/supabase-js`.
 
-1. Tạo project Supabase → chạy SQL [`supabase/migrations/001_init.sql`](supabase/migrations/001_init.sql) (xem [`supabase/README.md`](supabase/README.md)).
-2. Root `.env` (từ [`.env.example`](.env.example)): `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
-3. `web/.env.local` (từ [`web/.env.example`](web/.env.example)): `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`.
-4. Crawl local (tab Quản trị) → `python scripts/sync_to_supabase.py` (hoặc nút Sync trong Admin).
-5. `python scripts/export_all_for_pages.py` (build SPA nhẹ) → commit + push `master` / `/docs`.
+### Biến môi trường
 
-Local API (`MO_WEB`) vẫn dùng SQLite đầy đủ offline.
+| Biến | Ở đâu | Ghi chú |
+|------|--------|---------|
+| `VITE_SUPABASE_URL` | `web/.env.local` + Vercel | Bắt buộc (hoặc `NEXT_PUBLIC_SUPABASE_URL`) |
+| `VITE_SUPABASE_ANON_KEY` | `web/.env.local` + Vercel | Bắt buộc (hoặc `NEXT_PUBLIC_SUPABASE_ANON_KEY`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | root `.env` only | Sync script — **không** đưa lên Vercel/frontend |
+
+### Supabase Dashboard
+1. SQL: `supabase/migrations/001_init.sql` rồi `002_auth_rls.sql`
+2. Tắt public sign-up; Add user `@baoanpharma.com`
+3. Site URL / Redirect: `https://app.baoanpharma.com`
+
+### Deploy Vercel + Cloudflare
+1. Push GitHub → import project trên Vercel (`vercel.json` ở root → build `web/`).
+2. Env trên Vercel: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (hoặc cặp `NEXT_PUBLIC_*`).
+3. Cloudflare DNS: CNAME `app` → `cname.vercel-dns.com` (Proxied).
+4. Vercel Domains: thêm `app.baoanpharma.com`.
+
+Local API / crawl vẫn chạy trên máy sau khi đăng nhập.
 
 ## Danh mục 93
 
