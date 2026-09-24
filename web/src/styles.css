@@ -293,6 +293,24 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
   font-size: 13px; outline: none;
   transition: border-color .12s var(--ease), box-shadow .12s var(--ease);
 }
+.suggest-wrap { position: relative; width: 100%; }
+.suggest-wrap > input { width: 100%; }
+.suggest-list {
+  list-style: none; margin: 4px 0 0; padding: 4px;
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 45;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md); box-shadow: var(--shadow-2);
+  max-height: 180px; overflow: auto;
+  animation: pop .12s var(--ease);
+}
+.suggest-list.col { min-width: 160px; }
+.suggest-item {
+  width: 100%; display: block; text-align: left;
+  border: 0; background: transparent; cursor: pointer;
+  padding: 7px 10px; border-radius: var(--r-sm);
+  font-size: 13px; color: var(--ink);
+}
+.suggest-item:hover, .suggest-item.hi { background: var(--surface-2); }
 .field input::placeholder { color: #a3abb6; }
 .field input:hover, .field select:hover, .select:hover { border-color: #aab2bc; }
 .field input:focus, .field select:focus, .select:focus {

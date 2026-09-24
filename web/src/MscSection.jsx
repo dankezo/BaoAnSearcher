@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, loadStaticGz, staticUpdated } from './api'
 import {
-  DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, IngredientText, LoadingOverlay, Pagination, TableToolbar,
-  UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, serverFilters, useSectionMeta,
-  useSelection, useSimProgress,
+  DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, IngredientText, LoadingOverlay, Pagination,
+  SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, serverFilters,
+  useSectionMeta, useSelection, useSimProgress,
 } from './components'
 
 const PAGE_SIZE = 50
@@ -94,7 +94,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const [kind, setKind] = useState('prices')
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
-  const [filtersRow, setFiltersRow] = useState(true)
+  const [filtersRow, setFiltersRow] = useState(false)
   const [filterModalOpen, setFilterModalOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [data, setData] = useState({ total: 0, items: [] })
@@ -113,19 +113,25 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const cols = kind === 'prices' ? PRICE_COLS : TENDER_COLS
   const staticName = kind === 'prices' ? 'msc_prices' : 'msc_tenders'
 
+  const filtersRef = useRef(filters)
+  const columnFiltersRef = useRef(columnFilters)
+  filtersRef.current = filters
+  columnFiltersRef.current = columnFilters
+
   const mergedFilters = useCallback(
-    (cf = columnFilters) => ({ ...filters, ...serverFilters(cf, SERVER_MAP) }),
-    [filters, columnFilters],
+    (cf) => ({ ...filtersRef.current, ...serverFilters(cf ?? columnFiltersRef.current, SERVER_MAP) }),
+    [],
   )
 
-  const search = useCallback(async (p = 0, cf) => {
+  const search = useCallback(async (p = 0, cf, override = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
     setLoading(true)
     setErr('')
+    const active = { ...mergedFilters(cf), ...(override || {}) }
     try {
       if (localMode) {
-        const res = await api.mscSearch({ kind, filters: mergedFilters(cf), page: p, size: PAGE_SIZE })
+        const res = await api.mscSearch({ kind, filters: active, page: p, size: PAGE_SIZE })
         if (stale()) return
         setData(res)
         setPage(p)
@@ -139,7 +145,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         return
       }
       setStaticFallback({ updated: staticUpdated(dumped), count: dumped.total || dumped.items.length })
-      const items = filterStatic(dumped.items, filters)
+      const items = filterStatic(dumped.items, active)
       setData({ total: items.length, items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE) })
       setPage(p)
     } catch (e) {
@@ -150,7 +156,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         setRefreshKey((k) => k + 1)
       }
     }
-  }, [kind, filters, localMode, mergedFilters, staticName])
+  }, [kind, localMode, mergedFilters, staticName])
 
   useEffect(() => {
     sel.clear()
@@ -160,9 +166,37 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
 
   const setF = (k, v) => setFilters((f) => ({ ...f, [k]: v }))
   const setCF = (k, v) => setColumnFilters((f) => ({ ...f, [k]: v }))
-  const onEnter = (e) => e.key === 'Enter' && search(0)
+  const runSearch = useCallback((override) => search(0, undefined, override || null), [search])
+  const onEnter = (e) => {
+    if (e.key === 'Enter' && !e.nativeEvent?.isComposing) runSearch()
+  }
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
   const detailActive = Object.entries(filters).filter(([k, v]) => k !== 'q' && String(v ?? '').trim()).length
+
+  const fieldSuggest = useCallback((fieldKey) => async (q) => {
+    const needle = String(q || '').trim()
+    if (needle.length < 1) return []
+    try {
+      let items = []
+      if (localMode) {
+        const res = await api.mscSearch({ kind, filters: { ...mergedFilters(), [fieldKey]: needle, q: '' }, page: 0, size: 30 })
+        items = res?.items || []
+      } else {
+        const dumped = await loadStaticGz(staticName)
+        items = filterStatic(dumped?.items || [], { ...mergedFilters(), [fieldKey]: needle, q: '' }).slice(0, 40)
+      }
+      const seen = new Set()
+      const out = []
+      for (const r of items) {
+        const t = String(fieldKey === 'q' ? (r.name || r.ingredient || r.registration || '') : (r[fieldKey] || '')).trim()
+        if (!t || seen.has(t)) continue
+        seen.add(t)
+        out.push(t)
+        if (out.length >= 3) break
+      }
+      return out
+    } catch { return [] }
+  }, [localMode, kind, mergedFilters, staticName])
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.source_id ? `${kind}:${r.source_id}` : `${kind}:${r.tender_no}|${page}|${i}`), [kind, page])
@@ -172,8 +206,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
       return fetchAllPages((p, size) => api.mscSearch({ kind, filters: mergedFilters(), page: p, size }), { onProgress: setExportPct })
     }
     const dumped = await loadStaticGz(staticName)
-    return filterStatic(dumped?.items || [], filters)
-  }, [localMode, kind, mergedFilters, staticName, filters])
+    return filterStatic(dumped?.items || [], mergedFilters())
+  }, [localMode, kind, mergedFilters, staticName])
 
   const doExport = async () => {
     setExporting(true)
@@ -195,20 +229,20 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     <div className="filter-grid">
       {kind === 'prices' ? (
         <>
-          <Field label="Tên thuốc"><input value={filters.name} onChange={(e) => setF('name', e.target.value)} onKeyDown={onEnter} /></Field>
-          <Field label="Hoạt chất"><input value={filters.ingredient} onChange={(e) => setF('ingredient', e.target.value)} onKeyDown={onEnter} /></Field>
-          <Field label="SĐK"><input value={filters.registration} onChange={(e) => setF('registration', e.target.value)} onKeyDown={onEnter} /></Field>
-          <Field label="Nhà sản xuất"><input value={filters.manufacturer} onChange={(e) => setF('manufacturer', e.target.value)} onKeyDown={onEnter} /></Field>
+          <SuggestField label="Tên thuốc" value={filters.name} onChange={(v) => setF('name', v)} onSearch={(v) => runSearch({ name: v })} suggest={fieldSuggest('name')} />
+          <SuggestField label="Hoạt chất" value={filters.ingredient} onChange={(v) => setF('ingredient', v)} onSearch={(v) => runSearch({ ingredient: v })} suggest={fieldSuggest('ingredient')} />
+          <SuggestField label="SĐK" value={filters.registration} onChange={(v) => setF('registration', v)} onSearch={(v) => runSearch({ registration: v })} suggest={fieldSuggest('registration')} />
+          <SuggestField label="Nhà sản xuất" value={filters.manufacturer} onChange={(v) => setF('manufacturer', v)} onSearch={(v) => runSearch({ manufacturer: v })} suggest={fieldSuggest('manufacturer')} />
           <Field label="Nhóm"><input value={filters.group_name} onChange={(e) => setF('group_name', e.target.value)} onKeyDown={onEnter} placeholder="1 … 5" /></Field>
-          <Field label="Loại thuốc"><input value={filters.medicine_type} onChange={(e) => setF('medicine_type', e.target.value)} onKeyDown={onEnter} /></Field>
-          <Field label="Nhà thầu"><input value={filters.winner} onChange={(e) => setF('winner', e.target.value)} onKeyDown={onEnter} /></Field>
+          <SuggestField label="Loại thuốc" value={filters.medicine_type} onChange={(v) => setF('medicine_type', v)} onSearch={(v) => runSearch({ medicine_type: v })} suggest={fieldSuggest('medicine_type')} />
+          <SuggestField label="Nhà thầu" value={filters.winner} onChange={(v) => setF('winner', v)} onSearch={(v) => runSearch({ winner: v })} suggest={fieldSuggest('winner')} />
         </>
       ) : (
-        <Field label="Tên gói"><input value={filters.name} onChange={(e) => setF('name', e.target.value)} onKeyDown={onEnter} /></Field>
+        <SuggestField label="Tên gói" value={filters.name} onChange={(v) => setF('name', v)} onSearch={(v) => runSearch({ name: v })} suggest={fieldSuggest('name')} />
       )}
-      <Field label="TBMT"><input value={filters.tender_no} onChange={(e) => setF('tender_no', e.target.value)} onKeyDown={onEnter} placeholder="IB…" /></Field>
-      <Field label="Tỉnh / TP"><input value={filters.province} onChange={(e) => setF('province', e.target.value)} onKeyDown={onEnter} /></Field>
-      <Field label="Bệnh viện / CĐT"><input value={filters.buyer} onChange={(e) => setF('buyer', e.target.value)} onKeyDown={onEnter} /></Field>
+      <SuggestField label="TBMT" value={filters.tender_no} onChange={(v) => setF('tender_no', v)} onSearch={(v) => runSearch({ tender_no: v })} suggest={fieldSuggest('tender_no')} placeholder="IB…" />
+      <SuggestField label="Tỉnh / TP" value={filters.province} onChange={(v) => setF('province', v)} onSearch={(v) => runSearch({ province: v })} suggest={fieldSuggest('province')} />
+      <SuggestField label="Bệnh viện / CĐT" value={filters.buyer} onChange={(v) => setF('buyer', v)} onSearch={(v) => runSearch({ buyer: v })} suggest={fieldSuggest('buyer')} />
     </div>
   )
 
@@ -234,7 +268,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
             </div>
           </div>
           <div className="filter-grid">
-            <Field label="Từ khóa"><input value={filters.q} onChange={(e) => setF('q', e.target.value)} onKeyDown={onEnter} placeholder="Tìm trong mọi trường" /></Field>
+            <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tìm trong mọi trường" />
           </div>
           {!filtersInModal && secondaryGrid}
           <div className="filter-actions">
@@ -244,7 +278,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
                 {detailActive > 0 && <span className="pill">{detailActive}</span>}
               </button>
             )}
-            <button type="button" className="btn" onClick={() => search(0)}>{Icons.search} Tìm kiếm</button>
+            <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
             <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
           </div>
         </div>
@@ -259,7 +293,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           filtersVisible={filtersRow}
           onToggleFilters={() => setFiltersRow((v) => !v)}
           activeColumnFilters={activeCF}
-          onClearColumnFilters={() => { setColumnFilters({}); if (localMode) search(0, {}) }}
+          onClearColumnFilters={() => { setColumnFilters({}); search(0, {}) }}
         />
         <ErrorNote>{err}</ErrorNote>
 
@@ -274,7 +308,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           columnFilters={columnFilters}
           onColumnFilter={setCF}
           filtersVisible={filtersRow}
-          onFilterEnter={() => localMode && search(0)}
+          onFilterEnter={() => search(0)}
+          onFilterSuggest={async (key, q) => fieldSuggest(key)(q)}
           onRowDoubleClick={setDetail}
           loading={loading}
           minWidth={embedded ? 720 : (kind === 'prices' ? 1400 : 1100)}
@@ -289,7 +324,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           extra={sel.size > 0 && <span className="chip">{sel.size} dòng đã chọn</span>} />
       </div>
 
-      <FilterModal open={filtersInModal && filterModalOpen} onClose={() => setFilterModalOpen(false)} onApply={() => search(0)}>
+      <FilterModal open={filtersInModal && filterModalOpen} onClose={() => setFilterModalOpen(false)} onApply={() => runSearch()}>
         {secondaryGrid}
       </FilterModal>
 

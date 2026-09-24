@@ -76,6 +76,210 @@ export function HospitalGradeField({ value, onChange }) {
   )
 }
 
+/**
+ * Compact filter input with 1–3 typeahead suggestions.
+ * suggest: async (query) => string[]  (or sync)
+ */
+export function SuggestField({
+  label, hint, value, onChange, onSearch, suggest, placeholder = '', className = '',
+}) {
+  const wrapRef = useRef(null)
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState([])
+  const [hi, setHi] = useState(-1)
+  const seq = useRef(0)
+  const timer = useRef(null)
+
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  useEffect(() => {
+    clearTimeout(timer.current)
+    const q = String(value ?? '').trim()
+    if (!suggest || q.length < 1) {
+      setItems([])
+      return undefined
+    }
+    timer.current = setTimeout(async () => {
+      const id = ++seq.current
+      try {
+        const list = await suggest(q)
+        if (id === seq.current) {
+          setItems((list || []).filter(Boolean).slice(0, 3))
+          setHi(-1)
+        }
+      } catch {
+        if (id === seq.current) setItems([])
+      }
+    }, 220)
+    return () => clearTimeout(timer.current)
+  }, [value, suggest])
+
+  const show = open && items.length > 0
+
+  const pick = (text) => {
+    onChange(text)
+    setOpen(false)
+    setItems([])
+    onSearch?.(text)
+  }
+
+  const onKey = (e) => {
+    if (e.nativeEvent?.isComposing) return
+    if (e.key === 'ArrowDown' && show) {
+      e.preventDefault()
+      setHi((i) => (i + 1) % items.length)
+      return
+    }
+    if (e.key === 'ArrowUp' && show) {
+      e.preventDefault()
+      setHi((i) => (i <= 0 ? items.length - 1 : i - 1))
+      return
+    }
+    if (e.key === 'Escape') {
+      setOpen(false)
+      return
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      if (show && hi >= 0 && items[hi]) {
+        pick(items[hi])
+        return
+      }
+      onSearch?.(value)
+    }
+  }
+
+  return (
+    <Field label={label} hint={hint} className={`suggest-field ${className}`.trim()}>
+      <div className="suggest-wrap" ref={wrapRef}>
+        <input
+          value={value}
+          placeholder={placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(e) => { onChange(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={onKey}
+        />
+        {show && (
+          <ul className="suggest-list" role="listbox">
+            {items.map((t, i) => (
+              <li key={`${t}-${i}`}>
+                <button
+                  type="button"
+                  className={`suggest-item${i === hi ? ' hi' : ''}`}
+                  onMouseEnter={() => setHi(i)}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => pick(t)}
+                >
+                  {t}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Field>
+  )
+}
+
+/** Bare input+suggest for table column filter row. */
+export function SuggestInput({
+  value, onChange, onSearch, suggest, placeholder = 'Lọc…', 'aria-label': ariaLabel,
+}) {
+  const wrapRef = useRef(null)
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState([])
+  const [hi, setHi] = useState(-1)
+  const seq = useRef(0)
+  const timer = useRef(null)
+
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  useEffect(() => {
+    clearTimeout(timer.current)
+    const q = String(value ?? '').trim()
+    if (!suggest || q.length < 1) { setItems([]); return undefined }
+    timer.current = setTimeout(async () => {
+      const id = ++seq.current
+      try {
+        const list = await suggest(q)
+        if (id === seq.current) {
+          setItems((list || []).filter(Boolean).slice(0, 3))
+          setHi(-1)
+        }
+      } catch {
+        if (id === seq.current) setItems([])
+      }
+    }, 220)
+    return () => clearTimeout(timer.current)
+  }, [value, suggest])
+
+  const show = open && items.length > 0
+  const pick = (text) => {
+    onChange(text)
+    setOpen(false)
+    setItems([])
+    onSearch?.(text)
+  }
+
+  return (
+    <div className="th-filter suggest-wrap" ref={wrapRef}>
+      <input
+        value={value || ''}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        autoComplete="off"
+        onChange={(e) => { onChange(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.nativeEvent?.isComposing) return
+          if (e.key === 'ArrowDown' && show) { e.preventDefault(); setHi((i) => (i + 1) % items.length); return }
+          if (e.key === 'ArrowUp' && show) { e.preventDefault(); setHi((i) => (i <= 0 ? items.length - 1 : i - 1)); return }
+          if (e.key === 'Escape') { setOpen(false); return }
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            if (show && hi >= 0 && items[hi]) { pick(items[hi]); return }
+            onSearch?.(value)
+          }
+        }}
+      />
+      {value ? (
+        <button type="button" className="clear" aria-label="Xóa" onClick={() => { onChange(''); setItems([]) }}>{I.x}</button>
+      ) : null}
+      {show && (
+        <ul className="suggest-list col" role="listbox">
+          {items.map((t, i) => (
+            <li key={`${t}-${i}`}>
+              <button
+                type="button"
+                className={`suggest-item${i === hi ? ' hi' : ''}`}
+                onMouseEnter={() => setHi(i)}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(t)}
+              >
+                {t}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 /** Modal shell for secondary filters (used in multi-view). */
 export function FilterModal({ open, title = 'Bộ lọc chi tiết', onClose, onApply, children }) {
   useEffect(() => {
@@ -564,6 +768,7 @@ export function DataTable({
   columns, rows, rowKey, startIndex = 0, showIndex = true,
   selectable = true, selected, onToggleRow, onToggleAll,
   columnFilters = {}, onColumnFilter, filtersVisible = true, onFilterEnter,
+  onFilterSuggest,
   onRowDoubleClick, emptyText = 'Không có dữ liệu', loading,
   trailing, // { label, render(row) }
   minWidth,
@@ -592,6 +797,24 @@ export function DataTable({
   }, [columns, rows])
 
   const extraCols = (showIndex ? 1 : 0) + (selectable ? 1 : 0) + (trailing ? 1 : 0)
+
+  const defaultSuggest = useCallback((key) => async (q) => {
+    if (onFilterSuggest) return onFilterSuggest(key, q)
+    const col = columns.find((c) => c.key === key)
+    if (!col) return []
+    const needle = fold(q)
+    const seen = new Set()
+    const out = []
+    for (const r of rows) {
+      const t = cellText(r, col).trim()
+      if (!t || seen.has(t)) continue
+      if (!fold(t).includes(needle)) continue
+      seen.add(t)
+      out.push(t)
+      if (out.length >= 3) break
+    }
+    return out
+  }, [onFilterSuggest, columns, rows])
 
   return (
     <div className="table-wrap">
@@ -628,24 +851,21 @@ export function DataTable({
                     <select
                       value={columnFilters[c.key] || ''}
                       onChange={(e) => onColumnFilter?.(c.key, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent?.isComposing) onFilterEnter?.() }}
                       aria-label={`Lọc ${c.label}`}
                     >
                       <option value="">Tất cả</option>
                       {(options[c.key] || []).map((o) => <option key={o} value={o}>{o}</option>)}
                     </select>
                   ) : (
-                    <div className="th-filter">
-                      <input
-                        value={columnFilters[c.key] || ''}
-                        placeholder="Lọc…"
-                        aria-label={`Lọc ${c.label}`}
-                        onChange={(e) => onColumnFilter?.(c.key, e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') onFilterEnter?.() }}
-                      />
-                      {columnFilters[c.key] && (
-                        <button type="button" className="clear" aria-label="Xóa" onClick={() => onColumnFilter?.(c.key, '')}>{I.x}</button>
-                      )}
-                    </div>
+                    <SuggestInput
+                      value={columnFilters[c.key] || ''}
+                      placeholder="Lọc…"
+                      aria-label={`Lọc ${c.label}`}
+                      onChange={(v) => onColumnFilter?.(c.key, v)}
+                      onSearch={() => onFilterEnter?.()}
+                      suggest={defaultSuggest(c.key)}
+                    />
                   )}
                 </th>
               ))}

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, applyClientFilters, containsWords, fmtDate, loadStaticGz, openDavLookup, staticUpdated, DAV_LOOKUP } from './api'
 import {
-  ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField,
-  Icons, IngredientText, LoadingOverlay, Pagination, SearchSuggestBar, TableToolbar, UpdatedNote,
+  ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, FilterModal, HospitalGradeField,
+  Icons, IngredientText, LoadingOverlay, Pagination, SearchSuggestBar, SuggestField, TableToolbar, UpdatedNote,
   ViewModeSelect, applyColumnFilters, exportSelectionOrAll, fetchAllPages, serverFilters,
   useSectionMeta, useSelection, useSimProgress, useTt20,
 } from './components'
@@ -86,7 +86,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const [visible, setVisible] = useState(COMPACT)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
-  const [filtersRow, setFiltersRow] = useState(true)
+  const [filtersRow, setFiltersRow] = useState(false)
   const [filterModalOpen, setFilterModalOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [data, setData] = useState({ total: 0, items: [] })
@@ -107,6 +107,12 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const suggestTimer = useRef(null)
   const meta = useSectionMeta('dav', localMode, staticFallback, refreshKey)
   const { selectedTags, setSelectedTags, configs, refreshConfigs } = useTagFilterState()
+  const filtersRef = useRef(filters)
+  const columnFiltersRef = useRef(columnFilters)
+  const selectedTagsRef = useRef(selectedTags)
+  filtersRef.current = filters
+  columnFiltersRef.current = columnFilters
+  selectedTagsRef.current = selectedTags
 
   useEffect(() => {
     if (viewMode === 'compact') setVisible(COMPACT)
@@ -141,12 +147,12 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   }), [visible, configs])
 
   const mergedFilters = useCallback(
-    (cf = columnFilters) => ({
-      ...filters,
-      ...serverFilters(cf, SERVER_MAP),
-      tags: selectedTags,
+    (cf) => ({
+      ...filtersRef.current,
+      ...serverFilters(cf ?? columnFiltersRef.current, SERVER_MAP),
+      tags: selectedTagsRef.current,
     }),
-    [filters, columnFilters, selectedTags],
+    [],
   )
 
   const search = useCallback(async (p = 0, cf, override = null) => {
@@ -174,7 +180,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
             size: PAGE_SIZE,
           })
         } else {
-          setData(res)
+          setData({ ...res, items })
         }
         setPage(p)
         return
@@ -256,6 +262,50 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     filters.hangBenhVien,
   ].filter((v) => String(v ?? '').trim()).length
 
+  const fieldSuggest = useCallback((fieldKey) => async (q) => {
+    const needle = String(q || '').trim()
+    if (needle.length < 1) return []
+    try {
+      let items = []
+      if (localMode) {
+        const res = await api.davSearch({
+          filters: { ...mergedFilters(), [fieldKey]: needle, q: '' },
+          page: 0,
+          size: 30,
+        })
+        items = res?.items || []
+      } else {
+        const dumped = await loadStaticGz('dav')
+        items = filterStatic(
+          dumped?.items || [],
+          { ...mergedFilters(), [fieldKey]: needle, q: '' },
+          tt20Index,
+        ).slice(0, 40)
+      }
+      const seen = new Set()
+      const out = []
+      const rowKeyOf = {
+        tenThuoc: 'tenThuoc', soDangKy: 'soDangKy', hoatChat: 'hoatChat', dangBaoChe: 'dangBaoChe',
+        sanXuat: 'ctySanXuat', dangKy: 'ctyDangKy', nuocSanXuat: 'nuocSanXuat',
+      }[fieldKey] || fieldKey
+      for (const r of items) {
+        const t = String(r[rowKeyOf] || '').trim()
+        if (!t || seen.has(t)) continue
+        seen.add(t)
+        out.push(t)
+        if (out.length >= 3) break
+      }
+      return out
+    } catch {
+      return []
+    }
+  }, [localMode, mergedFilters, tt20Index])
+
+  const runSearch = useCallback((override) => {
+    setSuggestOpen(false)
+    search(0, undefined, override || null)
+  }, [search])
+
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.id != null ? `id:${r.id}` : `${r.soDangKy}|${page}|${i}`), [page])
 
@@ -288,13 +338,13 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
 
   const detailFields = (
     <div className="filter-grid">
-      <Field label="Tên thuốc"><input value={filters.tenThuoc} onChange={(e) => setF('tenThuoc', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-      <Field label="Số ĐK"><input value={filters.soDangKy} onChange={(e) => setF('soDangKy', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-      <Field label="Hoạt chất"><input value={filters.hoatChat} onChange={(e) => setF('hoatChat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-      <Field label="Dạng bào chế"><input value={filters.dangBaoChe} onChange={(e) => setF('dangBaoChe', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-      <Field label="Công ty SX"><input value={filters.sanXuat} onChange={(e) => setF('sanXuat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-      <Field label="Công ty ĐK"><input value={filters.dangKy} onChange={(e) => setF('dangKy', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
-      <Field label="Nước SX"><input value={filters.nuocSanXuat} onChange={(e) => setF('nuocSanXuat', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search(0)} /></Field>
+      <SuggestField label="Tên thuốc" value={filters.tenThuoc} onChange={(v) => setF('tenThuoc', v)} onSearch={(v) => runSearch({ tenThuoc: v })} suggest={fieldSuggest('tenThuoc')} />
+      <SuggestField label="Số ĐK" value={filters.soDangKy} onChange={(v) => setF('soDangKy', v)} onSearch={(v) => runSearch({ soDangKy: v })} suggest={fieldSuggest('soDangKy')} />
+      <SuggestField label="Hoạt chất" value={filters.hoatChat} onChange={(v) => setF('hoatChat', v)} onSearch={(v) => runSearch({ hoatChat: v })} suggest={fieldSuggest('hoatChat')} />
+      <SuggestField label="Dạng bào chế" value={filters.dangBaoChe} onChange={(v) => setF('dangBaoChe', v)} onSearch={(v) => runSearch({ dangBaoChe: v })} suggest={fieldSuggest('dangBaoChe')} />
+      <SuggestField label="Công ty SX" value={filters.sanXuat} onChange={(v) => setF('sanXuat', v)} onSearch={(v) => runSearch({ sanXuat: v })} suggest={fieldSuggest('sanXuat')} />
+      <SuggestField label="Công ty ĐK" value={filters.dangKy} onChange={(v) => setF('dangKy', v)} onSearch={(v) => runSearch({ dangKy: v })} suggest={fieldSuggest('dangKy')} />
+      <SuggestField label="Nước SX" value={filters.nuocSanXuat} onChange={(v) => setF('nuocSanXuat', v)} onSearch={(v) => runSearch({ nuocSanXuat: v })} suggest={fieldSuggest('nuocSanXuat')} />
       <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
       <CountSelect label="Số hoạt chất" value={filters.ingredientCount} otherValue={filters.ingredientCountOther}
         options={[1, 2, 3, 4, 5]} onChange={(v) => setF('ingredientCount', v)} onOther={(v) => setF('ingredientCountOther', v)} />
@@ -323,7 +373,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           <SearchSuggestBar
             value={filters.q}
             onChange={(v) => setF('q', v)}
-            onSubmit={() => { setSuggestOpen(false); search(0) }}
+            onSubmit={() => runSearch()}
             suggestions={suggests}
             open={suggestOpen}
             onOpenChange={setSuggestOpen}
@@ -334,7 +384,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
               setFilters((f) => ({ ...f, q }))
               setSuggestOpen(false)
               if (row) setDetail(row)
-              search(0, undefined, { q })
+              runSearch({ q })
             }}
           />
           <div className="filter-actions filter-actions-center">
@@ -353,6 +403,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
                 {advancedActive > 0 && <span className="pill">{advancedActive}</span>}
               </button>
             ) : null}
+            <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
             <button type="button" className="btn secondary" onClick={() => {
               setFilters(EMPTY_FILTERS)
               setColumnFilters({})
@@ -362,7 +413,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
               Xóa lọc
             </button>
             {localMode && !embedded && (
-              <button type="button" className="btn ghost" onClick={() => api.davValidity().then(() => search(0)).catch((e) => setErr(e.message))}>
+              <button type="button" className="btn ghost" onClick={() => api.davValidity().then(() => runSearch()).catch((e) => setErr(e.message))}>
                 Rebuild tập hiệu lực
               </button>
             )}
@@ -383,7 +434,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           filtersVisible={filtersRow}
           onToggleFilters={() => setFiltersRow((v) => !v)}
           activeColumnFilters={activeCF}
-          onClearColumnFilters={() => { setColumnFilters({}); if (localMode) search(0, {}) }}
+          onClearColumnFilters={() => { setColumnFilters({}); search(0, {}) }}
         >
           <ViewModeSelect value={viewMode} onChange={(v) => { setViewMode(v); if (v === 'custom') setColPicker(true) }} />
           {viewMode === 'custom' && (
@@ -405,7 +456,11 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           columnFilters={columnFilters}
           onColumnFilter={setCF}
           filtersVisible={filtersRow}
-          onFilterEnter={() => localMode && search(0)}
+          onFilterEnter={() => search(0)}
+          onFilterSuggest={async (key, q) => {
+            const mapKey = SERVER_MAP[key] || key
+            return fieldSuggest(mapKey)(q)
+          }}
           onRowDoubleClick={setDetail}
           loading={loading}
           emptyText="Không có dữ liệu phù hợp"
@@ -426,7 +481,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
       <FilterModal
         open={filtersInModal && filterModalOpen}
         onClose={() => setFilterModalOpen(false)}
-        onApply={() => search(0)}
+        onApply={() => runSearch()}
       >
         {detailFields}
       </FilterModal>

@@ -385,28 +385,15 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
         return {"total": 0, "page": max(0, int(page)), "size": max(1, min(200, int(size))), "items": [], "dbTotal": total_db}
 
     need_group = any([dosage_n, strength_n])
-    # Fast path: SQL prefilter when no group stats needed
+    # Fast path: SQL prefilter on FTS-ish search column (broad), then precise match on flatten()
     clauses, args = [], []
     for word in q.split():
         clauses.append("search LIKE ?")
         args.append(f"%{word}%")
-    for field, path, alt in [
-        (ten, "$.tenThuoc", None),
-        (sdk, "$.soDangKy", "$.soDangKyCu"),
-        (hc, "$.thongTinThuocCoBan.hoatChatChinh", "$.hoatChatChinh"),
-        (dang, "$.thongTinThuocCoBan.dangBaoChe", "$.dangBaoChe"),
-        (sx, "$.congTySanXuat.tenCongTySanXuat", "$.tenCongTySanXuat"),
-        (dk, "$.congTyDangKy.tenCongTyDangKy", "$.tenCongTyDangKy"),
-        (nuoc, "$.congTySanXuat.nuocSanXuat", "$.nuocSanXuat"),
-    ]:
-        if not field:
-            continue
-        if alt:
-            clauses.append("(fold(coalesce(json_extract(raw,?),'') || ' ' || coalesce(json_extract(raw,?),'')) LIKE ?)")
-            args.extend([path, alt, f"%{field}%"])
-        else:
-            clauses.append("fold(coalesce(json_extract(raw,?),'')) LIKE ?")
-            args.extend([path, f"%{field}%"])
+    for blob in (ten, sdk, hc, dang, sx, dk, nuoc):
+        for word in (blob.split() if blob else []):
+            clauses.append("search LIKE ?")
+            args.append(f"%{word}%")
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     con = connect()
@@ -454,6 +441,21 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
     for (raw,) in rows:
         rec = json.loads(raw)
         flat = flatten(rec)
+        # Reliable text match on flattened fields (json_extract paths can miss variants)
+        if ten and ten not in fold(flat.get("tenThuoc") or ""):
+            continue
+        if sdk and sdk not in fold(f"{flat.get('soDangKy') or ''} {flat.get('soDangKyCu') or ''}"):
+            continue
+        if hc and not all(w in fold(flat.get("hoatChat") or "") for w in hc.split()):
+            continue
+        if dang and dang not in fold(flat.get("dangBaoChe") or ""):
+            continue
+        if sx and sx not in fold(flat.get("ctySanXuat") or ""):
+            continue
+        if dk and dk not in fold(flat.get("ctyDangKy") or ""):
+            continue
+        if nuoc and nuoc not in fold(flat.get("nuocSanXuat") or ""):
+            continue
         if con_hieu_luc and flat["soDangKy"] not in validity:
             continue
         if tags_set is not None and flat.get("tagId") not in tags_set:

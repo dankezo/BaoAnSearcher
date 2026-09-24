@@ -20,7 +20,7 @@ export const DEFAULT_TAG_CONFIGS = [
     label: 'Cần xác minh / Hạn ngắn',
     shortTitle: 'Rủi ro kỹ thuật / Đang nộp gia hạn',
     description: 'SĐK hạn còn lại < 18 tháng, hoặc cấp kỳ hạn ~3 năm, hoặc đã nộp giấy tiếp nhận gia hạn. Dùng dóng dữ liệu ngoại, cân nhắc khi chào thầu.',
-    defaultChecked: false,
+    defaultChecked: true,
   },
   {
     id: TAG_CAM,
@@ -28,7 +28,7 @@ export const DEFAULT_TAG_CONFIGS = [
     label: 'Bẫy Danh mục 93 (CMO)',
     shortTitle: 'Khớp Danh mục 93 nội địa (TT 03/2024)',
     description: 'Trùng hoạt chất + hàm lượng + dạng bào chế với DM93 (≥3 cơ sở EU-GMP nội). Cấm hàng nhập khẩu chào thầu; cơ hội đặt gia công (CMO) trong nước.',
-    defaultChecked: false,
+    defaultChecked: true,
   },
   {
     id: TAG_XAM,
@@ -36,7 +36,7 @@ export const DEFAULT_TAG_CONFIGS = [
     label: 'Lịch sử / Đã hết hạn',
     shortTitle: 'SĐK đã hết hiệu lực / Thu hồi',
     description: 'SĐK đã dừng lưu hành hoặc bị thu hồi/xóa. Giữ để tra cứu tiền lệ cấp phép khi làm hồ sơ dóng quốc tế.',
-    defaultChecked: false,
+    defaultChecked: true,
   },
 ]
 
@@ -64,7 +64,12 @@ export function defaultSelectedTags() {
     const raw = localStorage.getItem(LS_SELECTED)
     if (raw) {
       const arr = JSON.parse(raw)
-      if (Array.isArray(arr) && arr.length) return arr
+      // Legacy: only-green or empty → treat as "all tags" so search isn't silently limited
+      if (Array.isArray(arr) && arr.length) {
+        const all = DEFAULT_TAG_CONFIGS.map((t) => t.id)
+        if (arr.length === 1 && arr[0] === TAG_XANH) return all
+        return arr
+      }
     }
   } catch { /* ignore */ }
   return DEFAULT_TAG_CONFIGS.filter((t) => t.defaultChecked).map((t) => t.id)
