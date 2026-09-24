@@ -108,19 +108,22 @@ def save_rows(rows: list[dict]) -> int:
 
 
 def import_spreadsheet_ml(path: str | Path, max_rows: int | None = None, progress_cb=None) -> dict:
-    """Stream-parse SpreadsheetML (.xls XML) from VSS export."""
+    """Stream-parse SpreadsheetML (.xls XML). Falls back to regex sanitizer on bad chars."""
     path = Path(path)
+    try:
+        return _import_spreadsheet_ml_et(path, max_rows=max_rows, progress_cb=progress_cb)
+    except Exception as e:
+        update_status("vss", message=f"ET fail ({e}); dùng parser regex…", updated=now_iso())
+        return _import_spreadsheet_ml_regex(path, max_rows=max_rows)
+
+
+def _import_spreadsheet_ml_et(path: Path, max_rows: int | None = None, progress_cb=None) -> dict:
+    """Stream-parse SpreadsheetML (.xls XML) from VSS export."""
     update_status("vss", state="running", progress=1, message=f"Đang đọc {path.name}…", updated=now_iso())
-    # Use iterparse for large files
-    ns = {
-        "ss": "urn:schemas-microsoft-com:office:spreadsheet",
-        "main": "urn:schemas-microsoft-com:office:spreadsheet",
-    }
     headers = None
     batch = []
     inserted = 0
     seen_rows = 0
-    # SpreadsheetML often uses default namespace
     tag_row = "{urn:schemas-microsoft-com:office:spreadsheet}Row"
     tag_cell = "{urn:schemas-microsoft-com:office:spreadsheet}Cell"
     tag_data = "{urn:schemas-microsoft-com:office:spreadsheet}Data"
@@ -130,7 +133,6 @@ def import_spreadsheet_ml(path: str | Path, max_rows: int | None = None, progres
         if elem.tag != tag_row:
             continue
         cells = []
-        # Cells may skip indices via ss:Index
         idx = 1
         for cell in elem.findall(tag_cell):
             index_attr = cell.get("{urn:schemas-microsoft-com:office:spreadsheet}Index")
@@ -147,25 +149,16 @@ def import_spreadsheet_ml(path: str | Path, max_rows: int | None = None, progres
         if not any(cells):
             continue
         if headers is None:
-            # first non-empty row as header if looks like headers
             if cells and cells[0] in ("loai_thau", "STT", "stt") or "hoatchat" in [c.lower() for c in cells]:
-                headers = [c.strip().lower() for c in cells]
-                # normalize
-                mapping = []
-                for h in headers:
-                    h2 = h.replace(" ", "_")
-                    mapping.append(h2 if h2 in COLUMNS or h2 == "stt" else h2)
-                headers = mapping
+                headers = [c.strip().lower().replace(" ", "_") for c in cells]
                 continue
             headers = list(COLUMNS)
-            # fall through treating as data aligned to COLUMNS
         d = {}
         for i, h in enumerate(headers):
             if h == "stt":
                 continue
             key = h if h in COLUMNS else (COLUMNS[i] if i < len(COLUMNS) else h)
             d[key] = cells[i] if i < len(cells) else ""
-        # ensure all columns
         for c in COLUMNS:
             d.setdefault(c, "")
         batch.append(d)
@@ -183,6 +176,87 @@ def import_spreadsheet_ml(path: str | Path, max_rows: int | None = None, progres
     info = meta_info()
     update_status("vss", state="idle", progress=100, message=f"Import xong +{inserted:,}", updated=now_iso(), count=info["count"])
     return {"read": seen_rows, "inserted": inserted, "count": info["count"]}
+
+
+def _import_spreadsheet_ml_regex(path: Path, max_rows: int | None = None) -> dict:
+    invalid = re.compile(r"&#x0*(?:[0-8bcefBCEF]|1[0-9a-fA-F]|7[fF]);|&#0*(?:[0-8]|1[0-9]|1[2-9]|2[0-9]|3[01]);")
+    row_re = re.compile(r"<Row[^>]*>(.*?)</Row>", re.I | re.S)
+    cell_re = re.compile(r'<Cell([^>]*)>\s*(?:<Data[^>]*>(.*?)</Data>)?', re.I | re.S)
+    index_re = re.compile(r'ss:Index="(\d+)"', re.I)
+    update_status("vss", state="running", progress=1, message=f"Import regex {path.name}…", updated=now_iso())
+    headers = None
+    batch, inserted, seen = [], 0, 0
+    buf = ""
+    size = max(1, path.stat().st_size)
+    read_bytes = 0
+
+    def cell_text(raw: str) -> str:
+        if not raw:
+            return ""
+        t = re.sub(r"<[^>]+>", "", raw)
+        return (
+            t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", '"').replace("&apos;", "'").strip()
+        )
+
+    with path.open("r", encoding="utf-8", errors="replace") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            read_bytes += len(chunk)
+            buf += invalid.sub("", chunk)
+            parts = list(row_re.finditer(buf))
+            if not parts:
+                if len(buf) > 5_000_000:
+                    buf = buf[-500_000:]
+                continue
+            last_end = 0
+            for m in parts:
+                last_end = m.end()
+                cells, idx = [], 1
+                for cm in cell_re.finditer(m.group(1)):
+                    attrs, data = cm.group(1) or "", cm.group(2) or ""
+                    im = index_re.search(attrs)
+                    if im:
+                        want = int(im.group(1))
+                        while idx < want:
+                            cells.append("")
+                            idx += 1
+                    cells.append(cell_text(data))
+                    idx += 1
+                if not any(cells):
+                    continue
+                if headers is None:
+                    lower = [c.strip().lower().replace(" ", "_") for c in cells]
+                    if lower and (lower[0] in ("loai_thau", "stt") or "hoatchat" in lower):
+                        headers = lower
+                        continue
+                    headers = list(COLUMNS)
+                d = {c: "" for c in COLUMNS}
+                for j, h in enumerate(headers):
+                    if h == "stt":
+                        continue
+                    key = h if h in COLUMNS else (COLUMNS[j] if j < len(COLUMNS) else None)
+                    if key:
+                        d[key] = cells[j] if j < len(cells) else ""
+                batch.append(d)
+                seen += 1
+                if len(batch) >= 800:
+                    inserted += save_rows(batch)
+                    batch = []
+                    update_status("vss", progress=min(95, int(100 * read_bytes / size)), message=f"Import {seen:,}…", updated=now_iso())
+                if max_rows and seen >= max_rows:
+                    buf = ""
+                    break
+            buf = buf[last_end:]
+            if max_rows and seen >= max_rows:
+                break
+    if batch:
+        inserted += save_rows(batch)
+    info = meta_info()
+    update_status("vss", state="idle", progress=100, message=f"Import xong +{inserted:,}", updated=now_iso(), count=info["count"])
+    return {"read": seen, "inserted": inserted, "count": info["count"]}
 
 
 class TableParser(HTMLParser):
