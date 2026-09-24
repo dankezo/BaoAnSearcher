@@ -64,12 +64,12 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50) -> dict:
 
     where = " WHERE " + " AND ".join(clauses)
     page = max(0, int(page))
-    size = max(1, min(200, int(size)))
+    size = max(1, min(5000, int(size)))
     with core.connect(MSC_DB) as con:
         total = con.execute("SELECT count(*) FROM records" + where, args).fetchone()[0]
         rows = con.execute(
             "SELECT normalized, raw, collected_at FROM records" + where +
-            " ORDER BY collected_at DESC LIMIT ? OFFSET ?",
+            " ORDER BY coalesce(json_extract(normalized, '$.published'), collected_at) DESC LIMIT ? OFFSET ?",
             args + [size, page * size],
         ).fetchall()
     items = []
@@ -77,6 +77,11 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50) -> dict:
         item = json.loads(norm)
         item["_collected_at"] = collected
         items.append(item)
+    # Stable newest-first on published / close / collected
+    items.sort(
+        key=lambda it: str(it.get("published") or it.get("close_date") or it.get("_collected_at") or ""),
+        reverse=True,
+    )
     return {"total": total, "page": page, "size": size, "items": items}
 
 

@@ -382,7 +382,7 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
             total_db = con.execute("SELECT count(*) FROM drugs").fetchone()[0]
         finally:
             con.close()
-        return {"total": 0, "page": max(0, int(page)), "size": max(1, min(200, int(size))), "items": [], "dbTotal": total_db}
+        return {"total": 0, "page": max(0, int(page)), "size": max(1, min(5000, int(size))), "items": [], "dbTotal": total_db}
 
     need_group = any([dosage_n, strength_n])
     # Fast path: SQL prefilter on FTS-ish search column (broad), then precise match on flatten()
@@ -474,9 +474,15 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
                 continue
         results.append(flat)
 
+    # Newest first (gia hạn / ngày cấp)
+    results.sort(
+        key=lambda f: str(f.get("ngayGiaHan") or f.get("ngayCap") or f.get("ngayHetHan") or ""),
+        reverse=True,
+    )
+
     total = len(results)
     page = max(0, int(page))
-    size = max(1, min(200, int(size)))
+    size = max(1, min(5000, int(size)))
     start = page * size
     slice_ = results[start: start + size]
     return {

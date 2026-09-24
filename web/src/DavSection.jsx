@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, applyClientFilters, containsWords, fmtDate, loadStaticGz, openDavLookup, staticUpdated, DAV_LOOKUP } from './api'
+import { api, applyClientFilters, containsWords, fmtDate, loadStaticGz, openDavLookup, sortByDateDesc, staticUpdated, DAV_LOOKUP } from './api'
 import {
   ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, FilterModal, HospitalGradeField,
   Icons, IngredientText, LoadingOverlay, Pagination, SearchSuggestBar, SuggestField, TableToolbar, UpdatedNote,
-  ViewModeSelect, applyColumnFilters, exportSelectionOrAll, fetchAllPages, serverFilters,
+  ViewModeSelect, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters,
   useSectionMeta, useSelection, useSimProgress, useTt20,
 } from './components'
 import { TagBadge, TagFilterDropdown, useTagFilterState } from './TagFilterDropdown'
 import { enrichRowTag } from './tagConfig'
 import { ingredientAllowedAtGrade } from './tt20'
 
-const PAGE_SIZE = 50
+const PAGE_SIZE_DEFAULT = 200
 
 const ALL_COLS = [
   { key: 'tagId', label: 'Trạng thái', filter: 'select', nowrap: true, width: 52, align: 'center' },
@@ -76,7 +76,7 @@ function filterStatic(items, f, tt20Index) {
     if (tags.length === 0) return []
     out = out.filter((r) => tags.includes(r.tagId))
   }
-  return out
+  return sortByDateDesc(out, ['ngayGiaHan', 'ngayCap', 'ngayHetHan'])
 }
 
 export default function DavSection({ localMode, embedded = false, filtersInModal = false }) {
@@ -88,6 +88,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const [columnFilters, setColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(false)
   const [filterModalOpen, setFilterModalOpen] = useState(false)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
   const [page, setPage] = useState(0)
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(false)
@@ -110,9 +111,11 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const filtersRef = useRef(filters)
   const columnFiltersRef = useRef(columnFilters)
   const selectedTagsRef = useRef(selectedTags)
+  const pageSizeRef = useRef(pageSize)
   filtersRef.current = filters
   columnFiltersRef.current = columnFilters
   selectedTagsRef.current = selectedTags
+  pageSizeRef.current = pageSize
 
   useEffect(() => {
     if (viewMode === 'compact') setVisible(COMPACT)
@@ -158,6 +161,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const search = useCallback(async (p = 0, cf, override = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
+    const size = resolvePageSize(pageSizeRef.current)
     setLoading(true)
     setErr('')
     const active = { ...mergedFilters(cf), ...(override || {}) }
@@ -167,17 +171,18 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
         const res = await api.davSearch({
           filters: active,
           page: needGrade ? 0 : p,
-          size: needGrade ? 400 : PAGE_SIZE,
+          size: needGrade ? Math.max(size, 400) : size,
         })
         if (stale()) return
         let items = (res.items || []).map(enrichRowTag)
         if (active.hangBenhVien) {
           items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, active.hangBenhVien))
+          items = sortByDateDesc(items, ['ngayGiaHan', 'ngayCap', 'ngayHetHan'])
           setData({
             total: items.length,
-            items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE),
+            items: items.slice(p * size, p * size + size),
             page: p,
-            size: PAGE_SIZE,
+            size,
           })
         } else {
           setData({ ...res, items })
@@ -194,7 +199,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
       }
       setStaticFallback({ updated: staticUpdated(dumped, ['ngayCap']), count: dumped.total || dumped.items.length })
       const items = filterStatic(dumped.items, active, tt20Index)
-      setData({ total: items.length, items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE), page: p, size: PAGE_SIZE })
+      setData({ total: items.length, items: items.slice(p * size, p * size + size), page: p, size })
       setPage(p)
     } catch (e) {
       if (!stale()) setErr(String(e.message || e))
@@ -206,7 +211,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     }
   }, [localMode, mergedFilters, tt20Index])
 
-  useEffect(() => { search(0) }, [selectedTags, filters.hangBenhVien]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { search(0) }, [selectedTags, filters.hangBenhVien, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toSuggest = useCallback((items) => (
     (items || []).slice(0, 4).map((r, i) => ({
@@ -308,6 +313,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.id != null ? `id:${r.id}` : `${r.soDangKy}|${page}|${i}`), [page])
+  const pageSizeNum = resolvePageSize(pageSize)
 
   const fetchAll = useCallback(async () => {
     if (localMode) {
@@ -449,7 +455,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           columns={cols}
           rows={rows}
           rowKey={rowKey}
-          startIndex={page * PAGE_SIZE}
+          startIndex={page * pageSizeNum}
           selected={sel.selected}
           onToggleRow={sel.toggle}
           onToggleAll={sel.setMany}
@@ -474,8 +480,16 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
             ),
           }}
         />
-        <Pagination page={page} size={PAGE_SIZE} total={data.total || 0} shown={rows.length} onPage={(p) => search(p)}
-          extra={sel.size > 0 && <span className="chip">{sel.size} dòng đã chọn</span>} />
+        <Pagination
+          page={page}
+          size={pageSizeNum}
+          total={data.total || 0}
+          shown={rows.length}
+          onPage={(p) => search(p)}
+          pageSize={pageSize}
+          onPageSize={(v) => { setPageSize(v); setPage(0) }}
+          extra={sel.size > 0 && <span className="chip">{sel.size} dòng đã chọn</span>}
+        />
       </div>
 
       <FilterModal

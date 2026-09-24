@@ -56,6 +56,35 @@ export function containsWords(haystack, needle) {
   return n.split(/\s+/).every((w) => h.includes(w))
 }
 
+/** Extract 20xx year from a date-ish string or nam field. */
+export function extractYear(row, keys = ['nam', 'congbo', 'tungay', 'tungay_hd', 'denngay_hd', 'ngayCap', 'ngayHetHan', 'published', 'created_date']) {
+  if (row?.nam != null && String(row.nam).trim() !== '') {
+    const y = String(row.nam).trim()
+    if (/^20\d{2}$/.test(y)) return y
+  }
+  for (const k of keys) {
+    const s = String(row?.[k] ?? '')
+    const m = s.match(/(20\d{2})/)
+    if (m) return m[1]
+  }
+  return ''
+}
+
+export function matchesYear(row, nam) {
+  const y = String(nam ?? '').trim()
+  if (!y) return true
+  return extractYear(row) === y
+}
+
+/** Sort rows by the first non-empty date-like field, newest first. */
+export function sortByDateDesc(items, keys) {
+  return [...(items || [])].sort((a, b) => {
+    const da = keys.map((k) => String(a?.[k] ?? '')).find((v) => v) || ''
+    const db = keys.map((k) => String(b?.[k] ?? '')).find((v) => v) || ''
+    return db.localeCompare(da)
+  })
+}
+
 /**
  * Apply simple client-side filters to an item list.
  * spec: [{ value, keys: ['field', ...] }] — each non-empty value must match at least one key.

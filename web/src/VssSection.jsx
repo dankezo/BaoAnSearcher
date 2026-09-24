@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, loadStaticGz, staticUpdated } from './api'
+import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, loadStaticGz, matchesYear, sortByDateDesc, staticUpdated } from './api'
 import {
   ColumnPicker, DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons,
   IngredientText, LoadingOverlay, Pagination, SuggestField, TableToolbar, UpdatedNote, ViewModeSelect,
-  applyColumnFilters, exportSelectionOrAll, fetchAllPages, serverFilters, useSectionMeta,
+  applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters, useSectionMeta,
   useSelection, useSimProgress, useTt20,
 } from './components'
 import { ingredientAllowedAtGrade } from './tt20'
 
-const PAGE_SIZE = 50
+const PAGE_SIZE_DEFAULT = 200
 
 const toNum = (v) => {
   if (v == null || v === '') return ''
@@ -83,13 +83,13 @@ function filterStatic(items, f, tt20Index) {
     { value: f.hoatchat, keys: ['hoatchat'] }, { value: f.sodk, keys: ['sodk'] }, { value: f.duongdung, keys: ['duongdung'] },
     { value: f.ma_tinh, keys: ['ma_tinh'] }, { value: f.nuocsx, keys: ['nuocsx'] },
   ])
-  if (f.nam) out = out.filter((r) => String(r.congbo || r.tungay || r.tungay_hd || '').startsWith(String(f.nam)))
+  if (f.nam) out = out.filter((r) => matchesYear(r, f.nam))
   if (f.tuNgay) out = out.filter((r) => String(r.tungay_hd || '') >= f.tuNgay)
   if (f.denNgay) out = out.filter((r) => String(r.denngay_hd || '') <= `${f.denNgay} 23:59:59`)
   if (f.hangBenhVien) {
     out = out.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, f.hangBenhVien))
   }
-  return out
+  return sortByDateDesc(out, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd', 'created_date'])
 }
 
 export default function VssSection({ localMode, embedded = false, filtersInModal = false }) {
@@ -101,6 +101,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const [columnFilters, setColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(false)
   const [filterModalOpen, setFilterModalOpen] = useState(false)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
   const [page, setPage] = useState(0)
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(false)
@@ -124,8 +125,10 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
   const filtersRef = useRef(filters)
   const columnFiltersRef = useRef(columnFilters)
+  const pageSizeRef = useRef(pageSize)
   filtersRef.current = filters
   columnFiltersRef.current = columnFilters
+  pageSizeRef.current = pageSize
 
   const mergedFilters = useCallback(
     (cf) => ({ ...filtersRef.current, ...serverFilters(cf ?? columnFiltersRef.current, SERVER_MAP), loai: 'Tân dược' }),
@@ -135,6 +138,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const search = useCallback(async (p = 0, cf, override = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
+    const size = resolvePageSize(pageSizeRef.current)
     setLoading(true)
     setErr('')
     const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
@@ -144,13 +148,14 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         const res = await api.vssSearch({
           filters: active,
           page: needGrade ? 0 : p,
-          size: needGrade ? 400 : PAGE_SIZE,
+          size: needGrade ? Math.max(size, 400) : size,
         })
         if (stale()) return
         let items = res.items || []
         if (active.hangBenhVien) {
           items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, active.hangBenhVien))
-          setData({ total: items.length, items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE) })
+          items = sortByDateDesc(items, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd'])
+          setData({ total: items.length, items: items.slice(p * size, p * size + size) })
         } else {
           setData(res)
         }
@@ -166,7 +171,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
       }
       setStaticFallback({ updated: staticUpdated(dumped, ['created_date', 'congbo']), count: dumped.total || dumped.items.length })
       const items = filterStatic(dumped.items, active, tt20Index)
-      setData({ total: items.length, items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE) })
+      setData({ total: items.length, items: items.slice(p * size, p * size + size) })
       setPage(p)
     } catch (e) {
       if (!stale()) setErr(String(e.message || e))
@@ -178,7 +183,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     }
   }, [localMode, mergedFilters, tt20Index])
 
-  useEffect(() => { search(0) }, [filters.hangBenhVien]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { search(0) }, [filters.hangBenhVien, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const setF = (k, v) => setFilters((f) => ({ ...f, [k]: v }))
   const setCF = (k, v) => setColumnFilters((f) => ({ ...f, [k]: v }))
@@ -221,6 +226,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => `${r.sodk}|${r.ma}|${r.ma_tinh}|${r.quyetdinh}|${r.stt ?? `${page}-${i}`}`, [page])
+  const pageSizeNum = resolvePageSize(pageSize)
 
   const fetchAll = useCallback(async () => {
     if (localMode) {
@@ -368,7 +374,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           columns={cols}
           rows={rows}
           rowKey={rowKey}
-          startIndex={page * PAGE_SIZE}
+          startIndex={page * pageSizeNum}
           selected={sel.selected}
           onToggleRow={sel.toggle}
           onToggleAll={sel.setMany}
@@ -382,8 +388,16 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           emptyText="Không có dữ liệu — import Excel hoặc crawl VSS trong mục Quản trị"
           minWidth={embedded ? 720 : 1300}
         />
-        <Pagination page={page} size={PAGE_SIZE} total={data.total || 0} shown={rows.length} onPage={(p) => search(p)}
-          extra={sel.size > 0 && <span className="chip">{sel.size} dòng đã chọn</span>} />
+        <Pagination
+          page={page}
+          size={pageSizeNum}
+          total={data.total || 0}
+          shown={rows.length}
+          onPage={(p) => search(p)}
+          pageSize={pageSize}
+          onPageSize={(v) => { setPageSize(v); setPage(0) }}
+          extra={sel.size > 0 && <span className="chip">{sel.size} dòng đã chọn</span>}
+        />
       </div>
 
       <FilterModal

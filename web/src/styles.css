@@ -505,6 +505,11 @@ table.data a.sdk { font-family: var(--mono); font-size: .92em; font-weight: 500;
 }
 .footer-bar strong { color: var(--ink); font-weight: 600; }
 .pager { display: inline-flex; gap: 4px; }
+.page-size {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px;
+}
+.page-size .select.sm { height: 28px; }
 
 /* ---------------------------------------------------------------------
    Loading overlay

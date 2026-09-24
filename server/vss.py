@@ -419,8 +419,14 @@ def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
             clauses.append(f"fold(coalesce({key},'')) LIKE ?")
             args.append(f"%{val}%")
     if filters.get("nam"):
-        clauses.append("nam = ?")
-        args.append(int(filters["nam"]))
+        try:
+            year = int(str(filters["nam"]).strip())
+        except (TypeError, ValueError):
+            year = None
+        if year:
+            y = str(year)
+            clauses.append("(nam = ? OR coalesce(tungay_hd,'') LIKE ? OR coalesce(denngay_hd,'') LIKE ?)")
+            args.extend([year, f"{y}%", f"{y}%"])
     if filters.get("tuNgay"):
         clauses.append("coalesce(tungay_hd,'') >= ?")
         args.append(filters["tuNgay"])
@@ -430,16 +436,25 @@ def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     page = max(0, int(page))
-    size = max(1, min(200, int(size)))
+    size = max(1, min(5000, int(size)))
     with connect() as con:
         total = con.execute("SELECT count(*) FROM bids" + where, args).fetchone()[0]
         rows = con.execute(
-            "SELECT raw FROM bids" + where + " ORDER BY id DESC LIMIT ? OFFSET ?",
+            "SELECT raw FROM bids" + where +
+            " ORDER BY coalesce(tungay_hd,'') DESC, id DESC LIMIT ? OFFSET ?",
             args + [size, page * size],
         ).fetchall()
     items = []
     for i, (raw,) in enumerate(rows):
         d = json.loads(raw)
         d["stt"] = page * size + i + 1
+        # Ensure nam is present for client year filters
+        if d.get("nam") is None:
+            for k in ("congbo", "tungay_hd", "tungay"):
+                s = str(d.get(k) or "")
+                m = re.match(r"(20\d{2})", s)
+                if m:
+                    d["nam"] = int(m.group(1))
+                    break
         items.append(d)
     return {"total": total, "page": page, "size": size, "items": items}

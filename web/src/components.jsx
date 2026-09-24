@@ -496,18 +496,37 @@ export function ViewModeSelect({ value, onChange }) {
 /* ------------------------------------------------------------------ */
 /* Pagination                                                           */
 /* ------------------------------------------------------------------ */
-export function Pagination({ page, size, total, onPage, shown, extra }) {
-  const pages = Math.max(1, Math.ceil((total || 0) / size))
+export function Pagination({ page, size, total, onPage, shown, extra, pageSize, onPageSize, pageSizeOptions = [50, 100, 200, 'full'] }) {
+  const effectiveSize = size > 0 ? size : Math.max(total || 1, 1)
+  const pages = Math.max(1, Math.ceil((total || 0) / effectiveSize))
   return (
     <div className="footer-bar">
       <span>
         <strong>{(total || 0).toLocaleString('vi-VN')}</strong> kết quả
-        {shown != null && shown !== Math.min(size, total - page * size) && (
+        {shown != null && shown !== Math.min(effectiveSize, Math.max(0, (total || 0) - page * effectiveSize)) && (
           <> · hiển thị <strong>{shown}</strong> sau lọc cột</>
         )}
       </span>
       {extra}
       <div className="spacer" />
+      {onPageSize && (
+        <label className="page-size">
+          <span className="muted">Số dòng</span>
+          <select
+            className="select sm"
+            value={pageSize === 'full' || pageSize === 0 ? 'full' : String(pageSize)}
+            onChange={(e) => {
+              const v = e.target.value
+              onPageSize(v === 'full' ? 'full' : Number(v))
+            }}
+            aria-label="Số dòng mỗi trang"
+          >
+            {pageSizeOptions.map((o) => (
+              <option key={String(o)} value={String(o)}>{o === 'full' || o === 0 ? 'Full' : o}</option>
+            ))}
+          </select>
+        </label>
+      )}
       <span className="muted">Trang {page + 1}/{pages.toLocaleString('vi-VN')}</span>
       <div className="pager">
         <button type="button" className="icon-btn" aria-label="Trang trước" disabled={page <= 0} onClick={() => onPage(page - 1)}>{I.chevL}</button>
@@ -515,6 +534,14 @@ export function Pagination({ page, size, total, onPage, shown, extra }) {
       </div>
     </div>
   )
+}
+
+/** Resolve UI page-size choice → numeric size for API (Full = large cap). */
+export const PAGE_SIZE_FULL = 5000
+export function resolvePageSize(choice) {
+  if (choice === 'full' || choice === 0) return PAGE_SIZE_FULL
+  const n = Number(choice)
+  return Number.isFinite(n) && n > 0 ? n : 200
 }
 
 /* ------------------------------------------------------------------ */

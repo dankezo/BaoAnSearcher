@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, loadStaticGz, staticUpdated } from './api'
+import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, loadStaticGz, sortByDateDesc, staticUpdated } from './api'
 import {
   DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, IngredientText, LoadingOverlay, Pagination,
-  SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, serverFilters,
-  useSectionMeta, useSelection, useSimProgress,
+  SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize,
+  serverFilters, useSectionMeta, useSelection, useSimProgress,
 } from './components'
 
-const PAGE_SIZE = 50
+const PAGE_SIZE_DEFAULT = 200
 const money = (v) => (typeof v === 'number' ? v.toLocaleString('vi-VN') : v ?? '')
 
 const PRICE_COLS = [
@@ -82,12 +82,13 @@ function filterStatic(items, f) {
   if ((f.q || '').trim()) {
     out = out.filter((r) => containsWords(Object.values(r).filter((v) => typeof v === 'string').join(' '), f.q))
   }
-  return applyClientFilters(out, [
+  out = applyClientFilters(out, [
     { value: f.name, keys: ['name'] }, { value: f.ingredient, keys: ['ingredient'] },
     { value: f.registration, keys: ['registration', 'registration_keys'] }, { value: f.manufacturer, keys: ['manufacturer'] },
     { value: f.province, keys: ['province'] }, { value: f.tender_no, keys: ['tender_no'] }, { value: f.buyer, keys: ['buyer'] },
     { value: f.winner, keys: ['winner'] }, { value: f.group_name, keys: ['group_name'] }, { value: f.medicine_type, keys: ['medicine_type'] },
   ])
+  return sortByDateDesc(out, ['published', 'close_date', '_collected_at', 'collected_at'])
 }
 
 export default function MscSection({ localMode, embedded = false, filtersInModal = false }) {
@@ -96,6 +97,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const [columnFilters, setColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(false)
   const [filterModalOpen, setFilterModalOpen] = useState(false)
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
   const [page, setPage] = useState(0)
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(false)
@@ -115,8 +117,10 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
 
   const filtersRef = useRef(filters)
   const columnFiltersRef = useRef(columnFilters)
+  const pageSizeRef = useRef(pageSize)
   filtersRef.current = filters
   columnFiltersRef.current = columnFilters
+  pageSizeRef.current = pageSize
 
   const mergedFilters = useCallback(
     (cf) => ({ ...filtersRef.current, ...serverFilters(cf ?? columnFiltersRef.current, SERVER_MAP) }),
@@ -126,12 +130,13 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const search = useCallback(async (p = 0, cf, override = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
+    const size = resolvePageSize(pageSizeRef.current)
     setLoading(true)
     setErr('')
     const active = { ...mergedFilters(cf), ...(override || {}) }
     try {
       if (localMode) {
-        const res = await api.mscSearch({ kind, filters: active, page: p, size: PAGE_SIZE })
+        const res = await api.mscSearch({ kind, filters: active, page: p, size })
         if (stale()) return
         setData(res)
         setPage(p)
@@ -146,7 +151,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
       }
       setStaticFallback({ updated: staticUpdated(dumped), count: dumped.total || dumped.items.length })
       const items = filterStatic(dumped.items, active)
-      setData({ total: items.length, items: items.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE) })
+      setData({ total: items.length, items: items.slice(p * size, p * size + size) })
       setPage(p)
     } catch (e) {
       if (!stale()) setErr(String(e.message || e))
@@ -162,7 +167,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     sel.clear()
     setColumnFilters({})
     search(0, {})
-  }, [kind]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [kind, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const setF = (k, v) => setFilters((f) => ({ ...f, [k]: v }))
   const setCF = (k, v) => setColumnFilters((f) => ({ ...f, [k]: v }))
@@ -200,6 +205,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.source_id ? `${kind}:${r.source_id}` : `${kind}:${r.tender_no}|${page}|${i}`), [kind, page])
+  const pageSizeNum = resolvePageSize(pageSize)
 
   const fetchAll = useCallback(async () => {
     if (localMode) {
@@ -301,7 +307,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           columns={cols}
           rows={rows}
           rowKey={rowKey}
-          startIndex={page * PAGE_SIZE}
+          startIndex={page * pageSizeNum}
           selected={sel.selected}
           onToggleRow={sel.toggle}
           onToggleAll={sel.setMany}
@@ -320,8 +326,16 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
             ) : null,
           }}
         />
-        <Pagination page={page} size={PAGE_SIZE} total={data.total || 0} shown={rows.length} onPage={(p) => search(p)}
-          extra={sel.size > 0 && <span className="chip">{sel.size} dòng đã chọn</span>} />
+        <Pagination
+          page={page}
+          size={pageSizeNum}
+          total={data.total || 0}
+          shown={rows.length}
+          onPage={(p) => search(p)}
+          pageSize={pageSize}
+          onPageSize={(v) => { setPageSize(v); setPage(0) }}
+          extra={sel.size > 0 && <span className="chip">{sel.size} dòng đã chọn</span>}
+        />
       </div>
 
       <FilterModal open={filtersInModal && filterModalOpen} onClose={() => setFilterModalOpen(false)} onApply={() => runSearch()}>
