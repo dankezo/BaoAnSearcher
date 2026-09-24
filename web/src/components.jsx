@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fold, fmtDateTime, getStaticStatus, getStatus, relativeTime, sectionMeta } from './api'
+import { cloudMeta, supabaseConfigured } from './supabaseCloud'
 import { exportXlsx } from './export'
 import { HOSPITAL_GRADES } from './tt20'
 
@@ -564,8 +565,17 @@ export function useSectionMeta(section, localMode, fallback, refreshKey) {
   useEffect(() => {
     let alive = true
     const run = async () => {
-      const st = localMode ? await getStatus(true) : await getStaticStatus()
-      const m = sectionMeta(st, section)
+      let m = { updated: null, count: null }
+      if (localMode) {
+        const st = await getStatus(true)
+        m = sectionMeta(st, section)
+      } else if (supabaseConfigured) {
+        const cm = await cloudMeta(section)
+        if (cm) m = { updated: cm.updated || null, count: cm.count ?? null }
+      } else {
+        const st = await getStaticStatus()
+        m = sectionMeta(st, section)
+      }
       if (!alive) return
       setMeta({
         updated: m.updated || fallback?.updated || null,

@@ -213,6 +213,72 @@ def vss_import(body: CrawlBody):
         raise HTTPException(500, str(e))
 
 
+class SyncBody(BaseModel):
+    only: Optional[str] = "vss,dav,msc"
+
+
+_sync_lock = threading.Lock()
+_sync_state = {"state": "idle", "message": "", "ok": True}
+
+
+@app.get("/api/supabase/sync/status")
+def supabase_sync_status():
+    return dict(_sync_state)
+
+
+@app.post("/api/supabase/sync")
+def supabase_sync(body: SyncBody):
+    """Run scripts/sync_to_supabase.py in a background thread (needs .env service role)."""
+    import os
+    import subprocess
+    import sys
+
+    if not os.environ.get("SUPABASE_URL") or not os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
+        try:
+            from dotenv import load_dotenv
+            root = Path(__file__).resolve().parents[1]
+            load_dotenv(root / ".env")
+        except Exception:
+            pass
+    if not os.environ.get("SUPABASE_URL") or not os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
+        raise HTTPException(
+            400,
+            "Thiếu SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY trong .env — xem .env.example và supabase/README.md",
+        )
+    if not _sync_lock.acquire(blocking=False):
+        return {"ok": False, "message": "Sync đang chạy."}
+
+    only = (body.only or "vss,dav,msc").strip()
+
+    def _run():
+        global _sync_state
+        _sync_state = {"state": "running", "message": f"Sync {only}…", "ok": True}
+        try:
+            root = Path(__file__).resolve().parents[1]
+            proc = subprocess.run(
+                [sys.executable, str(root / "scripts" / "sync_to_supabase.py"), "--only", only],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            out = (proc.stdout or "")[-2000:]
+            err = (proc.stderr or "")[-1000:]
+            if proc.returncode != 0:
+                _sync_state = {"state": "error", "message": err or out or "sync failed", "ok": False}
+            else:
+                last = out.strip().splitlines()[-1] if out.strip() else "Sync OK"
+                _sync_state = {"state": "idle", "message": last, "ok": True}
+        except Exception as e:
+            _sync_state = {"state": "error", "message": str(e), "ok": False}
+        finally:
+            _sync_lock.release()
+
+    threading.Thread(target=_run, daemon=True, name="supabase-sync").start()
+    return {"ok": True, "message": f"Đã bắt đầu sync ({only}). Theo dõi /api/supabase/sync/status."}
+
+
 # Serve built SPA if present
 DIST = Path(__file__).resolve().parents[1] / "web" / "dist"
 if DIST.exists():

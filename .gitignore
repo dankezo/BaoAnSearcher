@@ -36,6 +36,10 @@ __pycache__/
 .venv/
 venv/
 .env
+web/.env
+web/.env.local
+!.env.example
+!web/.env.example
 *.egg-info/
 .pytest_cache/
 

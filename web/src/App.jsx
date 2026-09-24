@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
 import { Tt20Provider } from './components'
+import { supabaseConfigured } from './supabaseCloud'
 import DavSection from './DavSection'
 import MscSection from './MscSection'
 import VssSection from './VssSection'
@@ -145,9 +146,24 @@ export default function App() {
               Đa khung
             </button>
           </nav>
-          <div className={`mode-pill ${localMode ? 'local' : 'static'}`} title={localMode ? 'Kết nối API local 127.0.0.1:8787' : 'Đọc dữ liệu export tĩnh'}>
+          <div
+            className={`mode-pill ${localMode ? 'local' : supabaseConfigured ? 'cloud' : 'static'}`}
+            title={
+              localMode
+                ? 'Kết nối API local 127.0.0.1:8787'
+                : supabaseConfigured
+                  ? 'GitHub Pages → Supabase (đủ data, query theo trang)'
+                  : 'Thiếu VITE_SUPABASE_* — cấu hình rồi build lại'
+            }
+          >
             <span className="dot" />
-            {!checked ? 'Đang kiểm tra…' : localMode ? 'Local API' : 'GitHub Pages'}
+            {!checked
+              ? 'Đang kiểm tra…'
+              : localMode
+                ? 'Local API'
+                : supabaseConfigured
+                  ? 'Cloud · Supabase'
+                  : 'Chưa cấu hình Cloud'}
           </div>
         </header>
         <main className={`page${multi ? ' page-split' : ''}`}>

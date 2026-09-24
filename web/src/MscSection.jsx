@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, loadStaticGz, sortByDateDesc, staticUpdated } from './api'
+import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, sortByDateDesc } from './api'
+import { cloudMeta, cloudMscSearch, supabaseConfigured } from './supabaseCloud'
 import {
   DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, IngredientText, LoadingOverlay, Pagination,
   SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize,
@@ -135,24 +136,21 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     setErr('')
     const active = { ...mergedFilters(cf), ...(override || {}) }
     try {
-      if (localMode) {
-        const res = await api.mscSearch({ kind, filters: active, page: p, size })
+      if (localMode || supabaseConfigured) {
+        const res = localMode
+          ? await api.mscSearch({ kind, filters: active, page: p, size })
+          : await cloudMscSearch({ kind, filters: active, page: p, size })
         if (stale()) return
         setData(res)
+        if (!localMode) {
+          const m = await cloudMeta('msc')
+          if (m) setStaticFallback({ updated: m.updated, count: m.count })
+        }
         setPage(p)
         return
       }
-      const dumped = await loadStaticGz(staticName)
-      if (stale()) return
-      if (!dumped?.items) {
-        setErr('Chưa có MSC export trên Pages.')
-        setData({ total: 0, items: [] })
-        return
-      }
-      setStaticFallback({ updated: staticUpdated(dumped), count: dumped.total || dumped.items.length })
-      const items = filterStatic(dumped.items, active)
-      setData({ total: items.length, items: items.slice(p * size, p * size + size) })
-      setPage(p)
+      setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
+      setData({ total: 0, items: [] })
     } catch (e) {
       if (!stale()) setErr(String(e.message || e))
     } finally {
@@ -183,12 +181,11 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     if (needle.length < 1) return []
     try {
       let items = []
-      if (localMode) {
-        const res = await api.mscSearch({ kind, filters: { ...mergedFilters(), [fieldKey]: needle, q: '' }, page: 0, size: 30 })
+      if (localMode || supabaseConfigured) {
+        const res = localMode
+          ? await api.mscSearch({ kind, filters: { ...mergedFilters(), [fieldKey]: needle, q: '' }, page: 0, size: 30 })
+          : await cloudMscSearch({ kind, filters: { ...mergedFilters(), [fieldKey]: needle, q: '' }, page: 0, size: 30 })
         items = res?.items || []
-      } else {
-        const dumped = await loadStaticGz(staticName)
-        items = filterStatic(dumped?.items || [], { ...mergedFilters(), [fieldKey]: needle, q: '' }).slice(0, 40)
       }
       const seen = new Set()
       const out = []
@@ -208,11 +205,11 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const pageSizeNum = resolvePageSize(pageSize)
 
   const fetchAll = useCallback(async () => {
-    if (localMode) {
-      return fetchAllPages((p, size) => api.mscSearch({ kind, filters: mergedFilters(), page: p, size }), { onProgress: setExportPct })
-    }
-    const dumped = await loadStaticGz(staticName)
-    return filterStatic(dumped?.items || [], mergedFilters())
+    if (!localMode && !supabaseConfigured) return []
+    const searchFn = localMode
+      ? (p, size) => api.mscSearch({ kind, filters: mergedFilters(), page: p, size })
+      : (p, size) => cloudMscSearch({ kind, filters: mergedFilters(), page: p, size })
+    return fetchAllPages(searchFn, { onProgress: setExportPct })
   }, [localMode, kind, mergedFilters, staticName])
 
   const doExport = async () => {

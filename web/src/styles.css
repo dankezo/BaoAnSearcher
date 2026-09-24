@@ -117,6 +117,7 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
 }
 .mode-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .mode-pill.local .dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.mode-pill.cloud .dot { background: var(--accent, #0b63b7); box-shadow: 0 0 0 3px var(--accent-soft, rgba(11,99,183,.15)); }
 .mode-pill.static .dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
 
 .page {

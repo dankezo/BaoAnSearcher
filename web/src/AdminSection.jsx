@@ -118,13 +118,13 @@ export default function AdminSection({ localMode }) {
           <div>
             <span className="kicker">Quản trị</span>
             <h1>Quản trị dữ liệu</h1>
-            <p>Phần crawl chỉ chạy trên máy local (API 127.0.0.1:8787). Trên GitHub Pages chỉ xem dữ liệu đã export.</p>
+            <p>Crawl chỉ chạy trên máy local. GitHub Pages đọc data qua Supabase (đủ 2024→nay, không tải cả kho).</p>
           </div>
         </header>
         <div className="panel pad">
           <div className="empty-state">
-            <strong>Đang ở chế độ tĩnh (GitHub Pages).</strong>
-            <span className="muted">Chạy <code>MO_WEB.cmd</code> hoặc <code>uvicorn server.main:app --port 8787</code> để mở bảng điều khiển crawl.</span>
+            <strong>Đang ở chế độ Cloud / Pages.</strong>
+            <span className="muted">Chạy <code>MO_WEB.cmd</code> để crawl. Sau crawl: <code>python scripts/sync_to_supabase.py</code> (xem <code>supabase/README.md</code>).</span>
           </div>
         </div>
       </div>
@@ -181,6 +181,28 @@ export default function AdminSection({ localMode }) {
             Import Excel mặc định
           </button>
         </StatusCard>
+      </div>
+
+      <div className="panel pad" style={{ marginTop: 16 }}>
+        <div className="toolbar-title" style={{ marginBottom: 8 }}>
+          <span className="kicker">Supabase</span>
+          <h2>Đồng bộ lên Cloud (Pages)</h2>
+        </div>
+        <p className="muted" style={{ margin: '0 0 10px' }}>
+          Sau khi crawl xong, đẩy SQLite local → Supabase để sếp tra trên GitHub Pages (đủ VSS 2024→nay).
+        </p>
+        <div className="admin-actions">
+          <button type="button" className="btn" disabled={busy} onClick={run(() => api.supabaseSync({ only: 'vss,dav,msc' }))}>
+            Sync VSS + DAV + MSC
+          </button>
+          <button type="button" className="btn secondary" disabled={busy} onClick={run(() => api.supabaseSync({ only: 'vss' }))}>
+            Sync chỉ VSS
+          </button>
+        </div>
+        <p className="muted small" style={{ marginTop: 8 }}>
+          Cần <code>SUPABASE_URL</code> + <code>SUPABASE_SERVICE_ROLE_KEY</code> trong <code>.env</code>. Hoặc chạy tay:{' '}
+          <code>python scripts/sync_to_supabase.py</code>
+        </p>
       </div>
 
       <div className="panel">

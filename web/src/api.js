@@ -55,6 +55,7 @@ export const api = {
   vssCrawl: (body) => request('/api/vss/crawl', { method: 'POST', body: JSON.stringify(body || {}) }),
   vssCrawlStop: () => request('/api/vss/crawl/stop', { method: 'POST', body: '{}' }),
   vssImport: (body) => request('/api/vss/import', { method: 'POST', body: JSON.stringify(body || {}) }),
+  supabaseSync: (body) => request('/api/supabase/sync', { method: 'POST', body: JSON.stringify(body || {}), timeoutMs: 600000 }),
 }
 
 /* ------------------------------------------------------------------ */

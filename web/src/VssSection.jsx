@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, loadStaticGz, matchesYear, sortByDateDesc, staticUpdated } from './api'
+import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, matchesYear, sortByDateDesc } from './api'
+import { cloudMeta, cloudVssSearch, supabaseConfigured } from './supabaseCloud'
 import {
   ColumnPicker, DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons,
   IngredientText, LoadingOverlay, Pagination, SuggestField, TableToolbar, UpdatedNote, ViewModeSelect,
@@ -145,13 +146,20 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     setInfoNote('')
     const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
     try {
-      if (localMode) {
+      const useRemote = localMode || supabaseConfigured
+      if (useRemote) {
         const needGrade = !!active.hangBenhVien
-        const res = await api.vssSearch({
-          filters: active,
-          page: needGrade ? 0 : p,
-          size: needGrade ? Math.max(size, 400) : size,
-        })
+        const res = localMode
+          ? await api.vssSearch({
+              filters: active,
+              page: needGrade ? 0 : p,
+              size: needGrade ? Math.max(size, 400) : size,
+            })
+          : await cloudVssSearch({
+              filters: active,
+              page: needGrade ? 0 : p,
+              size: needGrade ? Math.max(size, 400) : size,
+            })
         if (stale()) return
         let items = res.items || []
         if (active.hangBenhVien) {
@@ -161,24 +169,15 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         } else {
           setData(res)
         }
+        if (!localMode) {
+          const m = await cloudMeta('vss')
+          if (m) setStaticFallback({ updated: m.updated, count: m.count })
+        }
         setPage(p)
         return
       }
-      const dumped = await loadStaticGz('vss')
-      if (stale()) return
-      if (!dumped?.items) {
-        setErr('Chưa có VSS export trên Pages.')
-        setData({ total: 0, items: [] })
-        return
-      }
-      setStaticFallback({
-        updated: staticUpdated(dumped, ['created_date', 'congbo']),
-        count: dumped.total || dumped.items.length,
-      })
-      if (dumped.truncated && dumped.note) setInfoNote(dumped.note)
-      const items = filterStatic(dumped.items, active, tt20Index)
-      setData({ total: items.length, items: items.slice(p * size, p * size + size) })
-      setPage(p)
+      setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
+      setData({ total: 0, items: [] })
     } catch (e) {
       if (!stale()) setErr(String(e.message || e))
     } finally {
@@ -206,12 +205,11 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     if (needle.length < 1) return []
     try {
       let items = []
-      if (localMode) {
-        const res = await api.vssSearch({ filters: { ...mergedFilters(), [fieldKey]: needle, q: '' }, page: 0, size: 30 })
+      if (localMode || supabaseConfigured) {
+        const res = localMode
+          ? await api.vssSearch({ filters: { ...mergedFilters(), [fieldKey]: needle, q: '' }, page: 0, size: 30 })
+          : await cloudVssSearch({ filters: { ...mergedFilters(), [fieldKey]: needle, q: '' }, page: 0, size: 30 })
         items = res?.items || []
-      } else {
-        const dumped = await loadStaticGz('vss')
-        items = filterStatic(dumped?.items || [], { ...mergedFilters(), [fieldKey]: needle, q: '' }, tt20Index).slice(0, 40)
       }
       const seen = new Set()
       const out = []
@@ -235,15 +233,15 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const pageSizeNum = resolvePageSize(pageSize)
 
   const fetchAll = useCallback(async () => {
-    if (localMode) {
-      const all = await fetchAllPages((p, size) => api.vssSearch({ filters: mergedFilters(), page: p, size }), { onProgress: setExportPct })
-      if (filtersRef.current.hangBenhVien) {
-        return all.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, filtersRef.current.hangBenhVien))
-      }
-      return all
+    const searchFn = localMode
+      ? (p, size) => api.vssSearch({ filters: mergedFilters(), page: p, size })
+      : (p, size) => cloudVssSearch({ filters: mergedFilters(), page: p, size })
+    if (!localMode && !supabaseConfigured) return []
+    const all = await fetchAllPages(searchFn, { onProgress: setExportPct })
+    if (filtersRef.current.hangBenhVien) {
+      return all.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, filtersRef.current.hangBenhVien))
     }
-    const dumped = await loadStaticGz('vss')
-    return filterStatic(dumped?.items || [], mergedFilters(), tt20Index)
+    return all
   }, [localMode, mergedFilters, tt20Index])
 
   const doExport = async () => {

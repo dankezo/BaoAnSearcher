@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, applyClientFilters, containsWords, fmtDate, loadStaticGz, openDavLookup, sortByDateDesc, staticUpdated, DAV_LOOKUP } from './api'
+import { api, applyClientFilters, containsWords, fmtDate, openDavLookup, sortByDateDesc, DAV_LOOKUP } from './api'
+import { cloudDavSearch, cloudMeta, supabaseConfigured } from './supabaseCloud'
 import {
   ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, FilterModal, HospitalGradeField,
   Icons, IngredientText, LoadingOverlay, Pagination, SearchSuggestBar, SuggestField, TableToolbar, UpdatedNote,
@@ -166,13 +167,19 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     setErr('')
     const active = { ...mergedFilters(cf), ...(override || {}) }
     try {
-      if (localMode) {
+      if (localMode || supabaseConfigured) {
         const needGrade = !!active.hangBenhVien
-        const res = await api.davSearch({
-          filters: active,
-          page: needGrade ? 0 : p,
-          size: needGrade ? Math.max(size, 400) : size,
-        })
+        const res = localMode
+          ? await api.davSearch({
+              filters: active,
+              page: needGrade ? 0 : p,
+              size: needGrade ? Math.max(size, 400) : size,
+            })
+          : await cloudDavSearch({
+              filters: active,
+              page: needGrade ? 0 : p,
+              size: needGrade ? Math.max(size, 400) : size,
+            })
         if (stale()) return
         let items = (res.items || []).map(enrichRowTag)
         if (active.hangBenhVien) {
@@ -187,20 +194,15 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
         } else {
           setData({ ...res, items })
         }
+        if (!localMode) {
+          const m = await cloudMeta('dav')
+          if (m) setStaticFallback({ updated: m.updated, count: m.count })
+        }
         setPage(p)
         return
       }
-      const dumped = await loadStaticGz('dav')
-      if (stale()) return
-      if (!dumped?.items) {
-        setErr('Chưa có data export. Chạy local rồi python scripts/export_for_pages.py')
-        setData({ total: 0, items: [] })
-        return
-      }
-      setStaticFallback({ updated: staticUpdated(dumped, ['ngayCap']), count: dumped.total || dumped.items.length })
-      const items = filterStatic(dumped.items, active, tt20Index)
-      setData({ total: items.length, items: items.slice(p * size, p * size + size), page: p, size })
-      setPage(p)
+      setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
+      setData({ total: 0, items: [] })
     } catch (e) {
       if (!stale()) setErr(String(e.message || e))
     } finally {
@@ -236,16 +238,19 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
       setSuggesting(true)
       try {
         let items = []
-        if (localMode) {
-          const res = await api.davSearch({
-            filters: { ...mergedFilters(), q, tenThuoc: '', soDangKy: '', hoatChat: '' },
-            page: 0,
-            size: 4,
-          })
+        if (localMode || supabaseConfigured) {
+          const res = localMode
+            ? await api.davSearch({
+                filters: { ...mergedFilters(), q, tenThuoc: '', soDangKy: '', hoatChat: '' },
+                page: 0,
+                size: 4,
+              })
+            : await cloudDavSearch({
+                filters: { ...mergedFilters(), q, tenThuoc: '', soDangKy: '', hoatChat: '' },
+                page: 0,
+                size: 4,
+              })
           items = res?.items || []
-        } else {
-          const dumped = await loadStaticGz('dav')
-          items = filterStatic(dumped?.items || [], { ...filters, q, tags: selectedTags }, tt20Index).slice(0, 4)
         }
         if (id === suggestSeq.current) setSuggests(toSuggest(items))
       } catch {
@@ -272,20 +277,19 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     if (needle.length < 1) return []
     try {
       let items = []
-      if (localMode) {
-        const res = await api.davSearch({
-          filters: { ...mergedFilters(), [fieldKey]: needle, q: '' },
-          page: 0,
-          size: 30,
-        })
+      if (localMode || supabaseConfigured) {
+        const res = localMode
+          ? await api.davSearch({
+              filters: { ...mergedFilters(), [fieldKey]: needle, q: '' },
+              page: 0,
+              size: 30,
+            })
+          : await cloudDavSearch({
+              filters: { ...mergedFilters(), [fieldKey]: needle, q: '' },
+              page: 0,
+              size: 30,
+            })
         items = res?.items || []
-      } else {
-        const dumped = await loadStaticGz('dav')
-        items = filterStatic(
-          dumped?.items || [],
-          { ...mergedFilters(), [fieldKey]: needle, q: '' },
-          tt20Index,
-        ).slice(0, 40)
       }
       const seen = new Set()
       const out = []
@@ -316,15 +320,15 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const pageSizeNum = resolvePageSize(pageSize)
 
   const fetchAll = useCallback(async () => {
-    if (localMode) {
-      const all = await fetchAllPages((p, size) => api.davSearch({ filters: mergedFilters(), page: p, size }), { onProgress: setExportPct })
-      if (filters.hangBenhVien) {
-        return all.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, filters.hangBenhVien))
-      }
-      return all
+    if (!localMode && !supabaseConfigured) return []
+    const searchFn = localMode
+      ? (p, size) => api.davSearch({ filters: mergedFilters(), page: p, size })
+      : (p, size) => cloudDavSearch({ filters: mergedFilters(), page: p, size })
+    const all = await fetchAllPages(searchFn, { onProgress: setExportPct })
+    if (filters.hangBenhVien) {
+      return all.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, filters.hangBenhVien))
     }
-    const dumped = await loadStaticGz('dav')
-    return filterStatic(dumped?.items || [], { ...filters, tags: selectedTags }, tt20Index)
+    return all
   }, [localMode, mergedFilters, filters, selectedTags, tt20Index])
 
   const doExport = async () => {

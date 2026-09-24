@@ -37,16 +37,17 @@ Mở http://127.0.0.1:8787
 
 Import Excel BHYT: đặt file hoặc dùng nút **Import Excel mặc định** (đường dẫn Desktop HAR folder).
 
-## Export & GitHub Pages
+## GitHub Pages + Supabase (đủ data, không lag)
 
-1. Cập nhật data local (crawl trong tab Quản trị).
-2. `python scripts/export_for_pages.py 5000`
-3. `cd web && npm run build` rồi copy `web/dist` → `docs/` (hoặc chạy lại build + copy).
-4. Commit + push nhánh `master`.
-5. GitHub → **Settings → Pages → Deploy from a branch** → `master` / `/docs`.
-6. Link dạng: `https://dankezo.github.io/BaoAnSearcher/`
+Pages **không** nhúng JSON.gz lớn. Search gọi Postgres qua Supabase (VSS đủ từ 2024→nay).
 
-Pages chỉ xem data đã export; crawl chạy trên máy bạn.
+1. Tạo project Supabase → chạy SQL [`supabase/migrations/001_init.sql`](supabase/migrations/001_init.sql) (xem [`supabase/README.md`](supabase/README.md)).
+2. Root `.env` (từ [`.env.example`](.env.example)): `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
+3. `web/.env.local` (từ [`web/.env.example`](web/.env.example)): `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`.
+4. Crawl local (tab Quản trị) → `python scripts/sync_to_supabase.py` (hoặc nút Sync trong Admin).
+5. `python scripts/export_all_for_pages.py` (build SPA nhẹ) → commit + push `master` / `/docs`.
+
+Local API (`MO_WEB`) vẫn dùng SQLite đầy đủ offline.
 
 ## Danh mục 93
 
@@ -54,5 +55,5 @@ Nhúng tại [`web/public/data/dm93.json`](web/public/data/dm93.json) theo Phụ
 
 ## Ghi chú
 
-- Pages **không** chạy crawl / không lưu mật khẩu.
+- Pages **không** chạy crawl / không lưu mật khẩu / **không** commit `service_role`.
 - Mật khẩu MSC lưu local ngoài git, dùng điền sẵn khi mở browser crawl.
