@@ -43,6 +43,7 @@ class CrawlBody(BaseModel):
     excelPath: Optional[str] = None
     refresh: bool = False
     catchup: bool = False
+    saveJson: bool = False
 
 
 @app.get("/api/health")
@@ -179,7 +180,14 @@ def vss_crawl(body: CrawlBody):
     days = body.days
     if body.catchup and (not days or days < 30):
         days = 90
-    return vss.crawl_vss(days=days, loai=body.loai, catchup=body.catchup)
+    return vss.crawl_vss(
+        days=days,
+        loai=body.loai,
+        catchup=body.catchup,
+        from_date=body.dateFrom,
+        to_date=body.dateTo,
+        save_json=body.saveJson,
+    )
 
 
 @app.post("/api/vss/crawl/stop")

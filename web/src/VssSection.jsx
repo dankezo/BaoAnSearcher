@@ -8,7 +8,7 @@ import {
 } from './components'
 import { ingredientAllowedAtGrade } from './tt20'
 
-const PAGE_SIZE_DEFAULT = 200
+const PAGE_SIZE_DEFAULT = 100
 
 const toNum = (v) => {
   if (v == null || v === '') return ''
@@ -108,6 +108,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const [exporting, setExporting] = useState(false)
   const [exportPct, setExportPct] = useState(0)
   const [err, setErr] = useState('')
+  const [infoNote, setInfoNote] = useState('')
   const [detail, setDetail] = useState(null)
   const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -141,6 +142,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     const size = resolvePageSize(pageSizeRef.current)
     setLoading(true)
     setErr('')
+    setInfoNote('')
     const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
     try {
       if (localMode) {
@@ -169,7 +171,11 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         setData({ total: 0, items: [] })
         return
       }
-      setStaticFallback({ updated: staticUpdated(dumped, ['created_date', 'congbo']), count: dumped.total || dumped.items.length })
+      setStaticFallback({
+        updated: staticUpdated(dumped, ['created_date', 'congbo']),
+        count: dumped.total || dumped.items.length,
+      })
+      if (dumped.truncated && dumped.note) setInfoNote(dumped.note)
       const items = filterStatic(dumped.items, active, tt20Index)
       setData({ total: items.length, items: items.slice(p * size, p * size + size) })
       setPage(p)
@@ -374,6 +380,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         </TableToolbar>
 
         <ColumnPicker allColumns={ALL_COLS} visible={visible} onChange={setVisible} open={colPicker} onClose={() => setColPicker(false)} />
+        {infoNote && <div className="info-note">{infoNote}</div>}
         <ErrorNote>{err}</ErrorNote>
 
         <DataTable

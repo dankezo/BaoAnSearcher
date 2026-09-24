@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
-"""VSS BHYT winning-bid drugs: SQLite store, Excel import, HTML crawl."""
+"""VSS BHYT winning-bid drugs: SQLite store, Excel import, export crawl."""
 from __future__ import annotations
 import json
 import re
 import sqlite3
 import threading
 import time
-import urllib.parse
-import urllib.request
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
@@ -18,7 +16,7 @@ from .common import (
 )
 
 # DNS for quanlythuocv1.vss.gov.vn intermittently fails on some Windows resolvers;
-# HTTPS by IP + Host header still works (from HAR / live probe).
+# HTTPS by IP + Host header still works.
 VSS_HOST = "quanlythuocv1.vss.gov.vn"
 VSS_IP_FALLBACK = "103.57.114.162"
 
@@ -363,132 +361,389 @@ def parse_chi_tiet_html(html: str) -> list[dict]:
     return out
 
 
-VSS_HOST = "quanlythuocv1.vss.gov.vn"
-VSS_IP_FALLBACK = "103.57.114.162"
+VSS_EXPORT_PATH = "/kqdt/export"
 _vss_prefer_ip = False
 
+# Vietnamese / alternate headers → internal COLUMNS keys
+HEADER_ALIASES = {
+    "ten_hoat_chat": "hoatchat", "hoat_chat": "hoatchat", "ten_thuoc": "ten",
+    "so_dk": "sodk", "so_dang_ky": "sodk", "ham_luong": "hamluong",
+    "duong_dung": "duongdung", "don_vi_tinh": "donvitinh", "dvt": "donvitinh",
+    "so_luong": "soluong", "don_gia": "gia", "thanh_tien": "thanhtien",
+    "nhom_thau": "nhomthau", "nha_san_xuat": "nhasx", "nha_sx": "nhasx",
+    "nuoc_san_xuat": "nuocsx", "nuoc_sx": "nuocsx",
+    "tu_ngay": "tungay_hd", "tu_ngay_hd": "tungay_hd",
+    "den_ngay": "denngay_hd", "den_ngay_hd": "denngay_hd",
+    "loai_thau": "loai_thau", "dang_bao_che": "dangbaoche",
+    "ten_nha_thau": "tennhathau", "ma_tinh": "ma_tinh", "ma_cskcb": "ma_cskcb",
+}
 
-def _http_get(url: str, cookie: str = "", timeout: int = 45) -> str:
-    """GET HTML; on DNS failure retry via VSS IP with Host header."""
-    global _vss_prefer_ip
-    import ssl
-    from urllib.parse import urlparse
 
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "text/html",
-        **({"Cookie": cookie} if cookie else {}),
+def _snake_header(text: str) -> str:
+    raw = fold(str(text or "")).strip().replace(" ", "_").replace("-", "_")
+    raw = re.sub(r"_+", "_", raw).strip("_")
+    return HEADER_ALIASES.get(raw, raw if raw in COLUMNS else HEADER_ALIASES.get(raw, raw))
+
+
+def _clean_cell(val) -> str:
+    if val is None:
+        return ""
+    try:
+        import math
+        if isinstance(val, float) and math.isnan(val):
+            return ""
+    except Exception:
+        pass
+    s = str(val).strip()
+    if s.lower() in ("nan", "none", "null", "nat"):
+        return ""
+    return s
+
+
+def _browser_headers(cookie: str = "", host: str | None = None) -> dict:
+    h = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/vnd.ms-excel,application/octet-stream,*/*",
+        "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
+        "Referer": f"https://{VSS_HOST}/kqdt/chiTiet",
     }
+    if host:
+        h["Host"] = host
+    if cookie:
+        h["Cookie"] = cookie
+    return h
 
-    def via_ip() -> str:
-        parsed = urlparse(url)
-        ip_url = f"https://{VSS_IP_FALLBACK}{parsed.path}"
-        if parsed.query:
-            ip_url += f"?{parsed.query}"
-        headers2 = {**headers, "Host": VSS_HOST}
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request(ip_url, headers=headers2)
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            return resp.read().decode("utf-8", errors="replace")
 
-    if _vss_prefer_ip and VSS_HOST in url:
-        return via_ip()
+def download_kqdt_export(ngay: str, loai: int = 1, cookie: str = "", timeout: int = 60, retries: int = 3) -> bytes:
+    """One request: export all bids for a announcement day as SpreadsheetML .xls."""
+    global _vss_prefer_ip
+    try:
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except ImportError as e:
+        raise RuntimeError("Cần cài: pip install requests") from e
+
+    params = {"loai": str(loai), "ngaycongbo": ngay}
+    last_err: Exception | None = None
+
+    for attempt in range(1, retries + 1):
+        try:
+            if _vss_prefer_ip:
+                url = f"https://{VSS_IP_FALLBACK}{VSS_EXPORT_PATH}"
+                headers = _browser_headers(cookie, host=VSS_HOST)
+                verify = False
+            else:
+                url = f"https://{VSS_HOST}{VSS_EXPORT_PATH}"
+                headers = _browser_headers(cookie)
+                verify = True
+            resp = requests.get(url, params=params, headers=headers, timeout=timeout, verify=verify)
+            resp.raise_for_status()
+            data = resp.content or b""
+            if data.startswith(b"<") and b"Workbook" not in data[:500] and b"html" in data[:200].lower():
+                raise RuntimeError(f"Export trả HTML lỗi (ngày {ngay})")
+            if len(data) < 64:
+                raise RuntimeError(f"Export rỗng / quá ngắn ({len(data)} bytes)")
+            return data
+        except Exception as e:
+            last_err = e
+            # DNS failure → switch to IP fallback next try
+            err_s = str(e).lower()
+            if "getaddrinfo" in err_s or "nameresolution" in err_s or "failed to resolve" in err_s:
+                _vss_prefer_ip = True
+            elif not _vss_prefer_ip and attempt == 1:
+                # also try IP after first generic failure
+                _vss_prefer_ip = True
+            time.sleep(min(2 * attempt, 6))
+    raise RuntimeError(f"Export thất bại sau {retries} lần ({ngay}): {last_err}")
+
+
+def parse_spreadsheet_ml_bytes(data: bytes) -> list[dict]:
+    """Parse VSS SpreadsheetML (.xls XML) from memory → list of COLUMNS dicts."""
+    from io import BytesIO
+
+    # Strip illegal XML 1.0 char refs (same as bulk Excel importer)
+    text = data.decode("utf-8", errors="replace")
+    text = re.sub(
+        r"&#x0*(?:[0-8bcefBCEF]|1[0-9a-fA-F]|7[fF]);|&#0*(?:[0-8]|1[0-9]|1[2-9]|2[0-9]|3[01]);",
+        "",
+        text,
+    )
+    # Also strip raw control chars except tab/lf/cr
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+
+    tag_row = "{urn:schemas-microsoft-com:office:spreadsheet}Row"
+    tag_cell = "{urn:schemas-microsoft-com:office:spreadsheet}Cell"
+    tag_data = "{urn:schemas-microsoft-com:office:spreadsheet}Data"
+    headers = None
+    out: list[dict] = []
 
     try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode("utf-8", errors="replace")
-    except Exception as first:
-        if VSS_HOST not in url:
-            raise
-        _vss_prefer_ip = True
+        stream = BytesIO(text.encode("utf-8"))
+        events = ET.iterparse(stream, events=("end",))
+        for _event, elem in events:
+            if elem.tag != tag_row:
+                continue
+            cells = []
+            idx = 1
+            for cell in elem.findall(tag_cell):
+                index_attr = cell.get("{urn:schemas-microsoft-com:office:spreadsheet}Index")
+                if index_attr:
+                    index = int(index_attr)
+                    while idx < index:
+                        cells.append("")
+                        idx += 1
+                data_el = cell.find(tag_data)
+                cell_text = "".join(data_el.itertext()).strip() if data_el is not None else ""
+                cells.append(_clean_cell(cell_text))
+                idx += 1
+            elem.clear()
+            if not any(cells):
+                continue
+            if headers is None:
+                headers = [_snake_header(c) for c in cells]
+                continue
+            d = {c: "" for c in COLUMNS}
+            for i, h in enumerate(headers):
+                if h == "stt":
+                    continue
+                key = h if h in COLUMNS else HEADER_ALIASES.get(h)
+                if key and key in COLUMNS and i < len(cells):
+                    d[key] = cells[i]
+            if d.get("ten") or d.get("sodk") or d.get("hoatchat"):
+                out.append(d)
+        return out
+    except ET.ParseError:
+        # Fallback: regex row scrape (robust for dirty VSS XML)
+        return _parse_spreadsheet_ml_regex_text(text)
+
+
+def _parse_spreadsheet_ml_regex_text(text: str) -> list[dict]:
+    row_re = re.compile(r"<Row[^>]*>(.*?)</Row>", re.I | re.S)
+    cell_re = re.compile(r'<Cell([^>]*)>\s*(?:<Data[^>]*>(.*?)</Data>)?', re.I | re.S)
+    index_re = re.compile(r'ss:Index="(\d+)"', re.I)
+
+    def cell_text(raw: str) -> str:
+        if not raw:
+            return ""
+        t = re.sub(r"<[^>]+>", "", raw)
+        return _clean_cell(
+            t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", '"').replace("&apos;", "'")
+        )
+
+    headers = None
+    out: list[dict] = []
+    for m in row_re.finditer(text):
+        cells, idx = [], 1
+        for cm in cell_re.finditer(m.group(1)):
+            attrs, data = cm.group(1) or "", cm.group(2) or ""
+            im = index_re.search(attrs)
+            if im:
+                want = int(im.group(1))
+                while idx < want:
+                    cells.append("")
+                    idx += 1
+            cells.append(cell_text(data))
+            idx += 1
+        if not any(cells):
+            continue
+        if headers is None:
+            headers = [_snake_header(c) for c in cells]
+            continue
+        d = {c: "" for c in COLUMNS}
+        for i, h in enumerate(headers):
+            if h == "stt":
+                continue
+            key = h if h in COLUMNS else HEADER_ALIASES.get(h)
+            if key and key in COLUMNS and i < len(cells):
+                d[key] = cells[i]
+        if d.get("ten") or d.get("sodk") or d.get("hoatchat"):
+            out.append(d)
+    return out
+
+
+def rows_from_export_bytes(data: bytes) -> list[dict]:
+    """Prefer SpreadsheetML parser; fall back to pandas for real .xlsx/.xls."""
+    head = data[:80].lstrip()
+    if head.startswith(b"<?xml") or b"Workbook" in data[:400]:
+        return parse_spreadsheet_ml_bytes(data)
+    try:
+        import pandas as pd
+        from io import BytesIO
+        df = pd.read_excel(BytesIO(data), dtype=str)
+        df = df.where(df.notna(), "")
+        rows = []
+        for rec in df.to_dict(orient="records"):
+            d = {c: "" for c in COLUMNS}
+            for k, v in rec.items():
+                key = _snake_header(k)
+                if key in COLUMNS:
+                    d[key] = _clean_cell(v)
+            if d.get("ten") or d.get("sodk") or d.get("hoatchat"):
+                rows.append(d)
+        return rows
+    except Exception:
+        return parse_spreadsheet_ml_bytes(data)
+
+
+def write_day_json(rows: list[dict], ngay_ddmmyyyy: str, out_dir: Path | None = None) -> Path:
+    """Write kqdt_YYYYMMDD.json (pretty, UTF-8)."""
+    out_dir = out_dir or (DATA_DIR / "vss_exports")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    d, m, y = ngay_ddmmyyyy.split("/")
+    path = out_dir / f"kqdt_{y}{m}{d}.json"
+    payload = {
+        "ngaycongbo": ngay_ddmmyyyy,
+        "count": len(rows),
+        "items": rows,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def _parse_day_arg(val: str | None) -> datetime | None:
+    if not val:
+        return None
+    s = str(val).strip()
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
         try:
-            return via_ip()
-        except Exception:
-            raise first
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"Ngày không hợp lệ: {val}")
 
 
-def crawl_vss(days: int = 2, loai: int = 1, max_pages: int = 50, catchup: bool = False) -> dict:
-    """Crawl announcement days from quanlythuocv1.vss.gov.vn.
+def iter_crawl_days(
+    days: int | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    dates: list[str] | None = None,
+) -> list[str]:
+    """Return list of DD/MM/YYYY newest-first."""
+    if dates:
+        out = []
+        for d in dates:
+            dt = _parse_day_arg(d)
+            if dt:
+                out.append(dt.strftime("%d/%m/%Y"))
+        return out
+    if from_date or to_date:
+        start = _parse_day_arg(from_date) or _parse_day_arg(to_date)
+        end = _parse_day_arg(to_date) or _parse_day_arg(from_date)
+        if not start or not end:
+            raise ValueError("Cần from_date và/hoặc to_date")
+        if start > end:
+            start, end = end, start
+        cur = end
+        out = []
+        while cur >= start:
+            out.append(cur.strftime("%d/%m/%Y"))
+            cur -= timedelta(days=1)
+        return out
+    n = max(1, int(days or 2))
+    today = datetime.now()
+    return [(today - timedelta(days=i)).strftime("%d/%m/%Y") for i in range(n)]
 
-    - Daily / scheduled: days=2 (fast).
-    - Catch-up: days up to 180, stop early after several empty days in a row.
-    """
+
+def crawl_vss(
+    days: int = 2,
+    loai: int = 1,
+    max_pages: int = 50,  # unused — kept for API compat
+    catchup: bool = False,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    dates: list[str] | None = None,
+    save_json: bool = False,
+) -> dict:
+    """Crawl via /kqdt/export (1 Excel request / day). No HTML pagination."""
     global _crawl_thread
     if _crawl_thread and _crawl_thread.is_alive():
         return {"ok": False, "message": "VSS đang chạy"}
 
     _crawl_stop.clear()
-    days = max(1, min(180 if catchup else 14, int(days or 2)))
-    empty_stop = 5 if catchup else 2
+    if dates or from_date or to_date:
+        days_list = iter_crawl_days(from_date=from_date, to_date=to_date, dates=dates)
+    else:
+        if catchup and not days:
+            days = 90
+        if catchup:
+            days = max(int(days or 90), 30)
+            days = min(days, 180)
+        else:
+            days = max(1, min(14, int(days or 2)))
+        days_list = iter_crawl_days(days=days)
+    empty_stop = 5 if catchup or len(days_list) > 14 else 3
 
     def work():
         secrets = load_secrets()
         cookie = (secrets.get("vss") or {}).get("cookie") or ""
         total_ins = 0
-        today = datetime.now()
-        days_list = [(today - timedelta(days=i)).strftime("%d/%m/%Y") for i in range(days)]
         empty_streak = 0
-        mode = "bắt kịp" if catchup else f"{days} ngày"
+        mode = "bắt kịp export" if catchup else f"export {len(days_list)} ngày"
         update_status("vss", state="running", progress=1, message=f"Crawl VSS {mode}…", updated=now_iso())
         try:
             for day_i, ngay in enumerate(days_list):
                 if _crawl_stop.is_set():
                     break
-                day_ins = 0
-                for page in range(max_pages):
-                    if _crawl_stop.is_set():
-                        break
-                    url = f"{VSS_BASE}/kqdt/chiTiet?ngaycongbo={urllib.parse.quote(ngay)}&loai={loai}&page={page}"
-                    try:
-                        html = _http_get(url, cookie=cookie)
-                    except Exception as e:
-                        update_status("vss", message=f"Lỗi {ngay} p{page}: {e}")
-                        break
-                    rows = parse_chi_tiet_html(html)
-                    if not rows:
-                        break
+                try:
+                    blob = download_kqdt_export(ngay, loai=loai, cookie=cookie)
+                    rows = rows_from_export_bytes(blob)
                     for r in rows:
-                        r["congbo"] = ngay
+                        if not r.get("congbo"):
+                            r["congbo"] = ngay
                         if not r.get("loai"):
                             r["loai"] = "Tân dược"
-                    n = save_rows(rows)
+                    n = save_rows(rows) if rows else 0
                     total_ins += n
-                    day_ins += n
-                    # Progress by calendar day (not pages) so catch-up % không kẹt ở 2–7
-                    pct = min(99, int(100 * (day_i + (page + 1) / max_pages) / max(1, len(days_list))))
+                    if save_json and rows:
+                        path = write_day_json(rows, ngay)
+                        json_note = f" → {path.name}"
+                    else:
+                        json_note = ""
+                    kb = len(blob) / 1024
+                    pct = min(99, int(100 * (day_i + 1) / max(1, len(days_list))))
                     update_status(
                         "vss", progress=pct,
-                        message=f"{ngay} trang {page}: +{n} (tổng +{total_ins})",
+                        message=f"{ngay}: {kb:.1f} KB · {len(rows)} dòng · +{n} mới (tổng +{total_ins}){json_note}",
                         updated=now_iso(),
                     )
-                    time.sleep(0.25)
-                if day_ins == 0:
+                    if not rows:
+                        empty_streak += 1
+                        if empty_streak >= empty_stop:
+                            update_status("vss", message=f"Dừng sớm: {empty_streak} ngày export trống")
+                            break
+                    else:
+                        empty_streak = 0
+                except Exception as e:
+                    update_status("vss", message=f"Lỗi {ngay}: {e}")
                     empty_streak += 1
                     if empty_streak >= empty_stop:
-                        update_status("vss", message=f"Dừng sớm: {empty_streak} ngày trống liên tiếp")
                         break
-                else:
-                    empty_streak = 0
+                # throttle 3–5s between days
+                if day_i < len(days_list) - 1 and not _crawl_stop.is_set():
+                    time.sleep(3 + (day_i % 3))  # 3,4,5 cycling
             info = meta_info()
             update_status(
                 "vss", state="idle", progress=100,
-                message=f"Crawl xong +{total_ins}", updated=now_iso(), count=info["count"],
+                message=f"Crawl export xong +{total_ins}", updated=now_iso(), count=info["count"],
             )
         except Exception as e:
             update_status("vss", state="error", message=str(e), updated=now_iso())
 
-    _crawl_thread = threading.Thread(target=work, daemon=True)
+    _crawl_thread = threading.Thread(target=work, daemon=True, name="vss-export-crawl")
     _crawl_thread.start()
-    return {"ok": True, "message": f"Đã bắt đầu crawl VSS ({'bắt kịp ' if catchup else ''}{days} ngày)"}
+    return {"ok": True, "message": f"Đã bắt đầu crawl VSS export ({len(days_list)} ngày)"}
 
 
 def stop_crawl():
     _crawl_stop.set()
     update_status("vss", message="Đang dừng…")
     return {"ok": True}
+
 
 
 def meta_info() -> dict:

@@ -6,7 +6,7 @@ import {
   serverFilters, useSectionMeta, useSelection, useSimProgress,
 } from './components'
 
-const PAGE_SIZE_DEFAULT = 200
+const PAGE_SIZE_DEFAULT = 100
 const money = (v) => (typeof v === 'number' ? v.toLocaleString('vi-VN') : v ?? '')
 
 const PRICE_COLS = [

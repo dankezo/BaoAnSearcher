@@ -10,7 +10,7 @@ import { TagBadge, TagFilterDropdown, useTagFilterState } from './TagFilterDropd
 import { enrichRowTag } from './tagConfig'
 import { ingredientAllowedAtGrade } from './tt20'
 
-const PAGE_SIZE_DEFAULT = 200
+const PAGE_SIZE_DEFAULT = 100
 
 const ALL_COLS = [
   { key: 'tagId', label: 'Trạng thái', filter: 'select', nowrap: true, width: 52, align: 'center' },

@@ -6,16 +6,23 @@ server/secrets.local.json
 **/*.sqlite3
 **/*.sqlite3-*
 
-# Large source dumps
+# Large source dumps & crawl artifacts (local only — never push)
 *.xls
 *.xlsx
 !web/public/data/.gitkeep
+!docs/data/
+!docs/data/**
+!web/public/data/
+!web/public/data/**
 test zone/data/
 test zone/procurement/data/
 test zone/procurement/vendor/
-data/*.sqlite3
-data/raw/
-data/crawl_status.json
+/data/
+/data/raw/
+/data/crawl_status.json
+/data/vss_exports/
+/data/vss_crawl_logs/
+/db/
 
 # Empty / unrelated
 be432a96ed36e48d05f44bf375864355f62263f9/
@@ -46,4 +53,3 @@ _inspect_tmp.py
 *.har
 test zone/*.har
 test zone/*.html
-

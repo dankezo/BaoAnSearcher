@@ -169,9 +169,9 @@ export default function AdminSection({ localMode }) {
           </button>
         </StatusCard>
 
-        <StatusCard index="03" title="VSS — BHYT trúng thầu" source="quanlythuocv1.vss.gov.vn" status={status.vss}>
+        <StatusCard index="03" title="VSS — BHYT trúng thầu" source="quanlythuocv1.vss.gov.vn/kqdt/export" status={status.vss}>
           <button type="button" className="btn" onClick={run(() => api.vssCrawl({ days: 90, catchup: true }))}>
-            Crawl bắt kịp
+            Crawl bắt kịp (export Excel/ngày)
           </button>
           <button type="button" className="btn secondary" onClick={run(() => api.vssCrawl({ days: 2 }))}>
             Crawl 2 ngày

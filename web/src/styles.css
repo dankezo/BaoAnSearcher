@@ -457,6 +457,12 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 }
 .section > .error-note { margin: 0 0 12px; }
 
+.info-note {
+  margin: 0 0 12px; padding: 8px 12px; border-radius: var(--r-sm);
+  background: var(--accent-soft, rgba(11, 99, 183, .08)); color: var(--text-muted, #445);
+  font-size: 13px; border: 1px solid rgba(11, 99, 183, .18);
+}
+
 /* ---------------------------------------------------------------------
    Data table
 --------------------------------------------------------------------- */

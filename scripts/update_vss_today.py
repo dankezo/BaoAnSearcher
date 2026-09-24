@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Crawl VSS catch-up (default) then optional Excel import."""
+"""Crawl VSS via Excel export (1 request/day), not HTML pagination."""
 from __future__ import annotations
 import sys
 import time
@@ -11,41 +11,27 @@ sys.path.insert(0, str(ROOT))
 from server import vss
 from server.common import load_status
 
-EXCEL = Path(r"c:\Users\AD\Desktop\MouseWithoutBorders\Danh mục thuốc trúng thầu BHYT-2024.xls")
 
-
-def wait_idle(app="vss", timeout=7200):
+def wait_idle(timeout=7200):
     start = time.time()
-    saw_running = False
+    saw = False
     while time.time() - start < timeout:
-        st = load_status().get(app, {})
-        info = vss.meta_info()
-        print(f"  state={st.get('state')} pct={st.get('progress')} msg={st.get('message')} count={info.get('count')}")
+        st = load_status().get("vss") or {}
+        print(f"  state={st.get('state')} pct={st.get('progress')} msg={st.get('message')} count={vss.meta_info().get('count')}", flush=True)
         if st.get("state") == "running":
-            saw_running = True
-        if saw_running and st.get("state") in ("idle", "error"):
+            saw = True
+        if saw and st.get("state") in ("idle", "error"):
             return st
-        if (not saw_running) and time.time() - start > 30 and st.get("state") == "idle":
+        if (not saw) and time.time() - start > 45:
             return st
-        time.sleep(8)
-    return load_status().get(app, {})
+        time.sleep(5)
+    return load_status().get("vss", {})
 
 
 def main():
-    print("=== VSS catch-up (up to 90 days, stop on empty streak) ===")
-    print(vss.crawl_vss(days=90, loai=1, max_pages=40, catchup=True))
-    st = wait_idle()
-    print("catch-up done:", st, vss.meta_info())
-
-    print("=== VSS 2 days for loai 2,3 ===")
-    for loai in (2, 3):
-        print(vss.crawl_vss(days=2, loai=loai, max_pages=20, catchup=False))
-        st = wait_idle()
-        print("done:", st, vss.meta_info())
-
-    if EXCEL.exists():
-        print("Excel present — skip auto-import (dùng Quản trị → Import nếu cần):", EXCEL.name)
-    print("FINAL VSS", vss.meta_info())
+    print("=== VSS export catch-up (90 ngày) ===", flush=True)
+    print(vss.crawl_vss(days=90, loai=1, catchup=True, save_json=False), flush=True)
+    print("done:", wait_idle(), vss.meta_info(), flush=True)
 
 
 if __name__ == "__main__":

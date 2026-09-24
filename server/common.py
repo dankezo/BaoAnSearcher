@@ -47,18 +47,33 @@ def save_secrets(data: dict) -> None:
 
 def load_status() -> dict:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if STATUS_PATH.exists():
-        return json.loads(STATUS_PATH.read_text(encoding="utf-8"))
-    return {
+    default = {
         "dav": {"state": "idle", "progress": 0, "message": "", "updated": None, "count": 0},
         "msc": {"state": "idle", "progress": 0, "message": "", "updated": None, "count": 0},
         "vss": {"state": "idle", "progress": 0, "message": "", "updated": None, "count": 0},
     }
+    if not STATUS_PATH.exists():
+        return default
+    try:
+        raw = STATUS_PATH.read_text(encoding="utf-8").strip()
+        if not raw:
+            return default
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return default
+        for key in default:
+            data.setdefault(key, dict(default[key]))
+        return data
+    except (json.JSONDecodeError, OSError):
+        return default
 
 
 def save_status(status: dict) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    STATUS_PATH.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp = STATUS_PATH.with_suffix(".json.tmp")
+    payload = json.dumps(status, ensure_ascii=False, indent=2)
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(STATUS_PATH)
 
 
 def update_status(app: str, **kwargs) -> dict:
