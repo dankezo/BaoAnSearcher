@@ -1,28 +1,57 @@
 import { useEffect, useState } from 'react'
-import { api } from './api'
-import { LoadingOverlay } from './components'
+import { api, fmtDateTime, relativeTime, sectionMeta } from './api'
+import { ErrorNote, Field, LoadingOverlay } from './components'
 
-function Card({ title, status, children }) {
+const STATE_LABEL = { idle: 'Sẵn sàng', running: 'Đang chạy', error: 'Lỗi' }
+
+function StatusCard({ index, title, source, status, children }) {
   const pct = status?.progress || 0
-  const running = status?.state === 'running'
+  const state = status?.state || 'idle'
+  const running = state === 'running'
+  const m = sectionMeta({ x: status }, 'x')
   return (
-    <div className="admin-card">
-      <h3>{title}</h3>
-      <div className="meta">
-        Trạng thái: <strong>{status?.state || 'idle'}</strong>
-        {status?.count != null && <> · {Number(status.count).toLocaleString('vi-VN')} bản ghi</>}
-        {status?.updated && <> · {status.updated}</>}
+    <div className={`admin-card state-${state}`}>
+      <div className="admin-card-head">
+        <span className="admin-index">{index}</span>
+        <div>
+          <h3>{title}</h3>
+          <div className="muted small">{source}</div>
+        </div>
+        <span className={`state-pill ${state}`}>
+          {running && <span className="dot" />}
+          {STATE_LABEL[state] || state}
+        </span>
       </div>
-      {(running || pct > 0) && (
+
+      <dl className="admin-stats">
+        <div>
+          <dt>Bản ghi</dt>
+          <dd>{m.count != null ? Number(m.count).toLocaleString('vi-VN') : '—'}</dd>
+        </div>
+        <div>
+          <dt>Cập nhật</dt>
+          <dd title={m.updated || ''}>
+            {m.updated ? fmtDateTime(m.updated) : '—'}
+            {m.updated && <span className="muted small"> · {relativeTime(m.updated)}</span>}
+          </dd>
+        </div>
+      </dl>
+
+      {(running || (pct > 0 && pct < 100)) && (
         <div className="progress-line">
-          <div style={{ marginBottom: 6 }}>{status?.message || ''} — {Math.round(pct)}%</div>
+          <div className="progress-meta"><span>{status?.message || ''}</span><strong>{Math.round(pct)}%</strong></div>
           <div className="bar"><span style={{ width: `${pct}%` }} /></div>
         </div>
       )}
-      {!running && status?.message && status.state !== 'idle' && (
-        <div className="meta" style={{ color: status.state === 'error' ? 'var(--danger)' : undefined }}>{status.message}</div>
+      {!running && status?.message && state !== 'idle' && (
+        <div className={`admin-msg${state === 'error' ? ' error' : ''}`}>{status.message}</div>
       )}
-      <div className="btn-row" style={{ marginTop: 12 }}>{children}</div>
+      {!running && status?.message && state === 'idle' && (
+        <div className="admin-msg">{status.message}</div>
+      )}
+      {status?.error && <div className="admin-msg error">{status.error}</div>}
+
+      <div className="admin-actions">{children}</div>
     </div>
   )
 }
@@ -32,6 +61,7 @@ export default function AdminSection({ localMode }) {
   const [secrets, setSecrets] = useState({ msc: { username: '', password: '' }, vss: { cookie: '' }, autoCrawl: { enabled: false } })
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
   const [mscDates, setMscDates] = useState({ from: '', to: '' })
 
   const refresh = async () => {
@@ -39,8 +69,19 @@ export default function AdminSection({ localMode }) {
     try {
       const s = await api.status()
       setStatus(s)
+      setErr('')
     } catch (e) {
-      setMsg(String(e.message || e))
+      setErr(String(e.message || e))
+    }
+  }
+
+  const run = (fn) => async () => {
+    try {
+      const r = await fn()
+      if (r && r.ok === false && r.message) setMsg(r.message)
+      await refresh()
+    } catch (e) {
+      setErr(String(e.message || e))
     }
   }
 
@@ -56,15 +97,15 @@ export default function AdminSection({ localMode }) {
     refresh()
     const t = setInterval(refresh, 2000)
     return () => clearInterval(t)
-  }, [localMode])
+  }, [localMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveCreds = async () => {
     setBusy(true)
     try {
       await api.saveSecrets(secrets)
-      setMsg('Đã lưu tài khoản (local, không commit git).')
+      setMsg('Đã lưu tài khoản (chỉ trên máy local, không commit git).')
     } catch (e) {
-      setMsg(String(e.message || e))
+      setErr(String(e.message || e))
     } finally {
       setBusy(false)
     }
@@ -72,76 +113,89 @@ export default function AdminSection({ localMode }) {
 
   if (!localMode) {
     return (
-      <div>
-        <section className="hero">
-          <h1>Quản trị dữ liệu</h1>
-          <p>Phần crawl chỉ chạy trên máy local. Trên GitHub Pages chỉ xem data đã export.</p>
-        </section>
+      <div className="section">
+        <header className="section-head">
+          <div>
+            <span className="kicker">Quản trị</span>
+            <h1>Quản trị dữ liệu</h1>
+            <p>Phần crawl chỉ chạy trên máy local (API 127.0.0.1:8787). Trên GitHub Pages chỉ xem dữ liệu đã export.</p>
+          </div>
+        </header>
+        <div className="panel pad">
+          <div className="empty-state">
+            <strong>Đang ở chế độ tĩnh (GitHub Pages).</strong>
+            <span className="muted">Chạy <code>MO_WEB.cmd</code> hoặc <code>uvicorn server.main:app --port 8787</code> để mở bảng điều khiển crawl.</span>
+          </div>
+        </div>
       </div>
     )
   }
 
   return (
-    <div>
-      <section className="hero">
-        <h1>Quản trị dữ liệu & crawl</h1>
-        <p>Theo dõi 3 miniapp, chạy cập nhật có tiến độ %, lưu tài khoản MSC để điền sẵn khi mở trình duyệt.</p>
-      </section>
+    <div className="section">
+      <header className="section-head">
+        <div>
+          <span className="kicker">Quản trị · Local API</span>
+          <h1>Quản trị dữ liệu &amp; crawl</h1>
+          <p>Theo dõi 3 nguồn dữ liệu, chạy cập nhật có tiến độ, lưu tài khoản MSC để điền sẵn khi mở trình duyệt.</p>
+        </div>
+      </header>
+
+      <ErrorNote>{err}</ErrorNote>
 
       <div className="admin-grid">
-        <Card title="1. DAV — Đăng ký thuốc" status={status.dav}>
-          <button type="button" className="btn" onClick={() => api.davCrawl({}).then(refresh)}>Tải / tiếp tục</button>
-          <button type="button" className="btn secondary" onClick={() => api.davCrawl({ restart: true }).then(refresh)}>Từ đầu</button>
-          <button type="button" className="btn ghost" onClick={() => api.davCrawlStop().then(refresh)}>Dừng</button>
-          <button type="button" className="btn warn" onClick={() => api.davValidity().then(refresh)}>Rebuild hiệu lực</button>
-        </Card>
+        <StatusCard index="01" title="DAV — Đăng ký thuốc" source="dichvucong.dav.gov.vn" status={status.dav}>
+          <button type="button" className="btn" onClick={run(() => api.davCrawl({}))}>Tải / tiếp tục</button>
+          <button type="button" className="btn secondary" onClick={run(() => api.davCrawl({ restart: true }))}>Từ đầu</button>
+          <button type="button" className="btn ghost" onClick={run(() => api.davCrawlStop())}>Dừng</button>
+          <button type="button" className="btn warn" onClick={run(() => api.davValidity())}>Rebuild hiệu lực</button>
+        </StatusCard>
 
-        <Card title="2. MSC — Lọc thầu" status={status.msc}>
-          <div className="field" style={{ width: '100%' }}>
-            <label>Khoảng ngày đơn giá</label>
-            <div className="btn-row">
-              <input type="date" value={mscDates.from} onChange={(e) => setMscDates((d) => ({ ...d, from: e.target.value }))} />
-              <input type="date" value={mscDates.to} onChange={(e) => setMscDates((d) => ({ ...d, to: e.target.value }))} />
-            </div>
+        <StatusCard index="02" title="MSC — Đơn giá & gói thầu" source="muasamcong.mpi.gov.vn" status={status.msc}>
+          <div className="date-range">
+            <Field label="Từ ngày"><input type="date" value={mscDates.from} onChange={(e) => setMscDates((d) => ({ ...d, from: e.target.value }))} /></Field>
+            <Field label="Đến ngày"><input type="date" value={mscDates.to} onChange={(e) => setMscDates((d) => ({ ...d, to: e.target.value }))} /></Field>
           </div>
           <button
             type="button"
             className="btn"
-            onClick={() => api.mscPrices({ dateFrom: mscDates.from, dateTo: mscDates.to }).then(refresh)}
+            disabled={!mscDates.from || !mscDates.to}
+            onClick={run(() => api.mscPrices({ dateFrom: mscDates.from, dateTo: mscDates.to }))}
           >
             Crawl đơn giá
           </button>
-          <button type="button" className="btn secondary" onClick={() => api.mscTenders({ pages: 20 }).then(refresh)}>
+          <button type="button" className="btn secondary" onClick={run(() => api.mscTenders({ pages: 20 }))}>
             Crawl gói thầu (browser)
           </button>
-        </Card>
+        </StatusCard>
 
-        <Card title="3. VSS — BHYT trúng thầu" status={status.vss}>
-          <button type="button" className="btn" onClick={() => api.vssCrawl({ days: 7 }).then(refresh)}>Crawl 7 ngày</button>
-          <button type="button" className="btn secondary" onClick={() => api.vssImport({}).then((r) => { setMsg(JSON.stringify(r)); refresh() })}>
+        <StatusCard index="03" title="VSS — BHYT trúng thầu" source="baohiemxahoi.gov.vn" status={status.vss}>
+          <button type="button" className="btn" onClick={run(() => api.vssCrawl({ days: 7 }))}>Crawl 7 ngày</button>
+          <button type="button" className="btn secondary" onClick={run(async () => { const r = await api.vssImport({}); setMsg(JSON.stringify(r)); return r })}>
             Import Excel mặc định
           </button>
-        </Card>
+        </StatusCard>
       </div>
 
-      <div className="panel" style={{ marginTop: 18 }}>
-        <div className="panel-head"><h2>Tài khoản & tự động</h2></div>
+      <div className="panel">
+        <div className="toolbar">
+          <div className="toolbar-title">
+            <span className="kicker">Cấu hình</span>
+            <h2>Tài khoản &amp; tự động</h2>
+          </div>
+        </div>
         <div className="filters">
           <div className="filter-grid">
-            <div className="field">
-              <label>MSC username</label>
-              <input value={secrets.msc.username} onChange={(e) => setSecrets((s) => ({ ...s, msc: { ...s.msc, username: e.target.value } }))} />
-            </div>
-            <div className="field">
-              <label>MSC password</label>
-              <input type="password" value={secrets.msc.password} onChange={(e) => setSecrets((s) => ({ ...s, msc: { ...s.msc, password: e.target.value } }))} />
-            </div>
-            <div className="field">
-              <label>VSS cookie (tuỳ chọn)</label>
+            <Field label="MSC username">
+              <input value={secrets.msc.username} autoComplete="off" onChange={(e) => setSecrets((s) => ({ ...s, msc: { ...s.msc, username: e.target.value } }))} />
+            </Field>
+            <Field label="MSC password">
+              <input type="password" autoComplete="new-password" value={secrets.msc.password} onChange={(e) => setSecrets((s) => ({ ...s, msc: { ...s.msc, password: e.target.value } }))} />
+            </Field>
+            <Field label="VSS cookie" hint="tuỳ chọn">
               <input value={secrets.vss.cookie} onChange={(e) => setSecrets((s) => ({ ...s, vss: { ...s.vss, cookie: e.target.value } }))} placeholder="session=…" />
-            </div>
-            <div className="field">
-              <label>Nhắc tự cập nhật</label>
+            </Field>
+            <Field label="Nhắc tự cập nhật">
               <select
                 value={secrets.autoCrawl?.enabled ? '1' : '0'}
                 onChange={(e) => setSecrets((s) => ({ ...s, autoCrawl: { ...s.autoCrawl, enabled: e.target.value === '1' } }))}
@@ -149,13 +203,13 @@ export default function AdminSection({ localMode }) {
                 <option value="0">Tắt</option>
                 <option value="1">Bật (lưu preference local)</option>
               </select>
-            </div>
+            </Field>
           </div>
-          <div className="btn-row">
+          <div className="filter-actions">
             <button type="button" className="btn" onClick={saveCreds}>Lưu</button>
             <button type="button" className="btn secondary" onClick={refresh}>Làm mới trạng thái</button>
+            {msg && <span className="muted small">{msg}</span>}
           </div>
-          {msg && <div className="meta">{msg}</div>}
         </div>
       </div>
       <LoadingOverlay show={busy} percent={40} message="Đang lưu…" />

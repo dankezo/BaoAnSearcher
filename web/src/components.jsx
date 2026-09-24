@@ -1,13 +1,36 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { fold, fmtDateTime, getStaticStatus, getStatus, relativeTime, sectionMeta } from './api'
+import { exportXlsx } from './export'
 
+export { IngredientLink, IngredientText, Tt20Provider, useTt20 } from './tt20'
+
+/* ------------------------------------------------------------------ */
+/* Icons (inline, 16px)                                                 */
+/* ------------------------------------------------------------------ */
+const I = {
+  search: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>,
+  x: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>,
+  filter: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"><path d="M3 5h18l-7 8v6l-4-2v-4z" /></svg>,
+  download: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v11m0 0l-4-4m4 4l4-4M4 19h16" /></svg>,
+  external: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5" /></svg>,
+  chevL: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 6l-6 6 6 6" /></svg>,
+  chevR: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 6l6 6-6 6" /></svg>,
+  clock: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>,
+  columns: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 4v16" /></svg>,
+}
+export const Icons = I
+
+/* ------------------------------------------------------------------ */
+/* Loading                                                              */
+/* ------------------------------------------------------------------ */
 export function LoadingOverlay({ show, percent = 0, message = 'Đang xử lý…' }) {
   if (!show) return null
   const pct = Math.max(0, Math.min(100, Math.round(percent)))
   return (
     <div className="loading-overlay" role="status" aria-live="polite">
       <div className="loading-card">
-        <div>{message}</div>
-        <div className="pct">{pct}%</div>
+        <div className="loading-msg">{message}</div>
+        <div className="pct">{pct}<span>%</span></div>
         <div className="bar"><span style={{ width: `${pct}%` }} /></div>
       </div>
     </div>
@@ -27,26 +50,40 @@ export function useSimProgress(active, baseMsg = 'Đang tải') {
   return { percent: pct, message: `${baseMsg}…` }
 }
 
+/* ------------------------------------------------------------------ */
+/* Filter inputs                                                        */
+/* ------------------------------------------------------------------ */
+export function Field({ label, children, hint, className = '' }) {
+  return (
+    <div className={`field ${className}`}>
+      <label>{label}{hint && <span className="hint"> {hint}</span>}</label>
+      {children}
+    </div>
+  )
+}
+
 export function CountSelect({ label, value, onChange, options, otherValue, onOther }) {
   return (
     <div className="field">
       <label>{label}</label>
-      <select value={value || ''} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Tất cả</option>
-        {options.map((o) => (
-          <option key={o} value={String(o)}>{o}</option>
-        ))}
-        <option value="other">Khác…</option>
-      </select>
-      {value === 'other' && (
-        <input
-          type="number"
-          min="0"
-          placeholder="Nhập số"
-          value={otherValue || ''}
-          onChange={(e) => onOther(e.target.value)}
-        />
-      )}
+      <div className={`count-select${value === 'other' ? ' with-other' : ''}`}>
+        <select value={value || ''} onChange={(e) => onChange(e.target.value)}>
+          <option value="">Tất cả</option>
+          {options.map((o) => (
+            <option key={o} value={String(o)}>{o}</option>
+          ))}
+          <option value="other">Khác…</option>
+        </select>
+        {value === 'other' && (
+          <input
+            type="number"
+            min="0"
+            placeholder="Nhập số"
+            value={otherValue || ''}
+            onChange={(e) => onOther(e.target.value)}
+          />
+        )}
+      </div>
     </div>
   )
 }
@@ -54,11 +91,18 @@ export function CountSelect({ label, value, onChange, options, otherValue, onOth
 export function ColumnPicker({ allColumns, visible, onChange, open, onClose }) {
   if (!open) return null
   return (
-    <div className="filters" style={{ background: 'rgba(13,110,95,.04)' }}>
-      <strong>Chọn cột hiển thị</strong>
-      <div className="filter-grid">
+    <div className="colpicker">
+      <div className="colpicker-head">
+        <strong>Chọn cột hiển thị</strong>
+        <span className="muted">{visible.length}/{allColumns.length}</span>
+        <div className="spacer" />
+        <button type="button" className="btn ghost sm" onClick={() => onChange(allColumns.map((c) => c.key))}>Tất cả</button>
+        <button type="button" className="btn ghost sm" onClick={() => onChange([])}>Bỏ hết</button>
+        <button type="button" className="btn secondary sm" onClick={onClose}>Đóng</button>
+      </div>
+      <div className="colpicker-grid">
         {allColumns.map((c) => (
-          <label key={c.key} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '.85rem' }}>
+          <label key={c.key} className="check">
             <input
               type="checkbox"
               checked={visible.includes(c.key)}
@@ -67,25 +111,474 @@ export function ColumnPicker({ allColumns, visible, onChange, open, onClose }) {
                 else onChange(visible.filter((k) => k !== c.key))
               }}
             />
-            {c.label}
+            <span>{c.label}</span>
           </label>
         ))}
-      </div>
-      <div className="btn-row">
-        <button type="button" className="btn secondary" onClick={onClose}>Đóng</button>
       </div>
     </div>
   )
 }
 
-export function Pagination({ page, size, total, onPage }) {
-  const pages = Math.max(1, Math.ceil(total / size))
+export function ViewModeSelect({ value, onChange }) {
+  return (
+    <select className="select sm" value={value} onChange={(e) => onChange(e.target.value)} title="Chế độ cột">
+      <option value="compact">Cột rút gọn</option>
+      <option value="full">Hiện hết trường</option>
+      <option value="custom">Tùy chọn cột…</option>
+    </select>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Pagination                                                           */
+/* ------------------------------------------------------------------ */
+export function Pagination({ page, size, total, onPage, shown, extra }) {
+  const pages = Math.max(1, Math.ceil((total || 0) / size))
   return (
     <div className="footer-bar">
-      <span>{total.toLocaleString('vi-VN')} kết quả · Trang {page + 1}/{pages}</span>
+      <span>
+        <strong>{(total || 0).toLocaleString('vi-VN')}</strong> kết quả
+        {shown != null && shown !== Math.min(size, total - page * size) && (
+          <> · hiển thị <strong>{shown}</strong> sau lọc cột</>
+        )}
+      </span>
+      {extra}
       <div className="spacer" />
-      <button type="button" className="btn secondary" disabled={page <= 0} onClick={() => onPage(page - 1)}>←</button>
-      <button type="button" className="btn secondary" disabled={page + 1 >= pages} onClick={() => onPage(page + 1)}>→</button>
+      <span className="muted">Trang {page + 1}/{pages.toLocaleString('vi-VN')}</span>
+      <div className="pager">
+        <button type="button" className="icon-btn" aria-label="Trang trước" disabled={page <= 0} onClick={() => onPage(page - 1)}>{I.chevL}</button>
+        <button type="button" className="icon-btn" aria-label="Trang sau" disabled={page + 1 >= pages} onClick={() => onPage(page + 1)}>{I.chevR}</button>
+      </div>
     </div>
   )
+}
+
+/* ------------------------------------------------------------------ */
+/* Data freshness                                                       */
+/* ------------------------------------------------------------------ */
+/**
+ * Resolve {updated, count} for a section.
+ * localMode → /api/status meta; otherwise ./data/status.json or the fallback derived from the export.
+ */
+export function useSectionMeta(section, localMode, fallback, refreshKey) {
+  const [meta, setMeta] = useState({ updated: null, count: null })
+  useEffect(() => {
+    let alive = true
+    const run = async () => {
+      const st = localMode ? await getStatus(true) : await getStaticStatus()
+      const m = sectionMeta(st, section)
+      if (!alive) return
+      setMeta({
+        updated: m.updated || fallback?.updated || null,
+        count: m.count ?? fallback?.count ?? null,
+      })
+    }
+    run()
+    return () => { alive = false }
+  }, [section, localMode, fallback?.updated, fallback?.count, refreshKey])
+  return meta
+}
+
+export function UpdatedNote({ updated, count, source }) {
+  if (!updated && count == null) return null
+  return (
+    <div className="updated-note" title={updated ? String(updated) : undefined}>
+      {I.clock}
+      <span>
+        {updated ? <>Dữ liệu cập nhật từ <strong>{fmtDateTime(updated)}</strong> <em>({relativeTime(updated)})</em></> : 'Chưa rõ thời điểm cập nhật'}
+        {count != null && <> · {Number(count).toLocaleString('vi-VN')} bản ghi</>}
+        {source && <> · {source}</>}
+      </span>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Modal + detail                                                       */
+/* ------------------------------------------------------------------ */
+export function Modal({ open, onClose, title, subtitle, children, footer, width = 760 }) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
+    document.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
+  }, [open, onClose])
+  if (!open) return null
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
+      <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: width }}>
+        <div className="modal-head">
+          <div>
+            {subtitle && <div className="modal-kicker">{subtitle}</div>}
+            <h3>{title}</h3>
+          </div>
+          <button type="button" className="icon-btn" aria-label="Đóng" onClick={onClose}>{I.x}</button>
+        </div>
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-foot">{footer}</div>}
+      </div>
+    </div>
+  )
+}
+
+function isEmptyVal(v) {
+  return v == null || v === '' || (Array.isArray(v) && v.length === 0)
+}
+
+/**
+ * Detail modal listing all fields of a record.
+ * fields: [{key,label,text?}] ordered; remaining non-underscore keys are appended.
+ */
+export function DetailModal({ row, fields, title, subtitle, onClose, sourceUrl, renderValue }) {
+  const all = useMemo(() => {
+    if (!row) return []
+    const known = new Set(fields.map((f) => f.key))
+    const rest = Object.keys(row)
+      .filter((k) => !known.has(k) && !k.startsWith('_'))
+      .map((k) => ({ key: k, label: k }))
+    return [...fields, ...rest]
+  }, [row, fields])
+  if (!row) return null
+  const url = sourceUrl || row.source_url
+  return (
+    <Modal
+      open={!!row}
+      onClose={onClose}
+      title={title}
+      subtitle={subtitle}
+      footer={(
+        <>
+          <span className="muted">{all.length} trường</span>
+          <div className="spacer" />
+          {url && (
+            <a className="btn" href={url} target="_blank" rel="noopener noreferrer">
+              {I.external} Mở trang nguồn
+            </a>
+          )}
+          <button type="button" className="btn secondary" onClick={onClose}>Đóng</button>
+        </>
+      )}
+    >
+      <dl className="detail-grid">
+        {all.map((f) => {
+          const raw = row[f.key]
+          let val = f.text ? f.text(row) : raw
+          if (typeof val === 'object' && val !== null) val = JSON.stringify(val)
+          else if (typeof val === 'number') val = val.toLocaleString('vi-VN')
+          else if (typeof val === 'boolean') val = val ? 'Có' : 'Không'
+          if (renderValue) val = renderValue(f, row, val)
+          return (
+            <div key={f.key} className={`detail-row${isEmptyVal(raw) ? ' empty' : ''}`}>
+              <dt>{f.label}</dt>
+              <dd>{isEmptyVal(raw) ? '—' : val}</dd>
+            </div>
+          )
+        })}
+      </dl>
+    </Modal>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Selection                                                            */
+/* ------------------------------------------------------------------ */
+export function useSelection() {
+  const [selected, setSelected] = useState(() => new Map())
+  const toggle = useCallback((key, row) => {
+    setSelected((m) => {
+      const n = new Map(m)
+      if (n.has(key)) n.delete(key)
+      else n.set(key, row)
+      return n
+    })
+  }, [])
+  const setMany = useCallback((pairs, checked) => {
+    setSelected((m) => {
+      const n = new Map(m)
+      for (const [k, r] of pairs) {
+        if (checked) n.set(k, r)
+        else n.delete(k)
+      }
+      return n
+    })
+  }, [])
+  const clear = useCallback(() => setSelected(new Map()), [])
+  return { selected, toggle, setMany, clear, size: selected.size }
+}
+
+/* ------------------------------------------------------------------ */
+/* Column filters                                                       */
+/* ------------------------------------------------------------------ */
+export function cellText(row, col) {
+  if (col.text) return col.text(row)
+  const v = row[col.key]
+  if (v == null) return ''
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
+/** Client-side refine of loaded rows by per-column filters. */
+export function applyColumnFilters(rows, columns, filters) {
+  const active = Object.entries(filters || {}).filter(([, v]) => String(v ?? '').trim() !== '')
+  if (!active.length) return rows
+  const byKey = Object.fromEntries(columns.map((c) => [c.key, c]))
+  return rows.filter((row) =>
+    active.every(([key, value]) => {
+      const col = byKey[key] || { key }
+      const text = fold(cellText(row, col))
+      const needle = fold(value).trim()
+      if (col.filter === 'select') return text.trim() === needle
+      return needle.split(/\s+/).every((w) => text.includes(w))
+    }),
+  )
+}
+
+/** Map column filters onto server filter keys (only those mapped). */
+export function serverFilters(columnFilters, map) {
+  const out = {}
+  for (const [k, v] of Object.entries(columnFilters || {})) {
+    if (String(v ?? '').trim() === '') continue
+    const target = map?.[k]
+    if (target) out[target] = v
+  }
+  return out
+}
+
+/* ------------------------------------------------------------------ */
+/* Toolbar                                                              */
+/* ------------------------------------------------------------------ */
+export function TableToolbar({
+  title, kicker, selectedCount, onClearSelection, onExport, exporting,
+  filtersVisible, onToggleFilters, activeColumnFilters, onClearColumnFilters, children,
+}) {
+  return (
+    <div className="toolbar">
+      <div className="toolbar-title">
+        {kicker && <span className="kicker">{kicker}</span>}
+        <h2>{title}</h2>
+      </div>
+      <div className="toolbar-actions">
+        {children}
+        <button
+          type="button"
+          className={`btn ghost sm${filtersVisible ? ' on' : ''}`}
+          onClick={onToggleFilters}
+          title="Bật/tắt dòng lọc theo cột (kiểu Excel)"
+        >
+          {I.filter} Lọc cột
+          {activeColumnFilters > 0 && <span className="pill">{activeColumnFilters}</span>}
+        </button>
+        {activeColumnFilters > 0 && (
+          <button type="button" className="btn ghost sm" onClick={onClearColumnFilters}>Xóa lọc cột</button>
+        )}
+        <button
+          type="button"
+          className="btn secondary sm"
+          onClick={onExport}
+          disabled={exporting}
+          title={selectedCount ? `Xuất ${selectedCount} dòng đã chọn` : 'Xuất toàn bộ kết quả đã lọc'}
+        >
+          {I.download} Xuất Excel{selectedCount ? ` (${selectedCount})` : ''}
+        </button>
+        {selectedCount > 0 && (
+          <button type="button" className="btn ghost sm" onClick={onClearSelection}>Bỏ chọn</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* DataTable                                                            */
+/* ------------------------------------------------------------------ */
+/**
+ * columns: [{ key, label, render?(value,row), text?(row), filter?: 'text'|'select'|false,
+ *             align?: 'right'|'center', mono?: bool, nowrap?: bool, width? }]
+ */
+export function DataTable({
+  columns, rows, rowKey, startIndex = 0, showIndex = true,
+  selectable = true, selected, onToggleRow, onToggleAll,
+  columnFilters = {}, onColumnFilter, filtersVisible = true, onFilterEnter,
+  onRowDoubleClick, emptyText = 'Không có dữ liệu', loading,
+  trailing, // { label, render(row) }
+  minWidth,
+}) {
+  const keys = useMemo(() => rows.map((r, i) => rowKey(r, i)), [rows, rowKey])
+  const allChecked = rows.length > 0 && keys.every((k) => selected?.has(k))
+  const someChecked = !allChecked && keys.some((k) => selected?.has(k))
+  const headRef = useRef(null)
+
+  useEffect(() => {
+    if (headRef.current) headRef.current.indeterminate = someChecked
+  }, [someChecked])
+
+  const options = useMemo(() => {
+    const out = {}
+    for (const c of columns) {
+      if (c.filter !== 'select') continue
+      const set = new Set()
+      for (const r of rows) {
+        const t = cellText(r, c).trim()
+        if (t) set.add(t)
+      }
+      out[c.key] = [...set].sort((a, b) => a.localeCompare(b, 'vi'))
+    }
+    return out
+  }, [columns, rows])
+
+  const extraCols = (showIndex ? 1 : 0) + (selectable ? 1 : 0) + (trailing ? 1 : 0)
+
+  return (
+    <div className="table-wrap">
+      <table className={`data${filtersVisible ? ' with-filters' : ''}`} style={minWidth ? { minWidth } : undefined}>
+        <thead>
+          <tr className="labels">
+            {selectable && (
+              <th className="sel">
+                <input
+                  ref={headRef}
+                  type="checkbox"
+                  aria-label="Chọn tất cả trang này"
+                  checked={allChecked}
+                  onChange={(e) => onToggleAll?.(keys.map((k, i) => [k, rows[i]]), e.target.checked)}
+                />
+              </th>
+            )}
+            {showIndex && <th className="idx">#</th>}
+            {columns.map((c) => (
+              <th key={c.key} className={c.align ? `al-${c.align}` : ''} style={c.width ? { minWidth: c.width } : undefined}>
+                <span className="th-label">{c.label}</span>
+                {columnFilters[c.key] && <span className="th-dot" title="Đang lọc cột này" />}
+              </th>
+            ))}
+            {trailing && <th className="trail">{trailing.label}</th>}
+          </tr>
+          {filtersVisible && (
+            <tr className="filters-row">
+              {selectable && <th className="sel" />}
+              {showIndex && <th className="idx" />}
+              {columns.map((c) => (
+                <th key={c.key}>
+                  {c.filter === false ? null : c.filter === 'select' ? (
+                    <select
+                      value={columnFilters[c.key] || ''}
+                      onChange={(e) => onColumnFilter?.(c.key, e.target.value)}
+                      aria-label={`Lọc ${c.label}`}
+                    >
+                      <option value="">Tất cả</option>
+                      {(options[c.key] || []).map((o) => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  ) : (
+                    <div className="th-filter">
+                      <input
+                        value={columnFilters[c.key] || ''}
+                        placeholder="Lọc…"
+                        aria-label={`Lọc ${c.label}`}
+                        onChange={(e) => onColumnFilter?.(c.key, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') onFilterEnter?.() }}
+                      />
+                      {columnFilters[c.key] && (
+                        <button type="button" className="clear" aria-label="Xóa" onClick={() => onColumnFilter?.(c.key, '')}>{I.x}</button>
+                      )}
+                    </div>
+                  )}
+                </th>
+              ))}
+              {trailing && <th className="trail" />}
+            </tr>
+          )}
+        </thead>
+        <tbody>
+          {rows.map((row, i) => {
+            const k = keys[i]
+            const isSel = selected?.has(k)
+            return (
+              <tr
+                key={k}
+                className={isSel ? 'selected' : ''}
+                onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(row) : undefined}
+                title={onRowDoubleClick ? 'Nhấp đôi để xem chi tiết' : undefined}
+              >
+                {selectable && (
+                  <td className="sel" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={!!isSel} onChange={() => onToggleRow?.(k, row)} aria-label="Chọn dòng" />
+                  </td>
+                )}
+                {showIndex && <td className="idx">{startIndex + i + 1}</td>}
+                {columns.map((c) => {
+                  const v = row[c.key]
+                  let content
+                  if (c.render) content = c.render(v, row)
+                  else if (typeof v === 'number') content = v.toLocaleString('vi-VN')
+                  else content = v ?? ''
+                  const cls = [c.align ? `al-${c.align}` : '', c.mono ? 'mono' : '', c.nowrap ? 'nowrap' : ''].filter(Boolean).join(' ')
+                  return <td key={c.key} className={cls || undefined}>{content}</td>
+                })}
+                {trailing && <td className="trail">{trailing.render(row)}</td>}
+              </tr>
+            )
+          })}
+          {!rows.length && !loading && (
+            <tr className="empty"><td colSpan={columns.length + extraCols}>{emptyText}</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Export helper                                                        */
+/* ------------------------------------------------------------------ */
+/**
+ * Export selected rows (if any) else all rows returned by fetchAll().
+ * Returns the number of exported rows.
+ */
+export async function exportSelectionOrAll({ columns, selected, fetchAll, filename, sheetName, columnFilters }) {
+  let rows
+  if (selected && selected.size > 0) rows = [...selected.values()]
+  else {
+    rows = await fetchAll()
+    if (columnFilters) rows = applyColumnFilters(rows, columns, columnFilters)
+  }
+  if (!rows.length) return 0
+  exportXlsx({
+    columns,
+    rows,
+    getValue: (r, c) => {
+      if (c.text) return c.text(r)
+      const v = r[c.key]
+      return typeof v === 'object' && v !== null ? JSON.stringify(v) : v
+    },
+    filename,
+    sheetName,
+  })
+  return rows.length
+}
+
+/** Page through a server search until total/cap reached. */
+export async function fetchAllPages(fetchPage, { size = 200, cap = 5000, onProgress } = {}) {
+  const first = await fetchPage(0, size)
+  const items = [...(first.items || [])]
+  const total = Math.min(first.total || items.length, cap)
+  let page = 1
+  while (items.length < total && page < 200) {
+    onProgress?.(Math.round((items.length / total) * 100))
+    const more = await fetchPage(page, size)
+    if (!more.items?.length) break
+    items.push(...more.items)
+    page++
+  }
+  onProgress?.(100)
+  return items.slice(0, cap)
+}
+
+export function ErrorNote({ children }) {
+  if (!children) return null
+  return <div className="error-note">{children}</div>
 }
