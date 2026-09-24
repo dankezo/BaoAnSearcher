@@ -17,6 +17,11 @@ from .common import (
     VSS_DB, VSS_BASE, DATA_DIR, fold, now_iso, update_status, load_secrets,
 )
 
+# DNS for quanlythuocv1.vss.gov.vn intermittently fails on some Windows resolvers;
+# HTTPS by IP + Host header still works (from HAR / live probe).
+VSS_HOST = "quanlythuocv1.vss.gov.vn"
+VSS_IP_FALLBACK = "103.57.114.162"
+
 COLUMNS = [
     "loai_thau", "ma_tinh", "ten_tinh", "ten_don_vi", "ma_cskcb", "ten_cskcb",
     "ma", "ma_gy", "ten", "hoatchat", "duongdung", "maduongdung", "madd_gy",
@@ -71,19 +76,46 @@ def row_fingerprint(d: dict) -> str:
     return "|".join(str(d.get(k) or "") for k in keys)
 
 
+def _year_in(text: str) -> int | None:
+    m = re.search(r"(20\d{2})", str(text or ""))
+    return int(m.group(1)) if m else None
+
+
+def normalize_vss_date(val: str | None) -> str:
+    """Normalize dd/MM/yyyy (crawl HTML) or Excel datetimes to ISO yyyy-mm-dd[ HH:MM:SS]."""
+    s = str(val or "").strip()
+    if not s:
+        return ""
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(20\d{2})$", s)
+    if m:
+        d, mo, y = int(m.group(1)), int(m.group(2)), m.group(3)
+        return f"{y}-{mo:02d}-{d:02d}"
+    m = re.match(r"^(20\d{2})-(\d{2})-(\d{2})", s)
+    if m:
+        return s
+    return s
+
+
+def derive_nam(d: dict) -> int | None:
+    """Catalog / bid year = contract start (tungay_hd → congbo → tungay)."""
+    for k in ("tungay_hd", "congbo", "tungay"):
+        y = _year_in(d.get(k))
+        if y:
+            return y
+    return None
+
+
 def save_rows(rows: list[dict]) -> int:
     n = 0
     with connect() as con:
         for d in rows:
+            for k in ("tungay_hd", "denngay_hd", "tungay", "denngay", "congbo"):
+                if d.get(k):
+                    d[k] = normalize_vss_date(d.get(k)) or d.get(k)
             fp = row_fingerprint(d)
             search = fold(" ".join(str(d.get(c) or "") for c in COLUMNS))
-            nam = None
-            for k in ("tungay_hd", "congbo", "tungay"):
-                v = str(d.get(k) or "")
-                m = re.search(r"(20\d{2})", v)
-                if m:
-                    nam = int(m.group(1))
-                    break
+            nam = derive_nam(d)
+            d["nam"] = nam
             try:
                 con.execute(
                     """INSERT OR IGNORE INTO bids
@@ -303,14 +335,17 @@ def parse_chi_tiet_html(html: str) -> list[dict]:
             header_idx = i
             break
     headers = [fold(h).replace(" ", "_") for h in p.rows[header_idx]]
-    # Map common Vietnamese headers to our keys
+    # Map common Vietnamese headers to our keys (HTML chiTiet uses "Từ ngày HD", "Nhà SX", …)
     alias = {
-        "ten_hoat_chat": "hoatchat", "hoat_chat": "hoatchat", "ten_thuoc": "ten",
+        "ten_hoat_chat": "hoatchat", "hoat_chat": "hoatchat", "ten_thuoc": "ten", "ten": "ten",
         "so_dk": "sodk", "so_dang_ky": "sodk", "ham_luong": "hamluong",
-        "duong_dung": "duongdung", "don_vi_tinh": "donvitinh", "so_luong": "soluong",
-        "don_gia": "gia", "thanh_tien": "thanhtien", "nhom_thau": "nhomthau",
-        "nha_san_xuat": "nhasx", "nuoc_san_xuat": "nuocsx", "ma_tinh": "ma_tinh",
-        "ma_cskcb": "ma_cskcb", "tu_ngay": "tungay_hd", "den_ngay": "denngay_hd",
+        "duong_dung": "duongdung", "don_vi_tinh": "donvitinh", "dvt": "donvitinh",
+        "so_luong": "soluong", "don_gia": "gia", "gia": "gia", "thanh_tien": "thanhtien",
+        "nhom_thau": "nhomthau",
+        "nha_san_xuat": "nhasx", "nha_sx": "nhasx", "nuoc_san_xuat": "nuocsx", "nuoc_sx": "nuocsx",
+        "ma_tinh": "ma_tinh", "ma_cskcb": "ma_cskcb",
+        "tu_ngay": "tungay_hd", "tu_ngay_hd": "tungay_hd",
+        "den_ngay": "denngay_hd", "den_ngay_hd": "denngay_hd",
         "loai_thau": "loai_thau", "loai": "loai", "dang_bao_che": "dangbaoche",
     }
     mapped = []
@@ -328,41 +363,87 @@ def parse_chi_tiet_html(html: str) -> list[dict]:
     return out
 
 
-def crawl_vss(days: int = 7, loai: int = 1, max_pages: int = 50) -> dict:
-    """Crawl recent announcement days from quanlythuocv1.vss.gov.vn."""
+VSS_HOST = "quanlythuocv1.vss.gov.vn"
+VSS_IP_FALLBACK = "103.57.114.162"
+_vss_prefer_ip = False
+
+
+def _http_get(url: str, cookie: str = "", timeout: int = 45) -> str:
+    """GET HTML; on DNS failure retry via VSS IP with Host header."""
+    global _vss_prefer_ip
+    import ssl
+    from urllib.parse import urlparse
+
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/html",
+        **({"Cookie": cookie} if cookie else {}),
+    }
+
+    def via_ip() -> str:
+        parsed = urlparse(url)
+        ip_url = f"https://{VSS_IP_FALLBACK}{parsed.path}"
+        if parsed.query:
+            ip_url += f"?{parsed.query}"
+        headers2 = {**headers, "Host": VSS_HOST}
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(ip_url, headers=headers2)
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
+    if _vss_prefer_ip and VSS_HOST in url:
+        return via_ip()
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception as first:
+        if VSS_HOST not in url:
+            raise
+        _vss_prefer_ip = True
+        try:
+            return via_ip()
+        except Exception:
+            raise first
+
+
+def crawl_vss(days: int = 2, loai: int = 1, max_pages: int = 50, catchup: bool = False) -> dict:
+    """Crawl announcement days from quanlythuocv1.vss.gov.vn.
+
+    - Daily / scheduled: days=2 (fast).
+    - Catch-up: days up to 180, stop early after several empty days in a row.
+    """
     global _crawl_thread
     if _crawl_thread and _crawl_thread.is_alive():
         return {"ok": False, "message": "VSS đang chạy"}
 
     _crawl_stop.clear()
+    days = max(1, min(180 if catchup else 14, int(days or 2)))
+    empty_stop = 5 if catchup else 2
 
     def work():
         secrets = load_secrets()
-        # Cookie optional
         cookie = (secrets.get("vss") or {}).get("cookie") or ""
         total_ins = 0
         today = datetime.now()
-        days_list = [(today - timedelta(days=i)).strftime("%d/%m/%Y") for i in range(max(1, days))]
-        steps = max(1, len(days_list) * max_pages)
-        step = 0
-        update_status("vss", state="running", progress=1, message="Bắt đầu crawl VSS…", updated=now_iso())
+        days_list = [(today - timedelta(days=i)).strftime("%d/%m/%Y") for i in range(days)]
+        empty_streak = 0
+        mode = "bắt kịp" if catchup else f"{days} ngày"
+        update_status("vss", state="running", progress=1, message=f"Crawl VSS {mode}…", updated=now_iso())
         try:
-            for ngay in days_list:
+            for day_i, ngay in enumerate(days_list):
                 if _crawl_stop.is_set():
                     break
+                day_ins = 0
                 for page in range(max_pages):
                     if _crawl_stop.is_set():
                         break
-                    step += 1
                     url = f"{VSS_BASE}/kqdt/chiTiet?ngaycongbo={urllib.parse.quote(ngay)}&loai={loai}&page={page}"
-                    req = urllib.request.Request(url, headers={
-                        "User-Agent": "Mozilla/5.0",
-                        "Accept": "text/html",
-                        **({"Cookie": cookie} if cookie else {}),
-                    })
                     try:
-                        with urllib.request.urlopen(req, timeout=45) as resp:
-                            html = resp.read().decode("utf-8", errors="replace")
+                        html = _http_get(url, cookie=cookie)
                     except Exception as e:
                         update_status("vss", message=f"Lỗi {ngay} p{page}: {e}")
                         break
@@ -371,19 +452,37 @@ def crawl_vss(days: int = 7, loai: int = 1, max_pages: int = 50) -> dict:
                         break
                     for r in rows:
                         r["congbo"] = ngay
+                        if not r.get("loai"):
+                            r["loai"] = "Tân dược"
                     n = save_rows(rows)
                     total_ins += n
-                    pct = min(99, int(100 * step / steps))
-                    update_status("vss", progress=pct, message=f"{ngay} trang {page}: +{n} (tổng +{total_ins})", updated=now_iso())
-                    time.sleep(0.4)
+                    day_ins += n
+                    # Progress by calendar day (not pages) so catch-up % không kẹt ở 2–7
+                    pct = min(99, int(100 * (day_i + (page + 1) / max_pages) / max(1, len(days_list))))
+                    update_status(
+                        "vss", progress=pct,
+                        message=f"{ngay} trang {page}: +{n} (tổng +{total_ins})",
+                        updated=now_iso(),
+                    )
+                    time.sleep(0.25)
+                if day_ins == 0:
+                    empty_streak += 1
+                    if empty_streak >= empty_stop:
+                        update_status("vss", message=f"Dừng sớm: {empty_streak} ngày trống liên tiếp")
+                        break
+                else:
+                    empty_streak = 0
             info = meta_info()
-            update_status("vss", state="idle", progress=100, message=f"Crawl xong +{total_ins}", updated=now_iso(), count=info["count"])
+            update_status(
+                "vss", state="idle", progress=100,
+                message=f"Crawl xong +{total_ins}", updated=now_iso(), count=info["count"],
+            )
         except Exception as e:
             update_status("vss", state="error", message=str(e), updated=now_iso())
 
     _crawl_thread = threading.Thread(target=work, daemon=True)
     _crawl_thread.start()
-    return {"ok": True, "message": "Đã bắt đầu crawl VSS"}
+    return {"ok": True, "message": f"Đã bắt đầu crawl VSS ({'bắt kịp ' if catchup else ''}{days} ngày)"}
 
 
 def stop_crawl():
@@ -424,9 +523,27 @@ def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
         except (TypeError, ValueError):
             year = None
         if year:
+            # Excel BHYT-YYYY has no "nam" column. Catalog year = tungay_hd (→ congbo → tungay).
+            # Filter "Năm X" = HĐ hiệu lực trong năm X (giao [tungay_hd, denngay_hd]) hoặc công bố năm X.
+            # Do NOT match created_date via raw LIKE — that falsely marks almost all rows as 2025.
             y = str(year)
-            clauses.append("(nam = ? OR coalesce(tungay_hd,'') LIKE ? OR coalesce(denngay_hd,'') LIKE ?)")
-            args.extend([year, f"{y}%", f"{y}%"])
+            y_start, y_end = f"{y}-01-01", f"{y}-12-31"
+            clauses.append(
+                """(
+                    nam = ?
+                    OR coalesce(tungay_hd,'') LIKE ?
+                    OR coalesce(denngay_hd,'') LIKE ?
+                    OR coalesce(json_extract(raw,'$.congbo'),'') LIKE ?
+                    OR coalesce(json_extract(raw,'$.tungay'),'') LIKE ?
+                    OR (
+                        length(coalesce(tungay_hd,'')) >= 4
+                        AND length(coalesce(denngay_hd,'')) >= 4
+                        AND substr(tungay_hd,1,10) <= ?
+                        AND substr(denngay_hd,1,10) >= ?
+                    )
+                )"""
+            )
+            args.extend([year, f"{y}%", f"{y}%", f"{y}%", f"{y}%", y_end, y_start])
     if filters.get("tuNgay"):
         clauses.append("coalesce(tungay_hd,'') >= ?")
         args.append(filters["tuNgay"])
@@ -440,21 +557,15 @@ def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
     with connect() as con:
         total = con.execute("SELECT count(*) FROM bids" + where, args).fetchone()[0]
         rows = con.execute(
-            "SELECT raw FROM bids" + where +
+            "SELECT raw, nam FROM bids" + where +
             " ORDER BY coalesce(tungay_hd,'') DESC, id DESC LIMIT ? OFFSET ?",
             args + [size, page * size],
         ).fetchall()
     items = []
-    for i, (raw,) in enumerate(rows):
+    for i, (raw, nam_col) in enumerate(rows):
         d = json.loads(raw)
         d["stt"] = page * size + i + 1
-        # Ensure nam is present for client year filters
         if d.get("nam") is None:
-            for k in ("congbo", "tungay_hd", "tungay"):
-                s = str(d.get(k) or "")
-                m = re.match(r"(20\d{2})", s)
-                if m:
-                    d["nam"] = int(m.group(1))
-                    break
+            d["nam"] = nam_col if nam_col is not None else derive_nam(d)
         items.append(d)
     return {"total": total, "page": page, "size": size, "items": items}

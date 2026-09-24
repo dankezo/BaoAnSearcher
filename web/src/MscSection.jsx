@@ -232,7 +232,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   }
 
   const secondaryGrid = (
-    <div className="filter-grid">
+    <div className={`filter-grid tight ${kind === 'prices' ? 'cols-5' : 'cols-4'}`}>
       {kind === 'prices' ? (
         <>
           <SuggestField label="Tên thuốc" value={filters.name} onChange={(v) => setF('name', v)} onSearch={(v) => runSearch({ name: v })} suggest={fieldSuggest('name')} />
@@ -267,25 +267,27 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
 
       <div className="panel">
         <div className="filters">
-          <div className="filter-top">
-            <div className="segmented" role="tablist" aria-label="Loại dữ liệu">
-              <button type="button" role="tab" aria-selected={kind === 'prices'} className={kind === 'prices' ? 'on' : ''} onClick={() => setKind('prices')}>Đơn giá</button>
-              <button type="button" role="tab" aria-selected={kind === 'tenders'} className={kind === 'tenders' ? 'on' : ''} onClick={() => setKind('tenders')}>Gói thầu</button>
+          <div className="filters-inner">
+            <div className="filter-top">
+              <div className="segmented" role="tablist" aria-label="Loại dữ liệu">
+                <button type="button" role="tab" aria-selected={kind === 'prices'} className={kind === 'prices' ? 'on' : ''} onClick={() => setKind('prices')}>Đơn giá</button>
+                <button type="button" role="tab" aria-selected={kind === 'tenders'} className={kind === 'tenders' ? 'on' : ''} onClick={() => setKind('tenders')}>Gói thầu</button>
+              </div>
             </div>
-          </div>
-          <div className="filter-grid">
-            <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tìm trong mọi trường" />
-          </div>
-          {!filtersInModal && secondaryGrid}
-          <div className="filter-actions">
-            {filtersInModal && (
-              <button type="button" className={`btn ghost${detailActive ? ' on' : ''}`} onClick={() => setFilterModalOpen(true)}>
-                {Icons.filter} Bộ lọc chi tiết
-                {detailActive > 0 && <span className="pill">{detailActive}</span>}
-              </button>
-            )}
-            <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
-            <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
+            <div className="filter-keyword">
+              <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tìm trong mọi trường" />
+            </div>
+            {!filtersInModal && secondaryGrid}
+            <div className="filter-actions filter-actions-center">
+              {filtersInModal && (
+                <button type="button" className={`btn ghost${detailActive ? ' on' : ''}`} onClick={() => setFilterModalOpen(true)}>
+                  {Icons.filter} Bộ lọc chi tiết
+                  {detailActive > 0 && <span className="pill">{detailActive}</span>}
+                </button>
+              )}
+              <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
+              <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
+            </div>
           </div>
         </div>
 
@@ -354,8 +356,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           return val
         }}
       />
-      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} />
-      <LoadingOverlay show={exporting} percent={exportPct} message="Đang gom dữ liệu để xuất Excel…" />
+      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} onCancel={() => { reqSeq.current += 1; setLoading(false) }} />
+      <LoadingOverlay show={exporting} percent={exportPct} message="Đang gom dữ liệu để xuất Excel…" onCancel={() => setExporting(false)} />
     </div>
   )
 }

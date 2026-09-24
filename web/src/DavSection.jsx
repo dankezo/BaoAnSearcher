@@ -343,7 +343,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   }
 
   const detailFields = (
-    <div className="filter-grid">
+    <div className="filter-grid tight">
       <SuggestField label="Tên thuốc" value={filters.tenThuoc} onChange={(v) => setF('tenThuoc', v)} onSearch={(v) => runSearch({ tenThuoc: v })} suggest={fieldSuggest('tenThuoc')} />
       <SuggestField label="Số ĐK" value={filters.soDangKy} onChange={(v) => setF('soDangKy', v)} onSearch={(v) => runSearch({ soDangKy: v })} suggest={fieldSuggest('soDangKy')} />
       <SuggestField label="Hoạt chất" value={filters.hoatChat} onChange={(v) => setF('hoatChat', v)} onSearch={(v) => runSearch({ hoatChat: v })} suggest={fieldSuggest('hoatChat')} />
@@ -376,58 +376,60 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
 
       <div className="panel">
         <div className="filters">
-          <SearchSuggestBar
-            value={filters.q}
-            onChange={(v) => setF('q', v)}
-            onSubmit={() => runSearch()}
-            suggestions={suggests}
-            open={suggestOpen}
-            onOpenChange={setSuggestOpen}
-            loading={loading || suggesting}
-            onPick={(s) => {
-              const row = s.row
-              const q = row?.tenThuoc || s.title || filters.q
-              setFilters((f) => ({ ...f, q }))
-              setSuggestOpen(false)
-              if (row) setDetail(row)
-              runSearch({ q })
-            }}
-          />
-          <div className="filter-actions filter-actions-center">
-            <TagFilterDropdown
-              selectedTags={selectedTags}
-              onChange={(ids) => { setSelectedTags(ids); refreshConfigs() }}
-              configs={configs}
+          <div className="filters-inner">
+            <SearchSuggestBar
+              value={filters.q}
+              onChange={(v) => setF('q', v)}
+              onSubmit={() => runSearch()}
+              suggestions={suggests}
+              open={suggestOpen}
+              onOpenChange={setSuggestOpen}
+              loading={loading || suggesting}
+              onPick={(s) => {
+                const row = s.row
+                const q = row?.tenThuoc || s.title || filters.q
+                setFilters((f) => ({ ...f, q }))
+                setSuggestOpen(false)
+                if (row) setDetail(row)
+                runSearch({ q })
+              }}
             />
-            {filtersInModal ? (
-              <button
-                type="button"
-                className={`btn ghost${advancedActive ? ' on' : ''}`}
-                onClick={() => setFilterModalOpen(true)}
+            <div className="filter-actions filter-actions-center">
+              <TagFilterDropdown
+                selectedTags={selectedTags}
+                onChange={(ids) => { setSelectedTags(ids); refreshConfigs() }}
+                configs={configs}
+              />
+              {filtersInModal ? (
+                <button
+                  type="button"
+                  className={`btn ghost${advancedActive ? ' on' : ''}`}
+                  onClick={() => setFilterModalOpen(true)}
+                >
+                  {Icons.filter} Bộ lọc chi tiết
+                  {advancedActive > 0 && <span className="pill">{advancedActive}</span>}
+                </button>
+              ) : null}
+              <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
+              <button type="button" className="btn secondary" onClick={() => {
+                setFilters(EMPTY_FILTERS)
+                setColumnFilters({})
+                setSuggests([])
+              }}
               >
-                {Icons.filter} Bộ lọc chi tiết
-                {advancedActive > 0 && <span className="pill">{advancedActive}</span>}
+                Xóa lọc
               </button>
-            ) : null}
-            <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
-            <button type="button" className="btn secondary" onClick={() => {
-              setFilters(EMPTY_FILTERS)
-              setColumnFilters({})
-              setSuggests([])
-            }}
-            >
-              Xóa lọc
-            </button>
-            {localMode && !embedded && (
-              <button type="button" className="btn ghost" onClick={() => api.davValidity().then(() => runSearch()).catch((e) => setErr(e.message))}>
-                Rebuild tập hiệu lực
-              </button>
+              {localMode && !embedded && (
+                <button type="button" className="btn ghost" onClick={() => api.davValidity().then(() => runSearch()).catch((e) => setErr(e.message))}>
+                  Rebuild tập hiệu lực
+                </button>
+              )}
+            </div>
+            {!filtersInModal && detailFields}
+            {selectedTags.length === 0 && (
+              <div className="tag-empty-hint">Vui lòng chọn ít nhất một phân loại tag để hiển thị kết quả.</div>
             )}
           </div>
-          {!filtersInModal && detailFields}
-          {selectedTags.length === 0 && (
-            <div className="tag-empty-hint">Vui lòng chọn ít nhất một phân loại tag để hiển thị kết quả.</div>
-          )}
         </div>
 
         <TableToolbar
@@ -514,8 +516,8 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           return val
         }}
       />
-      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} />
-      <LoadingOverlay show={exporting} percent={exportPct} message="Đang gom dữ liệu để xuất Excel…" />
+      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} onCancel={() => { reqSeq.current += 1; setLoading(false) }} />
+      <LoadingOverlay show={exporting} percent={exportPct} message="Đang gom dữ liệu để xuất Excel…" onCancel={() => setExporting(false)} />
     </div>
   )
 }

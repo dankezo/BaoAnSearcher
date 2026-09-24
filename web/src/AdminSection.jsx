@@ -169,8 +169,14 @@ export default function AdminSection({ localMode }) {
           </button>
         </StatusCard>
 
-        <StatusCard index="03" title="VSS — BHYT trúng thầu" source="baohiemxahoi.gov.vn" status={status.vss}>
-          <button type="button" className="btn" onClick={run(() => api.vssCrawl({ days: 7 }))}>Crawl 7 ngày</button>
+        <StatusCard index="03" title="VSS — BHYT trúng thầu" source="quanlythuocv1.vss.gov.vn" status={status.vss}>
+          <button type="button" className="btn" onClick={run(() => api.vssCrawl({ days: 90, catchup: true }))}>
+            Crawl bắt kịp
+          </button>
+          <button type="button" className="btn secondary" onClick={run(() => api.vssCrawl({ days: 2 }))}>
+            Crawl 2 ngày
+          </button>
+          <button type="button" className="btn ghost" onClick={run(() => api.vssCrawlStop())}>Dừng</button>
           <button type="button" className="btn secondary" onClick={run(async () => { const r = await api.vssImport({}); setMsg(JSON.stringify(r)); return r })}>
             Import Excel mặc định
           </button>
@@ -195,13 +201,16 @@ export default function AdminSection({ localMode }) {
             <Field label="VSS cookie" hint="tuỳ chọn">
               <input value={secrets.vss.cookie} onChange={(e) => setSecrets((s) => ({ ...s, vss: { ...s.vss, cookie: e.target.value } }))} placeholder="session=…" />
             </Field>
-            <Field label="Nhắc tự cập nhật">
+            <Field label="Tự crawl VSS hàng ngày" hint="chỉ 2 ngày gần nhất">
               <select
                 value={secrets.autoCrawl?.enabled ? '1' : '0'}
-                onChange={(e) => setSecrets((s) => ({ ...s, autoCrawl: { ...s.autoCrawl, enabled: e.target.value === '1' } }))}
+                onChange={(e) => setSecrets((s) => ({
+                  ...s,
+                  autoCrawl: { ...s.autoCrawl, enabled: e.target.value === '1', vssDays: 2 },
+                }))}
               >
                 <option value="0">Tắt</option>
-                <option value="1">Bật (lưu preference local)</option>
+                <option value="1">Bật — mỗi ngày crawl 2 ngày gần nhất</option>
               </select>
             </Field>
           </div>

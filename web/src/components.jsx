@@ -24,7 +24,7 @@ export const Icons = I
 /* ------------------------------------------------------------------ */
 /* Loading                                                              */
 /* ------------------------------------------------------------------ */
-export function LoadingOverlay({ show, percent = 0, message = 'Đang xử lý…' }) {
+export function LoadingOverlay({ show, percent = 0, message = 'Đang xử lý…', onCancel }) {
   if (!show) return null
   const pct = Math.max(0, Math.min(100, Math.round(percent)))
   return (
@@ -33,6 +33,11 @@ export function LoadingOverlay({ show, percent = 0, message = 'Đang xử lý…
         <div className="loading-msg">{message}</div>
         <div className="pct">{pct}<span>%</span></div>
         <div className="bar"><span style={{ width: `${pct}%` }} /></div>
+        {onCancel && pct >= 85 && (
+          <button type="button" className="btn secondary sm" style={{ marginTop: 12 }} onClick={onCancel}>
+            Bỏ qua / thử lại
+          </button>
+        )}
       </div>
     </div>
   )
@@ -44,7 +49,10 @@ export function useSimProgress(active, baseMsg = 'Đang tải') {
     if (!active) { setPct(0); return }
     setPct(8)
     const t = setInterval(() => {
-      setPct((p) => (p >= 92 ? p : p + Math.random() * 7))
+      setPct((p) => {
+        if (p >= 94) return 88 + Math.random() * 6 // pulse thay vì kẹt cứng 92
+        return p + Math.random() * 7
+      })
     }, 400)
     return () => clearInterval(t)
   }, [active])

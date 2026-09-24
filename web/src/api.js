@@ -1,15 +1,33 @@
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 async function request(path, opts = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
-    ...opts,
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
+  const { timeoutMs = 55000, ...fetchOpts } = opts
+  const ctrl = new AbortController()
+  const external = fetchOpts.signal
+  if (external) {
+    if (external.aborted) ctrl.abort()
+    else external.addEventListener('abort', () => ctrl.abort(), { once: true })
   }
-  return res.json()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json', ...(fetchOpts.headers || {}) },
+      ...fetchOpts,
+      signal: ctrl.signal,
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || res.statusText)
+    }
+    return res.json()
+  } catch (e) {
+    if (e?.name === 'AbortError') {
+      throw new Error('Hết thời gian chờ API (có thể server đang bận crawl). Thử lại sau vài giây.')
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export async function health() {
@@ -35,6 +53,7 @@ export const api = {
   mscTenders: (body) => request('/api/msc/crawl/tenders', { method: 'POST', body: JSON.stringify(body) }),
   vssSearch: (body) => request('/api/vss/search', { method: 'POST', body: JSON.stringify(body) }),
   vssCrawl: (body) => request('/api/vss/crawl', { method: 'POST', body: JSON.stringify(body || {}) }),
+  vssCrawlStop: () => request('/api/vss/crawl/stop', { method: 'POST', body: '{}' }),
   vssImport: (body) => request('/api/vss/import', { method: 'POST', body: JSON.stringify(body || {}) }),
 }
 
@@ -70,10 +89,21 @@ export function extractYear(row, keys = ['nam', 'congbo', 'tungay', 'tungay_hd',
   return ''
 }
 
+/**
+ * VSS year filter: Excel has no "nam" column — catalog year = tungay_hd (→ congbo → tungay).
+ * "Năm X" matches contracts effective in calendar year X (overlap tungay_hd…denngay_hd) or announced in X.
+ * Does not use created_date alone.
+ */
 export function matchesYear(row, nam) {
   const y = String(nam ?? '').trim()
-  if (!y) return true
-  return extractYear(row) === y
+  if (!y || !/^20\d{2}$/.test(y)) return true
+  if (String(row?.nam ?? '').trim() === y) return true
+  const fields = [row?.tungay_hd, row?.denngay_hd, row?.congbo, row?.tungay, row?.denngay]
+  if (fields.some((v) => String(v ?? '').includes(y))) return true
+  const start = String(row?.tungay_hd || row?.tungay || '').slice(0, 10)
+  const end = String(row?.denngay_hd || row?.denngay || '').slice(0, 10)
+  if (start.length >= 4 && end.length >= 4 && start <= `${y}-12-31` && end >= `${y}-01-01`) return true
+  return false
 }
 
 /** Sort rows by the first non-empty date-like field, newest first. */

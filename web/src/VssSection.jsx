@@ -256,8 +256,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   }
 
   const primaryFilters = (
-    <div className="filter-grid">
-      <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" />
+    <div className="filter-grid cols-5">
       <Field label="Nhóm thầu">
         <select value={filters.nhomthau} onChange={(e) => setF('nhomthau', e.target.value)}>
           <option value="">Tất cả</option>
@@ -269,15 +268,17 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
       <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
       <SuggestField label="Hoạt chất" value={filters.hoatchat} onChange={(v) => setF('hoatchat', v)} onSearch={(v) => runSearch({ hoatchat: v })} suggest={fieldSuggest('hoatchat')} />
       <SuggestField label="Số ĐK" value={filters.sodk} onChange={(v) => setF('sodk', v)} onSearch={(v) => runSearch({ sodk: v })} suggest={fieldSuggest('sodk')} />
+      <SuggestField label="Loại thầu" value={filters.loai_thau} onChange={(v) => setF('loai_thau', v)} onSearch={(v) => runSearch({ loai_thau: v })} suggest={fieldSuggest('loai_thau')} placeholder="vd: thau_tinh" />
     </div>
   )
 
   const detailFilters = (
-    <div className="filter-grid">
-      <SuggestField label="Loại thầu" value={filters.loai_thau} onChange={(v) => setF('loai_thau', v)} onSearch={(v) => runSearch({ loai_thau: v })} suggest={fieldSuggest('loai_thau')} placeholder="vd: thau_tinh" />
+    <div className="filter-grid tight cols-6">
       <Field label="HĐ từ ngày"><input type="date" value={filters.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
       <Field label="HĐ đến ngày"><input type="date" value={filters.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
-      <Field label="Năm"><input value={filters.nam} onChange={(e) => setF('nam', e.target.value)} onKeyDown={onEnter} placeholder="2024" inputMode="numeric" /></Field>
+      <Field label="Năm" hint="hiệu lực HĐ">
+        <input value={filters.nam} onChange={(e) => setF('nam', e.target.value)} onKeyDown={onEnter} placeholder="2024 · 2025 · 2026" inputMode="numeric" />
+      </Field>
       <SuggestField label="Đường dùng" value={filters.duongdung} onChange={(v) => setF('duongdung', v)} onSearch={(v) => runSearch({ duongdung: v })} suggest={fieldSuggest('duongdung')} />
       <SuggestField label="Mã tỉnh" value={filters.ma_tinh} onChange={(v) => setF('ma_tinh', v)} onSearch={(v) => runSearch({ ma_tinh: v })} suggest={fieldSuggest('ma_tinh')} />
       <SuggestField label="Nước SX" value={filters.nuocsx} onChange={(v) => setF('nuocsx', v)} onSearch={(v) => runSearch({ nuocsx: v })} suggest={fieldSuggest('nuocsx')} />
@@ -301,7 +302,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
       <SuggestField label="Loại thầu" value={filters.loai_thau} onChange={(v) => setF('loai_thau', v)} onSearch={(v) => runSearch({ loai_thau: v })} suggest={fieldSuggest('loai_thau')} placeholder="vd: thau_tinh" />
       <Field label="HĐ từ ngày"><input type="date" value={filters.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
       <Field label="HĐ đến ngày"><input type="date" value={filters.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
-      <Field label="Năm"><input value={filters.nam} onChange={(e) => setF('nam', e.target.value)} onKeyDown={onEnter} placeholder="2024" inputMode="numeric" /></Field>
+      <Field label="Năm" hint="hiệu lực HĐ"><input value={filters.nam} onChange={(e) => setF('nam', e.target.value)} onKeyDown={onEnter} placeholder="2024 · 2025 · 2026" inputMode="numeric" /></Field>
       <SuggestField label="Đường dùng" value={filters.duongdung} onChange={(v) => setF('duongdung', v)} onSearch={(v) => runSearch({ duongdung: v })} suggest={fieldSuggest('duongdung')} />
       <SuggestField label="Mã tỉnh" value={filters.ma_tinh} onChange={(v) => setF('ma_tinh', v)} onSearch={(v) => runSearch({ ma_tinh: v })} suggest={fieldSuggest('ma_tinh')} />
       <SuggestField label="Nước SX" value={filters.nuocsx} onChange={(v) => setF('nuocsx', v)} onSearch={(v) => runSearch({ nuocsx: v })} suggest={fieldSuggest('nuocsx')} />
@@ -323,29 +324,34 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
       <div className="panel">
         <div className="filters">
-          {filtersInModal ? (
-            <div className="filter-grid">
-              <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" />
-            </div>
-          ) : (
-            <>
-              {primaryFilters}
-              {detailFilters}
-            </>
-          )}
-          <div className="filter-actions">
-            {filtersInModal && (
-              <button
-                type="button"
-                className={`btn ghost${detailActive ? ' on' : ''}`}
-                onClick={() => setFilterModalOpen(true)}
-              >
-                {Icons.filter} Bộ lọc chi tiết
-                {detailActive > 0 && <span className="pill">{detailActive}</span>}
-              </button>
+          <div className="filters-inner">
+            {filtersInModal ? (
+              <div className="filter-keyword">
+                <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" />
+              </div>
+            ) : (
+              <>
+                <div className="filter-keyword">
+                  <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" />
+                </div>
+                {primaryFilters}
+                {detailFilters}
+              </>
             )}
-            <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
-            <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
+            <div className="filter-actions filter-actions-center">
+              {filtersInModal && (
+                <button
+                  type="button"
+                  className={`btn ghost${detailActive ? ' on' : ''}`}
+                  onClick={() => setFilterModalOpen(true)}
+                >
+                  {Icons.filter} Bộ lọc chi tiết
+                  {detailActive > 0 && <span className="pill">{detailActive}</span>}
+                </button>
+              )}
+              <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
+              <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
+            </div>
           </div>
         </div>
 
@@ -416,8 +422,8 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         onClose={() => setDetail(null)}
         renderValue={(f, row, val) => (f.key === 'hoatchat' ? <IngredientText text={row.hoatchat} /> : val)}
       />
-      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} />
-      <LoadingOverlay show={exporting} percent={exportPct} message="Đang gom dữ liệu để xuất Excel…" />
+      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} onCancel={() => { reqSeq.current += 1; setLoading(false) }} />
+      <LoadingOverlay show={exporting} percent={exportPct} message="Đang gom dữ liệu để xuất Excel…" onCancel={() => setExporting(false)} />
     </div>
   )
 }

@@ -2,6 +2,8 @@
 """BaoAn Searcher API."""
 from __future__ import annotations
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -13,7 +15,7 @@ from pydantic import BaseModel
 
 from . import dav, msc, vss
 from .common import (
-    WEB_PUBLIC, load_secrets, save_secrets, load_status, update_status, now_iso, DM93_PATH,
+    WEB_PUBLIC, load_secrets, save_secrets, load_status, update_status, now_iso, DM93_PATH, VN,
 )
 
 app = FastAPI(title="BaoAn Searcher", version="1.0.0")
@@ -36,10 +38,11 @@ class CrawlBody(BaseModel):
     dateFrom: Optional[str] = None
     dateTo: Optional[str] = None
     pages: int = 20
-    days: int = 7
+    days: int = 2
     loai: int = 1
     excelPath: Optional[str] = None
     refresh: bool = False
+    catchup: bool = False
 
 
 @app.get("/api/health")
@@ -173,7 +176,10 @@ def vss_search(body: dict[str, Any]):
 
 @app.post("/api/vss/crawl")
 def vss_crawl(body: CrawlBody):
-    return vss.crawl_vss(days=body.days, loai=body.loai)
+    days = body.days
+    if body.catchup and (not days or days < 30):
+        days = 90
+    return vss.crawl_vss(days=days, loai=body.loai, catchup=body.catchup)
 
 
 @app.post("/api/vss/crawl/stop")
@@ -218,3 +224,37 @@ if DIST.exists():
 
 def create_app():
     return app
+
+
+def _auto_crawl_loop():
+    """When autoCrawl.enabled: daily VSS crawl of last 2 days only (default)."""
+    while True:
+        try:
+            time.sleep(1800)  # check every 30 min
+            secrets = load_secrets()
+            ac = secrets.get("autoCrawl") or {}
+            if not ac.get("enabled"):
+                continue
+            from datetime import datetime
+            today = datetime.now(VN).strftime("%Y-%m-%d")
+            if ac.get("lastVssDate") == today:
+                continue
+            days = int(ac.get("vssDays") or 2)
+            days = max(1, min(7, days))
+            st = load_status().get("vss") or {}
+            if st.get("state") == "running":
+                continue
+            vss.crawl_vss(days=days, loai=1, catchup=False)
+            secrets = load_secrets()
+            secrets.setdefault("autoCrawl", {})
+            secrets["autoCrawl"]["lastVssDate"] = today
+            secrets["autoCrawl"]["vssDays"] = days
+            save_secrets(secrets)
+        except Exception:
+            time.sleep(60)
+
+
+@app.on_event("startup")
+def _startup_auto_crawl():
+    t = threading.Thread(target=_auto_crawl_loop, daemon=True, name="vss-auto-crawl")
+    t.start()
