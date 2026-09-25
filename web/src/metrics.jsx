@@ -109,7 +109,7 @@ function useFlashKey(dep) {
   return flash
 }
 
-export function DonutChart({ slices, size = 100 }) {
+export function DonutChart({ slices, size = 88 }) {
   const total = slices.reduce((s, x) => s + (x.value || 0), 0) || 1
   const r = 36
   const c = 2 * Math.PI * r
@@ -198,7 +198,7 @@ function StatCard({ kicker, value, sub, tip, badge, tone }) {
         {badge && <span className={`insight-badge ${badge.tone || ''}`}>{badge.text}</span>}
       </div>
       {sub && <div className="stats-sub">{sub}</div>}
-      {tip && <div className="insight-tip"><strong>Sếp:</strong> {tip}</div>}
+      {tip && <div className="insight-tip">{tip}</div>}
     </div>
   )
 }
@@ -219,7 +219,7 @@ export function MetricsPanel({ title, stats, charts, flash }) {
           <div key={c.key} className={`stats-card insight-chart${c.span2 ? ' span-2' : ''}`}>
             {c.title && <div className="stats-kicker">{c.title}</div>}
             {c.node}
-            {c.tip && <div className="insight-tip"><strong>Sếp:</strong> {c.tip}</div>}
+            {c.tip && <div className="insight-tip">{c.tip}</div>}
           </div>
         ))}
       </div>
@@ -270,18 +270,13 @@ export function computeDavMetrics(items) {
   }
 
   const tags = { xanh: 0, vang: 0, cam: 0, xam: 0 }
-  let hieuLuc = 0
   for (const r of rows) {
     if (r.tagId === TAG_XANH) tags.xanh += 1
     else if (r.tagId === TAG_VANG) tags.vang += 1
     else if (r.tagId === TAG_CAM) tags.cam += 1
     else if (r.tagId === TAG_XAM) tags.xam += 1
     else tags.vang += 1
-    if (r.conHieuLuc) hieuLuc += 1
   }
-  const lowComp = sdkBuckets['1-2']
-  const highComp = sdkBuckets['5-10'] + sdkBuckets['10+']
-  const blueOceanPct = byIng.size ? Math.round((lowComp / byIng.size) * 100) : 0
 
   return {
     stats: [
@@ -293,32 +288,6 @@ export function computeDavMetrics(items) {
         tone: safePct >= 50 ? 'ok' : 'warn',
         sub: `${fmtInt(safe)}/${fmtInt(rows.length)} SĐK · hạn >18th & cấp ~5 năm`,
         tip: 'Dưới 50% = rủi ro đứt hàng giữa kỳ thầu — ưu tiên SĐK xanh khi chào.',
-      },
-      {
-        key: 'ocean',
-        kicker: 'Ô kỹ thuật ít cạnh tranh',
-        value: `${blueOceanPct}%`,
-        badge: { text: `${fmtInt(lowComp)} HC · 1–2 SĐK`, tone: blueOceanPct >= 40 ? 'ok' : 'warn' },
-        tone: blueOceanPct >= 40 ? 'ok' : 'warn',
-        sub: `${fmtInt(highComp)} HC đang “đại dương đỏ” (5+ SĐK)`,
-        tip: 'Tỷ lệ cao = còn đất xanh để vào; tập trung HC 1–2 SĐK thay vì đám đông.',
-      },
-      {
-        key: 'live',
-        kicker: 'SĐK còn hiệu lực',
-        value: `${rows.length ? Math.round((hieuLuc / rows.length) * 100) : 0}%`,
-        badge: { text: `${fmtInt(hieuLuc)} SĐK`, tone: 'ok' },
-        sub: `${fmtInt(byIng.size)} hoạt chất · ${fmtInt(rows.length)} dòng lọc`,
-        tip: 'Nhanh biết “kho sống” còn bao nhiêu để lập danh mục chào thầu.',
-      },
-      {
-        key: 'dm93',
-        kicker: 'Cảnh báo DM93 / Cam',
-        value: fmtInt(tags.cam),
-        badge: tags.cam > 0 ? { text: 'Cấm nhập?', tone: 'danger' } : { text: 'Sạch', tone: 'ok' },
-        tone: tags.cam > 0 ? 'danger' : 'ok',
-        sub: 'SĐK khớp danh mục 93 trong mẫu',
-        tip: 'Cam > 0 → cân nhắc CMO nội địa, tránh chào hàng ngoại bị loại.',
       },
     ],
     charts: [
@@ -336,7 +305,7 @@ export function computeDavMetrics(items) {
       {
         key: 'forms',
         title: 'Hoạt chất theo số dạng bào chế',
-        tip: 'Nhiều dạng = đa kênh (uống/tiêm); 1 dạng = dễ tập trung SKU.',
+        tip: 'Nhiều dạng = đa kênh; 1 dạng = dễ tập trung SKU.',
         slices: [
           { key: '1', label: '1 dạng', value: formBuckets['1'], color: '#0d9488' },
           { key: '2', label: '2 dạng', value: formBuckets['2'], color: '#2563eb' },
@@ -347,7 +316,7 @@ export function computeDavMetrics(items) {
       {
         key: 'tags',
         title: 'Cơ cấu trạng thái',
-        tip: 'Xanh = sẵn sàng thầu; Vàng = xác minh hạn; Xám = chỉ tra cứu lịch sử.',
+        tip: 'Xanh = sẵn sàng thầu; Vàng = xác minh hạn; Xám = tra cứu lịch sử.',
         span2: true,
         slices: [
           { key: 'xanh', label: 'Xanh', value: tags.xanh, color: '#22c55e' },
@@ -431,18 +400,8 @@ export function computeMscPriceMetrics(items) {
   const latestQ = quarters[quarters.length - 1]
   const prevQ = prevQuarterKey(latestQ)
   const curVol = latestQ ? (byQuarter.get(latestQ) || 0) : 0
-  const prevVol = prevQ ? (byQuarter.get(prevQ) || 0) : 0
-  let qoq = null
-  if (prevVol > 0) qoq = ((curVol - prevVol) / prevVol) * 100
-  else if (curVol > 0 && prevQ) qoq = 100
-
-  const sortedProv = [...byProv.entries()].sort((a, b) => b[1] - a[1])
-  const topProv = sortedProv[0]
-  const top3Share = value > 0
-    ? Math.round((sortedProv.slice(0, 3).reduce((s, [, v]) => s + v, 0) / value) * 100)
-    : 0
-  const topGroup = [...byGroup.entries()].sort((a, b) => b[1] - a[1])[0]
-  const avgPrice = volume > 0 ? value / volume : null
+  const prevVol = prevQ && byQuarter.has(prevQ) ? (byQuarter.get(prevQ) || 0) : 0
+  const qoq = prevVol > 0 ? ((curVol - prevVol) / prevVol) * 100 : null
 
   return {
     stats: [
@@ -451,46 +410,30 @@ export function computeMscPriceMetrics(items) {
         kicker: 'Dung lượng tiêu thụ (KQLCNT)',
         value: fmtInt(volume),
         sub: `≈ ${fmtMoney(value)} · ${fmtInt(rows.length)} dòng`,
-        tip: 'Quy mô thật của “mỏ” đang lọc — dùng khi quyết định sản lượng nhập.',
+        tip: 'Quy mô “mỏ” đang lọc — căn sản lượng nhập.',
       },
       {
         key: 'qoq',
         kicker: 'Tiêu thụ so quý trước (QoQ)',
-        value: fmtPct(qoq),
-        badge: qoq == null ? null : qoq >= 0 ? { text: 'Tăng', tone: 'ok' } : { text: 'Giảm', tone: 'danger' },
-        tone: qoq == null ? '' : qoq >= 0 ? 'ok' : 'danger',
-        sub: latestQ && prevQ ? `${latestQ} vs ${prevQ}` : 'Thiếu quý trước trong mẫu',
-        tip: 'Tăng mạnh = đẩy hàng / công nợ; giảm = hãm nhập, tránh tồn kho chết.',
-      },
-      {
-        key: 'topProv',
-        kicker: 'Tỉnh dẫn đầu giá trị',
-        value: topProv ? (topProv[0].length > 18 ? `${topProv[0].slice(0, 16)}…` : topProv[0]) : '—',
-        badge: topProv && value ? { text: `${Math.round((topProv[1] / value) * 100)}%`, tone: 'ok' } : null,
-        sub: `Top 3 tỉnh chiếm ${top3Share}% giá trị`,
-        tip: 'Đặt TDV & kho vùng theo tỉnh “nóng”, đừng rải đều.',
-      },
-      {
-        key: 'avg',
-        kicker: 'Đơn giá TB có trọng số',
-        value: avgPrice != null ? fmtInt(avgPrice) : '—',
-        badge: topGroup ? { text: /^[1-5]$/.test(topGroup[0]) ? `Nhóm ${topGroup[0]}` : 'Nhóm lớn', tone: 'warn' } : null,
-        sub: 'Giá × SL / tổng SL · nhóm lớn nhất theo GT',
-        tip: 'Neo giá chào: đừng dưới TB thị trường trừ khi đổi lấy volume.',
+        value: qoq == null ? '—' : fmtPct(qoq),
+        badge: qoq == null ? { text: 'Thiếu quý trước', tone: 'warn' } : qoq >= 0 ? { text: 'Tăng', tone: 'ok' } : { text: 'Giảm', tone: 'danger' },
+        tone: qoq == null ? 'warn' : qoq >= 0 ? 'ok' : 'danger',
+        sub: latestQ && prevQ && prevVol > 0 ? `${latestQ} vs ${prevQ}` : 'Cần ≥2 quý trong mẫu lọc',
+        tip: 'Tăng = đẩy hàng; giảm = hãm nhập. Chỉ tính khi đủ cả 2 quý.',
       },
     ],
     charts: [
       {
         key: 'groups',
         title: 'Giá trị theo nhóm thuốc',
-        tip: 'Nhóm nào đang “ăn tiền” — ưu tiên SKU/nhóm đó khi đàm phán.',
+        tip: 'Nhóm đang “ăn tiền” — ưu tiên SKU khi đàm phán.',
         bars: groupBars,
         horizontal: false,
       },
       {
         key: 'prov',
         title: 'Giá trị theo tỉnh (top)',
-        tip: 'Bản đồ tiền thật — phân bổ lực bán & nộp thầu tập trung.',
+        tip: 'Phân bổ lực bán & nộp thầu theo tỉnh nóng.',
         bars: provBars,
         horizontal: true,
         span2: true,
@@ -635,10 +578,9 @@ export function computeVssMetrics(items) {
   const latest = months[months.length - 1]
   const prev = prevMonthKey(latest)
   const cur = latest ? (byMonth.get(latest) || 0) : 0
-  const prv = prev ? (byMonth.get(prev) || 0) : 0
-  let mom = null
-  if (prv > 0) mom = ((cur - prv) / prv) * 100
-  else if (cur > 0 && prev) mom = 100
+  const prv = prev && byMonth.has(prev) ? (byMonth.get(prev) || 0) : 0
+  // Only real MoM when both consecutive months exist in sample — never invent +100%
+  const mom = prv > 0 && cur >= 0 ? ((cur - prv) / prv) * 100 : null
 
   const provBars = [...byProv.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -650,12 +592,6 @@ export function computeVssMetrics(items) {
       display: totalPay > 0 ? `${((v / totalPay) * 100).toFixed(1)}%` : '—',
       color: '#0f766e',
     }))
-
-  const sortedProv = [...byProv.entries()].sort((a, b) => b[1] - a[1])
-  const topProv = sortedProv[0]
-  const top3Share = totalPay > 0
-    ? Math.round((sortedProv.slice(0, 3).reduce((s, [, v]) => s + v, 0) / totalPay) * 100)
-    : 0
 
   const groupBars = ['1', '2', '3', '4', '5']
     .map((k, i) => ({
@@ -677,18 +613,20 @@ export function computeVssMetrics(items) {
     })
   }
 
-  const avgLine = rows.length ? totalPay / rows.length : null
-
   return {
     stats: [
       {
         key: 'mom',
         kicker: 'Tăng trưởng chi trả BHYT MoM',
-        value: fmtPct(mom),
-        badge: mom == null ? null : mom >= 0 ? { text: 'MoM ↑', tone: 'ok' } : { text: 'MoM ↓', tone: 'danger' },
-        tone: mom == null ? '' : mom >= 0 ? 'ok' : 'danger',
-        sub: latest && prev ? `${latest} vs ${prev}` : 'Thiếu tháng trước trong mẫu',
-        tip: 'Đầu tháng/quý thường tăng (quỹ còn); cuối kỳ giảm — căn nhịp giao hàng & đòi nợ.',
+        value: mom == null ? '—' : fmtPct(mom),
+        badge: mom == null
+          ? { text: 'Thiếu tháng trước', tone: 'warn' }
+          : mom >= 0 ? { text: 'MoM ↑', tone: 'ok' } : { text: 'MoM ↓', tone: 'danger' },
+        tone: mom == null ? 'warn' : mom >= 0 ? 'ok' : 'danger',
+        sub: mom != null && latest && prev
+          ? `${latest} vs ${prev}`
+          : 'Cần ≥2 tháng trong mẫu lọc',
+        tip: 'Đầu tháng/quý thường tăng; cuối kỳ giảm — căn nhịp giao hàng. Chỉ hiện khi đủ 2 tháng dữ liệu.',
       },
       {
         key: 'pay',
@@ -697,27 +635,12 @@ export function computeVssMetrics(items) {
         sub: `${fmtInt(rows.length)} dòng · thành tiền`,
         tip: 'Quy mô quỹ đang nhìn — neo target doanh số vùng/SKU.',
       },
-      {
-        key: 'topProv',
-        kicker: 'Tỉnh “mỏ vàng”',
-        value: topProv ? (topProv[0].length > 16 ? `${topProv[0].slice(0, 14)}…` : topProv[0]) : '—',
-        badge: topProv && totalPay ? { text: `${Math.round((topProv[1] / totalPay) * 100)}%`, tone: 'ok' } : null,
-        sub: `Top 3 tỉnh = ${top3Share}% chi trả`,
-        tip: 'Phân bổ TDV & nộp thầu theo tỉnh nóng, tránh rải mồi dàn trải.',
-      },
-      {
-        key: 'avg',
-        kicker: 'Giá trị TB / dòng thầu',
-        value: avgLine != null ? fmtMoney(avgLine) : '—',
-        sub: 'Thành tiền trung bình mỗi dòng lọc',
-        tip: 'Dòng lớn = ưu tiên đàm phán & chăm CSKCB tương ứng.',
-      },
     ],
     charts: [
       {
         key: 'prov',
         title: 'Tỷ trọng chi trả BHYT theo tỉnh',
-        tip: '% tiền thật theo địa bàn — chọn nơi dồn lực bán.',
+        tip: '% tiền theo địa bàn — chọn nơi dồn lực bán.',
         bars: provBars,
         horizontal: true,
         span2: true,

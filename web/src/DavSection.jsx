@@ -6,8 +6,7 @@ import {
   ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, FilterModal, HospitalGradeField,
   Icons, IngredientText, LoadingOverlay, Pagination, SearchSuggestBar, SuggestField, TableToolbar, UpdatedNote,
   ViewModeSelect, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters,
-  useSectionMeta, useSelection, useSimProgress, useTt20, isFullPageSize, PAGE_SIZE_FULL_CAP,
-} from './components'
+  useSectionMeta, useSelection, useLoadProgress, useTt20, } from './components'
 import { TagBadge, TagFilterDropdown, useTagFilterState } from './TagFilterDropdown'
 import { enrichRowTag } from './tagConfig'
 import { ingredientAllowedAtGrade } from './tt20'
@@ -78,12 +77,12 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const [detail, setDetail] = useState(null)
   const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
-  const [fullNote, setFullNote] = useState('')
   const [suggests, setSuggests] = useState([])
   const [suggestOpen, setSuggestOpen] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
   const [prefsReady, setPrefsReady] = useState(false)
-  const sim = useSimProgress(loading, 'Đang lọc thuốc DAV')
+  const [loadPct, setLoadPct] = useState(null)
+  const sim = useLoadProgress(loading, 'Đang lọc thuốc DAV', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
   const suggestSeq = useRef(0)
@@ -108,7 +107,6 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
       if (saved.filters) setFilters({ ...EMPTY_FILTERS, ...saved.filters, tags: null })
       if (saved.viewMode) setViewMode(saved.viewMode)
       if (Array.isArray(saved.visible) && saved.visible.length) setVisible(saved.visible)
-      if (saved.pageSize != null) setPageSize(saved.pageSize)
       if (saved.columnFilters) setColumnFilters(saved.columnFilters)
     }
     setPrefsReady(true)
@@ -121,10 +119,9 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
       filters: { ...filters, tags: null },
       viewMode,
       visible,
-      pageSize,
       columnFilters,
     })
-  }, [userId, prefsReady, filters, viewMode, visible, pageSize, columnFilters])
+  }, [userId, prefsReady, filters, viewMode, visible, columnFilters])
 
   useEffect(() => {
     if (viewMode === 'compact') setVisible(COMPACT)
@@ -170,11 +167,9 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const search = useCallback(async (p = 0, cf, override = null, tagsOverride = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
-    const full = isFullPageSize(pageSizeRef.current)
     const size = resolvePageSize(pageSizeRef.current)
     setLoading(true)
     setErr('')
-    setFullNote('')
     const active = { ...mergedFilters(cf, tagsOverride), ...(override || {}) }
     try {
       if (localMode || supabaseConfigured) {
@@ -183,20 +178,15 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           ? (page, sz) => api.davSearch({ filters: active, page, size: sz })
           : (page, sz) => cloudDavSearch({ filters: active, page, size: sz })
 
-        if (full || needGrade) {
+        if (needGrade) {
           const allRaw = await fetchAllPages(searchFn, {
             size: Math.max(size, 400),
-            cap: PAGE_SIZE_FULL_CAP,
+            onProgress: (pct) => { if (!stale()) setLoadPct(pct) },
           })
           if (stale()) return
           let items = allRaw.map(enrichRowTag)
-          if (needGrade) {
-            items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, active.hangBenhVien))
-          }
+          items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, active.hangBenhVien))
           items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
-          if (full && allRaw.length >= PAGE_SIZE_FULL_CAP) {
-            setFullNote(`Đã tải tối đa ${PAGE_SIZE_FULL_CAP.toLocaleString('vi-VN')} dòng — thu hẹp lọc nếu cần xem thêm.`)
-          }
           setData({ total: items.length, items, page: 0, size: items.length || size })
           setPage(0)
         } else {
@@ -216,6 +206,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     } finally {
       if (!stale()) {
         setLoading(false)
+        setLoadPct(null)
         setRefreshKey((k) => k + 1)
       }
     }
@@ -341,8 +332,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.id != null ? `id:${r.id}` : `${r.soDangKy}|${page}|${i}`), [page])
-  const fullMode = isFullPageSize(pageSize)
-  const pageSizeNum = fullMode ? Math.max(data.items?.length || 0, 1) : resolvePageSize(pageSize)
+  const pageSizeNum = resolvePageSize(pageSize)
   const metricsItems = rows.length ? rows : data.items
 
   const fetchAll = useCallback(async () => {
@@ -490,14 +480,13 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
         </TableToolbar>
 
         <ColumnPicker allColumns={ALL_COLS} visible={visible} onChange={setVisible} open={colPicker} onClose={() => setColPicker(false)} />
-        {fullNote && <div className="info-note">{fullNote}</div>}
         <ErrorNote>{err}</ErrorNote>
 
         <DataTable
           columns={cols}
           rows={rows}
           rowKey={rowKey}
-          startIndex={fullMode ? 0 : page * pageSizeNum}
+          startIndex={page * pageSizeNum}
           selected={sel.selected}
           onToggleRow={sel.toggle}
           onToggleAll={sel.setMany}
@@ -556,7 +545,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           return val
         }}
       />
-      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} onCancel={() => { reqSeq.current += 1; setLoading(false) }} />
+      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} etaSec={sim.etaSec} onCancel={() => { reqSeq.current += 1; setLoading(false) }} />
       <LoadingOverlay show={exporting} percent={exportPct} message="Đang gom dữ liệu để xuất Excel…" onCancel={() => setExporting(false)} />
     </div>
   )

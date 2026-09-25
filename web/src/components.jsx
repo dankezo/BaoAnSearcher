@@ -25,7 +25,7 @@ export const Icons = I
 /* ------------------------------------------------------------------ */
 /* Loading                                                              */
 /* ------------------------------------------------------------------ */
-export function LoadingOverlay({ show, percent = 0, message = 'Đang xử lý…', onCancel }) {
+export function LoadingOverlay({ show, percent = 0, message = 'Đang xử lý…', etaSec = null, onCancel }) {
   if (!show) return null
   const pct = Math.max(0, Math.min(100, Math.round(percent)))
   return (
@@ -34,6 +34,9 @@ export function LoadingOverlay({ show, percent = 0, message = 'Đang xử lý…
         <div className="loading-msg">{message}</div>
         <div className="pct">{pct}<span>%</span></div>
         <div className="bar"><span style={{ width: `${pct}%` }} /></div>
+        {etaSec != null && etaSec > 0 && (
+          <div className="loading-eta muted">Ước tính còn ~{etaSec}s</div>
+        )}
         {onCancel && pct >= 85 && (
           <button type="button" className="btn secondary sm" style={{ marginTop: 12 }} onClick={onCancel}>
             Bỏ qua / thử lại
@@ -44,22 +47,77 @@ export function LoadingOverlay({ show, percent = 0, message = 'Đang xử lý…
   )
 }
 
-export function useSimProgress(active, baseMsg = 'Đang tải') {
+const LOAD_AVG_KEY = 'baoan.loadAvgMs'
+
+/** Real-ish progress: uses controlled percent when provided; else ETA from rolling avg of past loads. */
+export function useLoadProgress(active, baseMsg = 'Đang tải', controlledPct = null) {
   const [pct, setPct] = useState(0)
+  const [etaSec, setEtaSec] = useState(null)
+  const [message, setMessage] = useState(`${baseMsg}…`)
+  const startRef = useRef(0)
+
   useEffect(() => {
-    if (!active) { setPct(0); return undefined }
-    setPct(8)
-    const t = setInterval(() => {
-      setPct((p) => {
-        // Monotonic asymptote — never bounce backward (avoids 98%→96%).
-        if (p >= 92) return p
-        const step = 1.2 + Math.random() * 2.2
-        return Math.min(92, p + step)
-      })
-    }, 380)
-    return () => clearInterval(t)
-  }, [active])
-  return { percent: pct, message: `${baseMsg}…` }
+    if (!active) {
+      if (startRef.current > 0) {
+        const dur = Date.now() - startRef.current
+        if (dur > 120) {
+          try {
+            const prev = Number(sessionStorage.getItem(LOAD_AVG_KEY) || dur)
+            sessionStorage.setItem(LOAD_AVG_KEY, String(Math.round(prev * 0.55 + dur * 0.45)))
+          } catch { /* ignore */ }
+        }
+        startRef.current = 0
+        setPct(100)
+        setEtaSec(null)
+        setMessage(`${baseMsg}…`)
+        const t = setTimeout(() => setPct(0), 180)
+        return () => clearTimeout(t)
+      }
+      setPct(0)
+      setEtaSec(null)
+      return undefined
+    }
+
+    if (startRef.current === 0) startRef.current = Date.now()
+
+    if (controlledPct != null) {
+      const mapped = Math.max(1, Math.min(99, Number(controlledPct) || 1))
+      setPct(mapped)
+      let avgMs = 1600
+      try { avgMs = Math.max(600, Number(sessionStorage.getItem(LOAD_AVG_KEY) || 1600)) } catch { /* ignore */ }
+      const elapsed = Date.now() - startRef.current
+      const estTotal = mapped > 5 ? (elapsed / mapped) * 100 : avgMs
+      const remain = Math.max(0, estTotal - elapsed)
+      const sec = remain > 250 ? Math.ceil(remain / 1000) : null
+      setEtaSec(sec)
+      setMessage(sec != null ? `${baseMsg}… · còn ~${sec}s` : `${baseMsg}…`)
+      return undefined
+    }
+
+    setPct(6)
+    setMessage(`${baseMsg}…`)
+    let avgMs = 1600
+    try { avgMs = Math.max(600, Number(sessionStorage.getItem(LOAD_AVG_KEY) || 1600)) } catch { /* ignore */ }
+    const tick = setInterval(() => {
+      const elapsed = Date.now() - startRef.current
+      // Ease toward 97% based on expected duration — never freeze at a fake 92 forever
+      const ratio = elapsed / avgMs
+      const mapped = Math.min(97, 6 + (1 - Math.exp(-ratio * 1.35)) * 91)
+      setPct(mapped)
+      const remain = Math.max(0, avgMs - elapsed)
+      const sec = remain > 250 ? Math.ceil(remain / 1000) : null
+      setEtaSec(sec)
+      setMessage(sec != null ? `${baseMsg}… · còn ~${sec}s` : `${baseMsg}…`)
+    }, 120)
+    return () => clearInterval(tick)
+  }, [active, baseMsg, controlledPct])
+
+  return { percent: pct, message, etaSec }
+}
+
+/** @deprecated use useLoadProgress */
+export function useSimProgress(active, baseMsg = 'Đang tải') {
+  return useLoadProgress(active, baseMsg)
 }
 
 /* ------------------------------------------------------------------ */
@@ -510,9 +568,30 @@ export function ViewModeSelect({ value, onChange }) {
 /* ------------------------------------------------------------------ */
 /* Pagination                                                           */
 /* ------------------------------------------------------------------ */
-export function Pagination({ page, size, total, onPage, shown, extra, pageSize, onPageSize, pageSizeOptions = [50, 100, 200, 'full'] }) {
+export function Pagination({
+  page, size, total, onPage, shown, extra, pageSize, onPageSize,
+  pageSizeOptions = [50, 100, 200, 300, 400, 500],
+}) {
   const effectiveSize = size > 0 ? size : Math.max(total || 1, 1)
   const pages = Math.max(1, Math.ceil((total || 0) / effectiveSize))
+  const preset = pageSizeOptions.map(String)
+  const isCustom = pageSize != null && !preset.includes(String(pageSize))
+  const [customOpen, setCustomOpen] = useState(isCustom)
+  const [customVal, setCustomVal] = useState(isCustom ? String(pageSize) : '')
+
+  useEffect(() => {
+    if (isCustom) {
+      setCustomOpen(true)
+      setCustomVal(String(pageSize))
+    }
+  }, [pageSize, isCustom])
+
+  const applyCustom = () => {
+    const n = parseInt(String(customVal).trim(), 10)
+    if (!Number.isFinite(n) || n < 1) return
+    onPageSize?.(Math.min(2000, Math.max(1, n)))
+  }
+
   return (
     <div className="footer-bar">
       <span>
@@ -528,17 +607,39 @@ export function Pagination({ page, size, total, onPage, shown, extra, pageSize, 
           <span className="muted">Số dòng</span>
           <select
             className="select sm"
-            value={pageSize === 'full' || pageSize === 0 ? 'full' : String(pageSize)}
+            value={customOpen || isCustom ? 'custom' : String(pageSize ?? 100)}
             onChange={(e) => {
               const v = e.target.value
-              onPageSize(v === 'full' ? 'full' : Number(v))
+              if (v === 'custom') {
+                setCustomOpen(true)
+                setCustomVal(String(pageSize && !preset.includes(String(pageSize)) ? pageSize : 100))
+                return
+              }
+              setCustomOpen(false)
+              onPageSize(Number(v))
             }}
             aria-label="Số dòng mỗi trang"
           >
             {pageSizeOptions.map((o) => (
-              <option key={String(o)} value={String(o)}>{o === 'full' || o === 0 ? 'Full' : o}</option>
+              <option key={String(o)} value={String(o)}>{o}</option>
             ))}
+            <option value="custom">Khác…</option>
           </select>
+          {(customOpen || isCustom) && (
+            <span className="page-size-custom">
+              <input
+                className="input sm"
+                type="number"
+                min={1}
+                max={2000}
+                value={customVal}
+                onChange={(e) => setCustomVal(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') applyCustom() }}
+                aria-label="Số dòng tùy chọn"
+              />
+              <button type="button" className="btn ghost sm" onClick={applyCustom}>OK</button>
+            </span>
+          )}
         </label>
       )}
       <span className="muted">Trang {page + 1}/{pages.toLocaleString('vi-VN')}</span>
@@ -550,18 +651,16 @@ export function Pagination({ page, size, total, onPage, shown, extra, pageSize, 
   )
 }
 
-/** Resolve UI page-size choice → numeric size for API.
- * Full = chunk size for paging-all (client loads every page until done).
- */
-export const PAGE_SIZE_FULL_CHUNK = 1000
-export const PAGE_SIZE_FULL_CAP = 20000
+/** Resolve UI page-size choice → numeric size for API. */
+export const PAGE_SIZE_FULL_CHUNK = 500
+export const PAGE_SIZE_FULL_CAP = 5000
 export function resolvePageSize(choice) {
-  if (choice === 'full' || choice === 0) return PAGE_SIZE_FULL_CHUNK
+  if (choice === 'full' || choice === 0) return 100 // legacy full → safe default
   const n = Number(choice)
-  return Number.isFinite(n) && n > 0 ? n : 100
+  return Number.isFinite(n) && n > 0 ? Math.min(2000, n) : 100
 }
-export function isFullPageSize(choice) {
-  return choice === 'full' || choice === 0
+export function isFullPageSize() {
+  return false
 }
 
 /* ------------------------------------------------------------------ */

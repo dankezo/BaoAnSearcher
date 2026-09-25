@@ -5,8 +5,7 @@ import { useAuth } from './auth'
 import {
   DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, IngredientText, LoadingOverlay, Pagination,
   SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize,
-  serverFilters, useSectionMeta, useSelection, useSimProgress, isFullPageSize, PAGE_SIZE_FULL_CAP,
-} from './components'
+  serverFilters, useSectionMeta, useSelection, useLoadProgress, } from './components'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
 import { MscPriceMetrics, MscTenderMetrics } from './metrics'
 
@@ -114,8 +113,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const [detail, setDetail] = useState(null)
   const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
-  const [fullNote, setFullNote] = useState('')
-  const sim = useSimProgress(loading, 'Đang lọc thầu MSC')
+  const [loadPct, setLoadPct] = useState(null)
+  const sim = useLoadProgress(loading, 'Đang lọc thầu MSC', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
   const meta = useSectionMeta('msc', localMode, staticFallback, refreshKey)
@@ -125,7 +124,6 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     if (saved && typeof saved === 'object') {
       if (saved.kind === 'prices' || saved.kind === 'tenders') setKind(saved.kind)
       if (saved.filters) setFilters({ ...EMPTY_FILTERS, ...saved.filters })
-      if (saved.pageSize != null) setPageSize(saved.pageSize)
       if (saved.columnFilters) setColumnFilters(saved.columnFilters)
     }
     setPrefsReady(true)
@@ -133,8 +131,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
 
   useEffect(() => {
     if (!prefsReady) return
-    saveUserJson(userId, 'msc', 'session', { kind, filters, pageSize, columnFilters })
-  }, [userId, prefsReady, kind, filters, pageSize, columnFilters])
+    saveUserJson(userId, 'msc', 'session', { kind, filters, columnFilters })
+  }, [userId, prefsReady, kind, filters, columnFilters])
 
   useEffect(() => {
     if (localMode || !supabaseConfigured) return undefined
@@ -162,31 +160,19 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const search = useCallback(async (p = 0, cf, override = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
-    const full = isFullPageSize(pageSizeRef.current)
     const size = resolvePageSize(pageSizeRef.current)
     setLoading(true)
     setErr('')
-    setFullNote('')
     const active = { ...mergedFilters(cf), ...(override || {}) }
     try {
       if (localMode || supabaseConfigured) {
         const searchFn = localMode
           ? (page, sz) => api.mscSearch({ kind, filters: active, page, size: sz })
           : (page, sz) => cloudMscSearch({ kind, filters: active, page, size: sz })
-        if (full) {
-          const all = await fetchAllPages(searchFn, { size, cap: PAGE_SIZE_FULL_CAP })
-          if (stale()) return
-          if (all.length >= PAGE_SIZE_FULL_CAP) {
-            setFullNote(`Đã tải tối đa ${PAGE_SIZE_FULL_CAP.toLocaleString('vi-VN')} dòng — thu hẹp lọc nếu cần xem thêm.`)
-          }
-          setData({ total: all.length, items: all, page: 0, size: all.length || size })
-          setPage(0)
-        } else {
-          const res = await searchFn(p, size)
-          if (stale()) return
-          setData(res)
-          setPage(p)
-        }
+        const res = await searchFn(p, size)
+        if (stale()) return
+        setData(res)
+        setPage(p)
         return
       }
       setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
@@ -196,6 +182,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     } finally {
       if (!stale()) {
         setLoading(false)
+        setLoadPct(null)
         setRefreshKey((k) => k + 1)
       }
     }
@@ -243,8 +230,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.source_id ? `${kind}:${r.source_id}` : `${kind}:${r.tender_no}|${page}|${i}`), [kind, page])
-  const fullMode = isFullPageSize(pageSize)
-  const pageSizeNum = fullMode ? Math.max(data.items?.length || 0, 1) : resolvePageSize(pageSize)
+  const pageSizeNum = resolvePageSize(pageSize)
   const metricsItems = rows.length ? rows : data.items
 
   const fetchAll = useCallback(async () => {
@@ -348,14 +334,13 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           activeColumnFilters={activeCF}
           onClearColumnFilters={() => { setColumnFilters({}); search(0, {}) }}
         />
-        {fullNote && <div className="info-note">{fullNote}</div>}
         <ErrorNote>{err}</ErrorNote>
 
         <DataTable
           columns={cols}
           rows={rows}
           rowKey={rowKey}
-          startIndex={fullMode ? 0 : page * pageSizeNum}
+          startIndex={page * pageSizeNum}
           selected={sel.selected}
           onToggleRow={sel.toggle}
           onToggleAll={sel.setMany}
@@ -402,7 +387,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           return val
         }}
       />
-      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} onCancel={() => { reqSeq.current += 1; setLoading(false) }} />
+      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} etaSec={sim.etaSec} onCancel={() => { reqSeq.current += 1; setLoading(false) }} />
       <LoadingOverlay show={exporting} percent={exportPct} message="Đang gom dữ liệu để xuất Excel…" onCancel={() => setExporting(false)} />
     </div>
   )

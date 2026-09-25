@@ -6,8 +6,7 @@ import {
   ColumnPicker, DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons,
   IngredientText, LoadingOverlay, Pagination, SuggestField, TableToolbar, UpdatedNote, ViewModeSelect,
   applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters, useSectionMeta,
-  useSelection, useSimProgress, useTt20, isFullPageSize, PAGE_SIZE_FULL_CAP,
-} from './components'
+  useSelection, useLoadProgress, useTt20, } from './components'
 import { ingredientAllowedAtGrade } from './tt20'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
 import { VssMetrics } from './metrics'
@@ -119,8 +118,8 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [prefsReady, setPrefsReady] = useState(false)
-  const [fullNote, setFullNote] = useState('')
-  const sim = useSimProgress(loading, 'Đang lọc BHYT VSS')
+  const [loadPct, setLoadPct] = useState(null)
+  const sim = useLoadProgress(loading, 'Đang lọc BHYT VSS', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
   const meta = useSectionMeta('vss', localMode, staticFallback, refreshKey)
@@ -131,7 +130,6 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
       if (saved.filters) setFilters({ ...EMPTY_FILTERS, ...saved.filters })
       if (saved.viewMode) setViewMode(saved.viewMode)
       if (Array.isArray(saved.visible) && saved.visible.length) setVisible(saved.visible)
-      if (saved.pageSize != null) setPageSize(saved.pageSize)
       if (saved.columnFilters) setColumnFilters(saved.columnFilters)
     }
     setPrefsReady(true)
@@ -139,8 +137,8 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
   useEffect(() => {
     if (!prefsReady) return
-    saveUserJson(userId, 'vss', 'session', { filters, viewMode, visible, pageSize, columnFilters })
-  }, [userId, prefsReady, filters, viewMode, visible, pageSize, columnFilters])
+    saveUserJson(userId, 'vss', 'session', { filters, viewMode, visible, columnFilters })
+  }, [userId, prefsReady, filters, viewMode, visible, columnFilters])
 
   useEffect(() => {
     if (localMode || !supabaseConfigured) return undefined
@@ -173,12 +171,10 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const search = useCallback(async (p = 0, cf, override = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
-    const full = isFullPageSize(pageSizeRef.current)
     const size = resolvePageSize(pageSizeRef.current)
     setLoading(true)
     setErr('')
     setInfoNote('')
-    setFullNote('')
     const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
     try {
       const useRemote = localMode || supabaseConfigured
@@ -188,20 +184,15 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           ? (page, sz) => api.vssSearch({ filters: active, page, size: sz })
           : (page, sz) => cloudVssSearch({ filters: active, page, size: sz })
 
-        if (full || needGrade) {
+        if (needGrade) {
           const allRaw = await fetchAllPages(searchFn, {
             size: Math.max(size, 400),
-            cap: PAGE_SIZE_FULL_CAP,
+            onProgress: (pct) => { if (!stale()) setLoadPct(pct) },
           })
           if (stale()) return
           let items = allRaw
-          if (needGrade) {
-            items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, active.hangBenhVien))
-          }
+          items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, active.hangBenhVien))
           items = sortByDateDesc(items, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd'])
-          if (full && allRaw.length >= PAGE_SIZE_FULL_CAP) {
-            setFullNote(`Đã tải tối đa ${PAGE_SIZE_FULL_CAP.toLocaleString('vi-VN')} dòng — thu hẹp lọc nếu cần xem thêm.`)
-          }
           setData({ total: items.length, items, page: 0, size: items.length || size })
           setPage(0)
         } else {
@@ -219,6 +210,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     } finally {
       if (!stale()) {
         setLoading(false)
+        setLoadPct(null)
         setRefreshKey((k) => k + 1)
       }
     }
@@ -269,8 +261,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => `${r.sodk}|${r.ma}|${r.ma_tinh}|${r.quyetdinh}|${r.stt ?? `${page}-${i}`}`, [page])
-  const fullMode = isFullPageSize(pageSize)
-  const pageSizeNum = fullMode ? Math.max(data.items?.length || 0, 1) : resolvePageSize(pageSize)
+  const pageSizeNum = resolvePageSize(pageSize)
   const metricsItems = rows.length ? rows : data.items
 
   const fetchAll = useCallback(async () => {
@@ -423,14 +414,13 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
         <ColumnPicker allColumns={ALL_COLS} visible={visible} onChange={setVisible} open={colPicker} onClose={() => setColPicker(false)} />
         {infoNote && <div className="info-note">{infoNote}</div>}
-        {fullNote && <div className="info-note">{fullNote}</div>}
         <ErrorNote>{err}</ErrorNote>
 
         <DataTable
           columns={cols}
           rows={rows}
           rowKey={rowKey}
-          startIndex={fullMode ? 0 : page * pageSizeNum}
+          startIndex={page * pageSizeNum}
           selected={sel.selected}
           onToggleRow={sel.toggle}
           onToggleAll={sel.setMany}
@@ -472,7 +462,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         onClose={() => setDetail(null)}
         renderValue={(f, row, val) => (f.key === 'hoatchat' ? <IngredientText text={row.hoatchat} /> : val)}
       />
-      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} onCancel={() => { reqSeq.current += 1; setLoading(false) }} />
+      <LoadingOverlay show={loading} percent={sim.percent} message={sim.message} etaSec={sim.etaSec} onCancel={() => { reqSeq.current += 1; setLoading(false) }} />
       <LoadingOverlay show={exporting} percent={exportPct} message="Đang gom dữ liệu để xuất Excel…" onCancel={() => setExporting(false)} />
     </div>
   )
