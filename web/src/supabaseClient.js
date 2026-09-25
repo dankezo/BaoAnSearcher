@@ -17,6 +17,19 @@ const anon = (
 ).trim()
 
 export const ALLOWED_EMAIL_DOMAIN = 'baoanpharma.com'
+
+/**
+ * Explicit allowlist (Outlook OAuth + password staff).
+ * Only these emails may enter the app after login.
+ */
+export const ALLOWED_EMAILS = [
+  'sales@baoanpharma.com',
+  'importer@baoanpharma.com',
+  'admin@baoanpharma.com',
+  'sonnguyen@baoanpharma.com',
+  'tuanvu@baoanpharma.com',
+].map((e) => e.toLowerCase())
+
 /** Absolute session cap when "Ghi nhớ đăng nhập" is on. */
 export const REMEMBER_DAYS = 30
 const REMEMBER_FLAG = 'baoan.auth.remember'
@@ -82,6 +95,7 @@ export function getSupabase() {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
+        flowType: 'pkce',
         storage: authStorage(),
         storageKey: 'baoan.supabase.auth',
       },
@@ -93,7 +107,21 @@ export function getSupabase() {
 export function isCompanyEmail(email) {
   const e = String(email || '').trim().toLowerCase()
   if (!e.includes('@')) return false
+  if (ALLOWED_EMAILS.includes(e)) return true
   return e.endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)
+}
+
+/** Stricter gate used after OAuth / password — must be explicitly allowed. */
+export function isAllowedEmail(email) {
+  const e = String(email || '').trim().toLowerCase()
+  return ALLOWED_EMAILS.includes(e)
+}
+
+export function appRedirectUrl() {
+  if (typeof window === 'undefined') return 'https://app.baoanpharma.com/'
+  const base = import.meta.env.BASE_URL || '/'
+  const path = base.endsWith('/') ? base : `${base}/`
+  return `${window.location.origin}${path}`
 }
 
 /** If remember-until expired, clear session keys. Returns false when expired. */

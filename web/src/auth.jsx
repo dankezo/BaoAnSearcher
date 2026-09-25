@@ -2,9 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import {
   ALLOWED_EMAIL_DOMAIN,
   REMEMBER_DAYS,
+  appRedirectUrl,
   enforceRememberWindow,
   getSupabase,
-  isCompanyEmail,
+  isAllowedEmail,
   resetSupabaseClient,
   setRememberPreference,
   supabaseConfigured,
@@ -27,7 +28,19 @@ function mapAuthError(err) {
   if (low.includes('signups not allowed') || low.includes('signup is disabled')) {
     return 'Không cho phép tự đăng ký. Liên hệ Admin để tạo tài khoản.'
   }
+  if (low.includes('provider is not enabled') || low.includes('unsupported provider')) {
+    return 'Đăng nhập Outlook chưa bật trên máy chủ. Admin cần cấu hình Azure trong Supabase.'
+  }
   return msg || 'Đăng nhập thất bại.'
+}
+
+async function rejectIfNotAllowed(sb, session) {
+  const email = session?.user?.email
+  if (!email || !isAllowedEmail(email)) {
+    await sb.auth.signOut()
+    return 'Tài khoản chưa được cấp quyền truy cập BaoAn Searcher.'
+  }
+  return null
 }
 
 export function AuthProvider({ children }) {
@@ -48,32 +61,49 @@ export function AuthProvider({ children }) {
       return undefined
     }
     let alive = true
-    sb.auth.getSession().then(({ data }) => {
-      if (!alive) return
-      const s = data.session
-      if (s?.user?.email && !isCompanyEmail(s.user.email)) {
-        sb.auth.signOut()
+
+    const applySession = async (s) => {
+      if (!s) {
         setSession(null)
-        setAuthError('Tài khoản không thuộc quyền quản trị nội bộ')
-      } else {
-        setSession(s)
+        return
       }
-      setLoading(false)
+      const denied = await rejectIfNotAllowed(sb, s)
+      if (denied) {
+        setSession(null)
+        setAuthError(denied)
+        return
+      }
+      setSession(s)
+      setAuthError('')
+    }
+
+    // OAuth / PKCE callback may land with ?code= or hash tokens
+    const params = new URLSearchParams(window.location.search)
+    const oauthErr = params.get('error_description') || params.get('error')
+    if (oauthErr) {
+      setAuthError(decodeURIComponent(String(oauthErr).replace(/\+/g, ' ')))
+      const clean = appRedirectUrl()
+      window.history.replaceState(null, '', clean)
+    }
+
+    sb.auth.getSession().then(async ({ data }) => {
+      if (!alive) return
+      await applySession(data.session)
+      if (alive) setLoading(false)
+      // Strip OAuth query noise after session resolved
+      if (params.has('code') || params.has('error')) {
+        window.history.replaceState(null, '', appRedirectUrl())
+      }
     }).catch(() => {
       if (alive) {
         setSession(null)
         setLoading(false)
       }
     })
-    const { data: sub } = sb.auth.onAuthStateChange((_event, next) => {
-      if (next?.user?.email && !isCompanyEmail(next.user.email)) {
-        sb.auth.signOut()
-        setSession(null)
-        setAuthError('Tài khoản không thuộc quyền quản trị nội bộ')
-        return
-      }
-      setSession(next)
-      setAuthError('')
+
+    const { data: sub } = sb.auth.onAuthStateChange(async (_event, next) => {
+      if (!alive) return
+      await applySession(next)
     })
     return () => {
       alive = false
@@ -92,8 +122,8 @@ export function AuthProvider({ children }) {
       return { ok: false, error: m }
     }
     const em = String(email || '').trim().toLowerCase()
-    if (!isCompanyEmail(em)) {
-      const m = `Chỉ email @${ALLOWED_EMAIL_DOMAIN} được phép đăng nhập (ví dụ sales@, importer@).`
+    if (!isAllowedEmail(em)) {
+      const m = 'Tài khoản chưa được cấp quyền truy cập BaoAn Searcher.'
       setAuthError(m)
       return { ok: false, error: m }
     }
@@ -117,11 +147,10 @@ export function AuthProvider({ children }) {
         setAuthError(m)
         return { ok: false, error: m }
       }
-      if (data.user?.email && !isCompanyEmail(data.user.email)) {
-        await sb.auth.signOut()
-        const m = 'Tài khoản không thuộc quyền quản trị nội bộ'
-        setAuthError(m)
-        return { ok: false, error: m }
+      const denied = await rejectIfNotAllowed(sb, data.session)
+      if (denied) {
+        setAuthError(denied)
+        return { ok: false, error: denied }
       }
       if (remember) setRememberPreference(true)
       setSession(data.session)
@@ -134,6 +163,45 @@ export function AuthProvider({ children }) {
       return { ok: false, error: m }
     } finally {
       if (timer) clearTimeout(timer)
+    }
+  }, [])
+
+  const signInWithOutlook = useCallback(async ({ remember = true } = {}) => {
+    setAuthError('')
+    setRememberPreference(!!remember)
+    resetSupabaseClient()
+    const sb = getSupabase()
+    if (!sb) {
+      const m = 'Chưa cấu hình Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'
+      setAuthError(m)
+      return { ok: false, error: m }
+    }
+    try {
+      const { data, error } = await sb.auth.signInWithOAuth({
+        provider: 'azure',
+        options: {
+          scopes: 'email openid profile offline_access',
+          redirectTo: appRedirectUrl(),
+          queryParams: {
+            prompt: 'select_account',
+          },
+        },
+      })
+      if (error) {
+        const m = mapAuthError(error)
+        setAuthError(m)
+        return { ok: false, error: m }
+      }
+      // Browser navigates to Microsoft; url present when redirect starts
+      if (data?.url) {
+        window.location.assign(data.url)
+        return { ok: true, redirecting: true }
+      }
+      return { ok: true }
+    } catch (e) {
+      const m = mapAuthError(e)
+      setAuthError(m)
+      return { ok: false, error: m }
     }
   }, [])
 
@@ -151,11 +219,12 @@ export function AuthProvider({ children }) {
     authError,
     setAuthError,
     signIn,
+    signInWithOutlook,
     signOut,
     supabaseConfigured,
     allowedDomain: ALLOWED_EMAIL_DOMAIN,
     rememberDays: REMEMBER_DAYS,
-  }), [session, loading, authError, signIn, signOut])
+  }), [session, loading, authError, signIn, signInWithOutlook, signOut])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

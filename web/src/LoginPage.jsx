@@ -3,14 +3,35 @@ import { useAuth } from './auth'
 import { getRememberPreference } from './supabaseClient'
 
 export default function LoginPage() {
-  const { signIn, authError, setAuthError, allowedDomain, supabaseConfigured, rememberDays } = useAuth()
+  const {
+    signIn, signInWithOutlook, authError, setAuthError,
+    allowedDomain, supabaseConfigured, rememberDays,
+  } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(() => getRememberPreference())
   const [busy, setBusy] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const [localErr, setLocalErr] = useState('')
 
   const err = localErr || authError
+
+  const onOutlook = async () => {
+    setLocalErr('')
+    setAuthError('')
+    if (!supabaseConfigured) {
+      setLocalErr('Chưa cấu hình Supabase.')
+      return
+    }
+    setBusy(true)
+    try {
+      const r = await signInWithOutlook({ remember })
+      if (!r.ok && !r.redirecting) setBusy(false)
+      // if redirecting, leave busy spinner until navigation
+    } catch {
+      setBusy(false)
+    }
+  }
 
   const onSubmit = async (e) => {
     e.preventDefault()
@@ -29,9 +50,7 @@ export default function LoginPage() {
     try {
       const r = await signIn(em, password, { remember })
       if (r.ok) {
-        const base = import.meta.env.BASE_URL || '/'
-        const home = base.endsWith('/') ? base : `${base}/`
-        window.history.replaceState(null, '', home)
+        window.history.replaceState(null, '', `${window.location.origin}/`)
         window.dispatchEvent(new PopStateEvent('popstate'))
       }
     } finally {
@@ -52,34 +71,11 @@ export default function LoginPage() {
 
         <h1 className="login-h1">Đăng nhập</h1>
         <p className="login-lead muted">
-          Dùng email Outlook công ty (ví dụ sales@{allowedDomain}, importer@{allowedDomain}). Chỉ tài khoản Admin đã cấp mới vào được.
+          Nhân viên Sales / Import: đăng nhập bằng tài khoản Outlook công ty.
+          Chỉ email đã được Admin cấp quyền mới vào được hệ thống.
         </p>
 
-        <form className="login-form" onSubmit={onSubmit} noValidate>
-          <label className="login-field">
-            <span>Email công ty</span>
-            <input
-              type="email"
-              autoComplete="username"
-              placeholder={`sales@${allowedDomain}`}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={busy}
-              required
-            />
-          </label>
-          <label className="login-field">
-            <span>Mật khẩu</span>
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={busy}
-              required
-            />
-          </label>
-
+        <div className="login-form">
           <label className="login-remember">
             <input
               type="checkbox"
@@ -90,17 +86,69 @@ export default function LoginPage() {
             <span>Ghi nhớ đăng nhập {rememberDays || 30} ngày</span>
           </label>
 
+          <button
+            type="button"
+            className="btn login-outlook"
+            onClick={onOutlook}
+            disabled={busy}
+          >
+            <svg width="18" height="18" viewBox="0 0 23 23" aria-hidden="true">
+              <path fill="#f35325" d="M1 1h10v10H1z" />
+              <path fill="#81bc06" d="M12 1h10v10H12z" />
+              <path fill="#05a6f0" d="M1 12h10v10H1z" />
+              <path fill="#ffba08" d="M12 12h10v10H12z" />
+            </svg>
+            {busy ? 'Đang chuyển tới Outlook…' : 'Đăng nhập với Outlook'}
+          </button>
+
           {err && (
             <div className="login-error" role="alert">{err}</div>
           )}
 
-          <button type="submit" className="btn login-submit" disabled={busy}>
-            {busy ? 'Đang đăng nhập…' : 'Đăng nhập'}
+          <button
+            type="button"
+            className="login-toggle-password"
+            onClick={() => setShowPassword((v) => !v)}
+            disabled={busy}
+          >
+            {showPassword ? 'Ẩn đăng nhập mật khẩu' : 'Admin · đăng nhập bằng mật khẩu'}
           </button>
-        </form>
+        </div>
+
+        {showPassword && (
+          <form className="login-form login-password-form" onSubmit={onSubmit} noValidate>
+            <label className="login-field">
+              <span>Email nội bộ</span>
+              <input
+                type="email"
+                autoComplete="username"
+                placeholder={`admin@${allowedDomain}`}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={busy}
+                required
+              />
+            </label>
+            <label className="login-field">
+              <span>Mật khẩu</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={busy}
+                required
+              />
+            </label>
+            <button type="submit" className="btn login-submit" disabled={busy}>
+              {busy ? 'Đang đăng nhập…' : 'Đăng nhập mật khẩu'}
+            </button>
+          </form>
+        )}
 
         <p className="login-foot muted small">
-          Bỏ tick “Ghi nhớ” thì phiên chỉ giữ đến khi đóng trình duyệt. Liên hệ Admin nếu cần cấp tài khoản mới.
+          Outlook: sales@{allowedDomain}, importer@{allowedDomain}.
+          Bỏ tick “Ghi nhớ” thì phiên chỉ giữ đến khi đóng trình duyệt.
         </p>
       </div>
       <div className="login-aside" aria-hidden="true">

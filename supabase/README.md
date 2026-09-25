@@ -23,9 +23,30 @@ VSS syncs `nam >= 2024` (full years through current). DAV/MSC sync full tables.
 ## Auth (nội bộ @baoanpharma.com)
 
 1. Chạy thêm SQL [`migrations/002_auth_rls.sql`](migrations/002_auth_rls.sql) (chỉ `authenticated` đọc data).
-2. Authentication → Providers → Email: bật Email, **tắt** “Allow new users to sign up”.
-3. Users → Add user: tạo `ten@baoanpharma.com` + mật khẩu.
-4. URL Configuration: Site URL `https://app.baoanpharma.com`, Redirect URLs cùng domain.
-5. Frontend: `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` (hoặc `NEXT_PUBLIC_*`).
+2. Authentication → Providers → Email: bật Email, **tắt** “Allow new users to sign up” (admin dùng mật khẩu; staff Sales/Import dùng Outlook).
+3. URL Configuration:
+   - Site URL: `https://app.baoanpharma.com`
+   - Redirect URLs: `https://app.baoanpharma.com/**`, `http://localhost:5173/**`
+4. Frontend: `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`.
 
-SPA Vite chặn email ngoài `@baoanpharma.com` và bắt đăng nhập trước khi vào tool.
+### Đăng nhập Outlook (Microsoft Azure)
+
+App có nút **Đăng nhập với Outlook**. Cần bật provider Azure một lần:
+
+1. **Azure Portal** → Microsoft Entra ID → App registrations → **New registration**
+   - Name: `BaoAn Searcher`
+   - Supported accounts: *Accounts in this organizational directory only* (chỉ tenant BaoAn)
+   - Redirect URI (Web): `https://gojdltnquedwpcqvecob.supabase.co/auth/v1/callback`
+2. **Certificates & secrets** → New client secret → copy **Value**
+3. **API permissions** → Microsoft Graph (Delegated): `openid`, `profile`, `email`, `offline_access`, `User.Read` → **Grant admin consent**
+4. **Enterprise applications** → BaoAn Searcher → Users and groups → **Add** `sales@baoanpharma.com` và `importer@baoanpharma.com` (Assignment required = Yes nếu muốn chỉ 2 TK này)
+5. **Supabase** → Authentication → Providers → **Azure**
+   - Enable
+   - Application (client) ID
+   - Client secret (Value)
+   - Azure Tenant URL (optional, single-tenant): `https://login.microsoftonline.com/<TENANT_ID>`
+6. Soft-launch: mở `https://app.baoanpharma.com` → **Đăng nhập với Outlook** → chọn sales/importer.
+
+Allowlist trong code: `sales@`, `importer@`, `admin@`, `sonnguyen@`, `tuanvu@` (`web/src/supabaseClient.js`). Thêm email mới = sửa list + redeploy.
+
+SPA Vite chặn email ngoài allowlist và bắt đăng nhập trước khi vào tool.

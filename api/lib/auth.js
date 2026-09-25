@@ -5,7 +5,13 @@
  */
 import { createClient } from '@supabase/supabase-js'
 
-const ALLOWED_DOMAIN = 'baoanpharma.com'
+const ALLOWED_EMAILS = new Set([
+  'sales@baoanpharma.com',
+  'importer@baoanpharma.com',
+  'admin@baoanpharma.com',
+  'sonnguyen@baoanpharma.com',
+  'tuanvu@baoanpharma.com',
+])
 
 function supabaseEnv() {
   const url = (
@@ -53,8 +59,8 @@ export async function requireUser(req) {
     throw err
   }
   const email = String(data.user.email || '').toLowerCase()
-  if (!email.endsWith(`@${ALLOWED_DOMAIN}`)) {
-    const err = new Error('Tài khoản không thuộc quyền quản trị nội bộ')
+  if (!ALLOWED_EMAILS.has(email)) {
+    const err = new Error('Tài khoản chưa được cấp quyền truy cập')
     err.status = 403
     throw err
   }

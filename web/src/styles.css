@@ -1130,6 +1130,32 @@ table.data a.sdk { font-family: var(--mono); font-size: .92em; font-weight: 500;
   height: 16px;
   accent-color: var(--accent);
 }
+.login-outlook {
+  height: 46px;
+  width: 100%;
+  justify-content: center;
+  gap: 10px;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-1);
+}
+.login-outlook:hover:not(:disabled) {
+  background: var(--surface-2);
+  text-decoration: none;
+}
+.login-toggle-password {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 4px 0;
+  text-align: center;
+}
+.login-toggle-password:hover { color: var(--accent); text-decoration: underline; }
+.login-password-form { margin-top: 4px; padding-top: 12px; border-top: 1px dashed var(--line); }
 .login-error {
   padding: 10px 12px;
   border-radius: var(--r-sm);
