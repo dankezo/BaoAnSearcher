@@ -768,11 +768,59 @@ def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
         ("nhomthau", "nhomthau"), ("loai_thau", "loai_thau"),
         ("duongdung", "duongdung"), ("ma_tinh", "ma_tinh"), ("nuocsx", "nuocsx"),
     ]:
-        val = fold(filters.get(field) or "")
-        if val:
+        raw = filters.get(field)
+        if isinstance(raw, (list, tuple)):
+            vals = [fold(str(x)) for x in raw if str(x).strip()]
+        else:
+            text = fold(raw or "")
+            vals = [v for v in text.replace(";", "|").split("|") if v] if text else []
+        if not vals:
+            continue
+        if len(vals) == 1:
             clauses.append(f"fold(coalesce({key},'')) LIKE ?")
-            args.append(f"%{val}%")
-    if filters.get("nam"):
+            args.append(f"%{vals[0]}%")
+        else:
+            clauses.append("(" + " OR ".join(
+                f"fold(coalesce({key},'')) LIKE ?" for _ in vals
+            ) + ")")
+            args.extend(f"%{v}%" for v in vals)
+    raw_nam = filters.get("nam")
+    nam_list = []
+    if isinstance(raw_nam, (list, tuple)):
+        for x in raw_nam:
+            try:
+                nam_list.append(int(str(x).strip()))
+            except (TypeError, ValueError):
+                pass
+    elif raw_nam not in (None, ""):
+        for part in str(raw_nam).replace(";", "|").split("|"):
+            try:
+                nam_list.append(int(part.strip()))
+            except (TypeError, ValueError):
+                pass
+    if nam_list:
+        year_clauses = []
+        for year in nam_list:
+            y = str(year)
+            y_start, y_end = f"{y}-01-01", f"{y}-12-31"
+            year_clauses.append(
+                """(
+                    nam = ?
+                    OR coalesce(tungay_hd,'') LIKE ?
+                    OR (
+                        length(coalesce(tungay_hd,'')) >= 10
+                        AND length(coalesce(denngay_hd,'')) >= 10
+                        AND tungay_hd <= ? AND denngay_hd >= ?
+                    )
+                    OR coalesce(congbo,'') LIKE ?
+                )"""
+            )
+            args.extend([year, f"{y}%", y_end, y_start, f"{y}%"])
+        clauses.append("(" + " OR ".join(year_clauses) + ")")
+    elif False:
+        # placeholder removed — old single-year block replaced above
+        pass
+    if False and filters.get("nam"):
         try:
             year = int(str(filters["nam"]).strip())
         except (TypeError, ValueError):
