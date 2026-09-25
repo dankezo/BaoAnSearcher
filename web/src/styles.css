@@ -200,12 +200,13 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
 }
 .tab-pane[hidden] { display: none !important; }
 .tab-pane { animation: none; }
+/* Metrics + filters: equal two columns; 4 metric cards always one row. */
 .filters-split {
   width: 100%;
   margin: 0;
   display: grid;
-  grid-template-columns: minmax(360px, 5fr) minmax(0, 7fr);
-  gap: 8px 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px 14px;
   align-items: start;
 }
 .filters-split.no-stats {
@@ -282,7 +283,7 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
 }
 .compound-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
   gap: 8px;
 }
 .compound-card {
@@ -291,6 +292,7 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
   justify-content: space-between;
   gap: 6px;
   min-height: 0;
+  min-width: 0;
   padding: 10px 12px;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -415,13 +417,12 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
   .filters-split {
     grid-template-columns: 1fr;
   }
+  /* Keep 4 metrics in one row even on narrow screens */
   .compound-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
   }
-}
-@media (max-width: 560px) {
-  .compound-grid {
-    grid-template-columns: minmax(0, 1fr);
+  .compound-panel {
+    overflow-x: auto;
   }
 }
 @media (max-width: 640px) {
@@ -775,8 +776,9 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
 .multi-select-clear:hover { background: var(--surface-2); color: var(--ink); }
 .multi-select-panel {
   position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; right: 0;
-  max-height: 260px; overflow: auto;
-  background: var(--surface); border: 1px solid var(--line-strong);
+  max-height: 280px; overflow: auto;
+  background: #fff; background: var(--surface, #fff); opacity: 1;
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-md); box-shadow: var(--shadow-2, var(--shadow-1));
 }
 .multi-select-search { padding: 8px; border-bottom: 1px solid var(--line); }
@@ -785,6 +787,9 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
 .multi-select-item {
   display: flex; align-items: center; gap: 8px;
   padding: 7px 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.multi-select-item input[type="checkbox"] {
+  width: 15px; height: 15px; flex: 0 0 auto; accent-color: var(--accent, #2563eb);
 }
 .multi-select-item:hover, .multi-select-item.on { background: var(--accent-soft, #eff6ff); }
 .multi-select-empty { padding: 10px; text-align: center; }
@@ -1185,11 +1190,13 @@ table.data a.sdk { font-family: var(--mono); font-size: .92em; font-weight: 500;
 .modal-body { padding: 14px 18px; overflow: auto; }
 .modal-foot { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line); background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg); font-size: 12.5px; }
 
-.detail-grid { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 24px; }
-.detail-row { display: grid; grid-template-columns: 140px 1fr; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.detail-grid { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0 20px; background: transparent; }
+.detail-row { display: grid; grid-template-columns: 130px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 13px; background: transparent; }
 .detail-row dt { margin: 0; color: var(--muted); font-size: 12px; padding-top: 1px; }
 .detail-row dd { margin: 0; color: var(--ink); word-break: break-word; }
-.detail-row.empty dd { color: var(--line-strong); }
+.detail-row.empty dd { color: var(--muted); opacity: .7; }
+.modal .modal-body { background: #fff; background: var(--surface, #fff); }
+.modal .detail-grid { background: #fff; background: var(--surface, #fff); }
 
 /* ---------------------------------------------------------------------
    TT20 popover
@@ -1977,8 +1984,9 @@ tr.bid-open.selected > td {
 /* The available panel width, rather than screen width, drives the dashboard. */
 .section { animation: none; min-width: 0; }
 .filters { container: dashboard / inline-size; padding: 12px; }
-/* Metrics always full-width under filters — 4 cards one row (no 2-col stack). */
-.filters-split { grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+/* Metrics + filters: always 50/50; 4 cards always one row. */
+.filters-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.filters-split.no-stats { grid-template-columns: minmax(0, 1fr); }
 .filters-left { gap: 10px; grid-template-columns: minmax(0, 1fr); }
 .filters-left > * { min-width: 0; }
 .filters-left .search-hero { grid-template-columns: minmax(0, 1fr); }
@@ -1994,8 +2002,8 @@ tr.bid-open.selected > td {
 .filters-left .filter-grid > *, .filter-modal-body .filter-grid > * { min-width: 0; width: auto; }
 .filters-left .field, .filters-left input, .filters-left select { min-width: 0; max-width: 100%; }
 .filters-left .filter-actions { flex-wrap: wrap; gap: 8px; }
-.compound-panel, .filters-stats.compound-panel { display: grid !important; gap: 6px; align-content: start; width: 100%; }
-.compound-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.compound-panel, .filters-stats.compound-panel { display: grid !important; gap: 6px; align-content: start; width: 100%; min-width: 0; }
+.compound-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; gap: 8px; }
 .compound-card, .compound-card.scope-fixed {
   min-width: 0; min-height: 0; padding: 10px 12px; gap: 6px;
   border: 1px solid var(--line); background: var(--surface);
@@ -2005,12 +2013,12 @@ tr.bid-open.selected > td {
 .compound-title { font-size: 11px; letter-spacing: .02em; }
 .compound-head-right { min-width: 0; }
 .compound-sub { white-space: normal; }
-.compound-value { font-size: clamp(16px, 1.2vw, 22px); line-height: 1.15; }
+.compound-value { font-size: clamp(14px, 1.1vw, 20px); line-height: 1.15; }
 .compound-pills { gap: 4px; }
-.compound-pill { max-width: 100%; white-space: normal; text-align: left; }
+.compound-pill { max-width: 100%; white-space: normal; text-align: left; font-size: 10.5px; }
 .compound-card .compound-bar { margin-top: auto; }
 .compound-card .donut-wrap { gap: 8px; min-width: 0; }
-.compound-card .donut-svg { width: 64px; height: 64px; flex: 0 0 64px; }
+.compound-card .donut-svg { width: 56px; height: 56px; flex: 0 0 56px; }
 .compound-card .donut-legend { min-width: 0; flex: 1; }
 .compound-card .donut-legend li { min-width: 0; gap: 5px; }
 .compound-card .donut-label { min-width: 0; }
@@ -2020,16 +2028,12 @@ tr.bid-open.selected > td {
 @container dashboard (min-width: 1800px) {
   .filters-left .filter-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
-@container dashboard (max-width: 720px) {
-  .compound-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@container dashboard (max-width: 420px) {
-  .compound-grid { grid-template-columns: minmax(0, 1fr); }
+@container dashboard (max-width: 820px) {
+  .filters-split:not(.no-stats) { grid-template-columns: minmax(0, 1fr); }
 }
 .split-pane { contain: layout; isolation: isolate; }
-.split-pane > .filter-modal-backdrop { position: absolute; padding: 12px; }
-.split-pane .filter-modal { width: 100%; max-height: 100%; min-height: 0; }
-.split-pane .filter-modal-body { min-height: 0; overscroll-behavior: contain; }
+/* Modals always portal to body — do not re-scope inside split-pane */
+.split-pane > .filter-modal-backdrop { position: fixed; inset: 0; padding: 20px; }
 .split-pane .loading-overlay { inset: 44px 0 0; padding: 12px; }
 .split-pane .loading-card { min-width: 0; width: min(340px, 100%); }
 .split-pane .split-picker { top: 44px; }

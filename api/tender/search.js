@@ -58,9 +58,34 @@ function likeAny(where, args, col, v) {
     args.push(`%${vals[0]}%`)
     return
   }
+  // Same field, multiple ticks → OR
   where.push(`(${vals.map(() => `${col} LIKE ?`).join(' OR ')})`)
   for (const x of vals) args.push(`%${x}%`)
 }
+
+/** Compact column sets — do not SELECT dropped fields. */
+const DAV_SELECT = [
+  'id', 'search', 'tag_id', 'so_dang_ky', 'ngay_cap', 'ngay_gia_han', 'ngay_het_han',
+  'ten_thuoc', 'hoat_chat', 'ham_luong', 'dang_bao_che', 'dong_goi',
+  'cty_dang_ky', 'cty_san_xuat', 'nuoc_san_xuat', 'con_hieu_luc', 'ingredient_count', 'updated_at',
+].join(', ')
+
+const VSS_SELECT = [
+  'fingerprint', 'search', 'hoatchat', 'sodk', 'ten', 'duongdung', 'hamluong', 'donvitinh',
+  'soluong', 'gia', 'thanhtien', 'nhomthau', 'nhasx', 'nuocsx', 'ma_tinh', 'ma_cskcb',
+  'tungay_hd', 'denngay_hd', 'ten_tinh', 'ten_cskcb', 'loai_thau', 'loai', 'nam', 'congbo', 'updated_at',
+].join(', ')
+
+const MSC_PRICES_SELECT = [
+  'source_id', 'search', 'name', 'ingredient', 'strength', 'registration', 'unit_price', 'quantity',
+  'unit', 'group_name', 'medicine_type', 'manufacturer', 'country', 'buyer', 'province',
+  'tender_no', 'published', 'winner', 'source_url', 'collected_at', 'updated_at',
+].join(', ')
+
+const MSC_TENDERS_SELECT = [
+  'source_id', 'search', 'tender_no', 'name', 'buyer', 'province', 'published', 'close_date',
+  'status_label', 'status_code', 'bid_price', 'bid_form', 'source_url', 'collected_at', 'updated_at',
+].join(', ')
 
 function eqAny(where, args, col, v, parseIntVal = false) {
   const vals = asList(v)
@@ -94,6 +119,7 @@ async function searchVss(db, filters, page, size) {
   likeAny(where, args, 'loai_thau', f.loai_thau)
   likeAny(where, args, 'duongdung', f.duongdung)
   likeAny(where, args, 'ma_tinh', f.ma_tinh)
+  likeAny(where, args, 'ten_tinh', f.ten_tinh)
   likeAny(where, args, 'nuocsx', f.nuocsx)
   eqAny(where, args, 'nam', f.nam, true)
   if (f.tuNgay) {
@@ -113,7 +139,7 @@ async function searchVss(db, filters, page, size) {
   const total = Number(countRs.rows[0]?.c || 0)
   const offset = Math.max(0, page) * size
   const dataRs = await db.execute({
-    sql: `SELECT * FROM vss_bids WHERE ${wsql} ORDER BY tungay_hd DESC, fingerprint LIMIT ? OFFSET ?`,
+    sql: `SELECT ${VSS_SELECT} FROM vss_bids WHERE ${wsql} ORDER BY tungay_hd DESC, fingerprint LIMIT ? OFFSET ?`,
     args: [...args, size, offset],
   })
   return { total, page, size, items: dataRs.rows }
@@ -152,7 +178,7 @@ async function searchDav(db, filters, page, size) {
   const total = Number(countRs.rows[0]?.c || 0)
   const offset = Math.max(0, page) * size
   const dataRs = await db.execute({
-    sql: `SELECT * FROM dav_drugs WHERE ${wsql} ORDER BY ngay_cap DESC, ngay_gia_han DESC, id LIMIT ? OFFSET ?`,
+    sql: `SELECT ${DAV_SELECT} FROM dav_drugs WHERE ${wsql} ORDER BY ngay_cap DESC, ngay_gia_han DESC, id LIMIT ? OFFSET ?`,
     args: [...args, size, offset],
   })
   return { total, page, size, items: dataRs.rows }
@@ -178,6 +204,7 @@ async function searchMsc(db, kind, filters, page, size) {
     ['winner', f.winner],
     ['group_name', f.group_name],
     ['medicine_type', f.medicine_type],
+    ['country', f.country],
   ]
   for (const [col, v] of cols) likeAny(where, args, col, v)
 
@@ -188,8 +215,9 @@ async function searchMsc(db, kind, filters, page, size) {
   })
   const total = Number(countRs.rows[0]?.c || 0)
   const offset = Math.max(0, page) * size
+  const select = table === 'msc_tenders' ? MSC_TENDERS_SELECT : MSC_PRICES_SELECT
   const dataRs = await db.execute({
-    sql: `SELECT * FROM ${table} WHERE ${wsql} ORDER BY published DESC, source_id LIMIT ? OFFSET ?`,
+    sql: `SELECT ${select} FROM ${table} WHERE ${wsql} ORDER BY published DESC, source_id LIMIT ? OFFSET ?`,
     args: [...args, size, offset],
   })
   return { total, page, size, items: dataRs.rows }

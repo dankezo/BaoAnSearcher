@@ -3,9 +3,9 @@ import { api, fmtDate, openDavLookup, sortByDateDesc, DAV_LOOKUP } from './api'
 import { cloudDavSearch, cloudMeta, supabaseConfigured } from './supabaseCloud'
 import { useAuth } from './auth'
 import {
-  ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, FilterModal, HospitalGradeField,
+  CountSelect, DataTable, DetailModal, ErrorNote, FilterModal, HospitalGradeField,
   Icons, IngredientText, LoadingOverlay, Pagination, SearchSuggestBar, SuggestField, TableToolbar, UpdatedNote,
-  ViewModeSelect, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters,
+  applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters,
   useSectionMeta, useSelection, useLoadProgress, useTt20, MultiSelectField, DAV_METRICS_CAP,
 } from './components'
 import { TagBadge, TagFilterDropdown, useTagFilterState } from './TagFilterDropdown'
@@ -26,21 +26,10 @@ const ALL_COLS = [
   { key: 'hamLuong', label: 'Hàm lượng', width: 120, truncateAt: 72 },
   { key: 'dangBaoChe', label: 'Dạng bào chế', truncateAt: 64 },
   { key: 'dongGoi', label: 'Quy cách đóng gói', truncateAt: 72 },
-  { key: 'hanDung', label: 'Hạn dùng', align: 'right' },
-  { key: 'soQuyetDinh', label: 'Số quyết định', mono: true },
   { key: 'ngayHetHan', label: 'Ngày hết hạn', text: (r) => fmtDate(r.ngayHetHan), nowrap: true },
-  { key: 'ctySanXuat', label: 'Công ty sản xuất', width: 200, truncateAt: 80 },
-  { key: 'diaChiSanXuat', label: 'Địa chỉ SX', truncateAt: 80 },
-  { key: 'nuocSanXuat', label: 'Nước SX', filter: 'select' },
   { key: 'ctyDangKy', label: 'Công ty đăng ký', width: 180, truncateAt: 80 },
-  { key: 'nuocDangKy', label: 'Nước ĐK', filter: 'select' },
-  { key: 'tieuChuan', label: 'Tiêu chuẩn', truncateAt: 64 },
-  { key: 'kyCapNam', label: 'Kỳ cấp (năm)', align: 'right', filter: 'select' },
-]
-
-const COMPACT = [
-  'tagId', 'soDangKy', 'ngayCap', 'tenThuoc', 'hoatChat', 'hamLuong', 'dangBaoChe',
-  'dongGoi', 'ngayHetHan', 'ctyDangKy', 'ctySanXuat', 'nuocSanXuat',
+  { key: 'ctySanXuat', label: 'Công ty sản xuất', width: 200, truncateAt: 80 },
+  { key: 'nuocSanXuat', label: 'Nước SX', filter: 'select' },
 ]
 
 const SERVER_MAP = {
@@ -50,11 +39,11 @@ const SERVER_MAP = {
 
 const EMPTY_FILTERS = {
   q: '', tenThuoc: '', soDangKy: '', hoatChat: '', dangBaoChe: '',
-  sanXuat: '', dangKy: '', nuocSanXuat: '',
+  sanXuat: '', dangKy: '', nuocSanXuat: [],
   ingredientCount: '', ingredientCountOther: '',
   dosageFormCount: '', dosageFormCountOther: '',
   strengthCount: '', strengthCountOther: '',
-  hangBenhVien: '',
+  hangBenhVien: [],
   tags: null,
 }
 
@@ -62,9 +51,6 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const { user } = useAuth()
   const userId = userKeyPart(user)
   const { index: tt20Index } = useTt20()
-  const [colPicker, setColPicker] = useState(false)
-  const [viewMode, setViewMode] = useState('compact')
-  const [visible, setVisible] = useState(COMPACT)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(false)
@@ -112,8 +98,6 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     const saved = loadUserJson(userId, 'dav', 'session', null)
     if (saved && typeof saved === 'object') {
       if (saved.filters) setFilters({ ...EMPTY_FILTERS, ...saved.filters, tags: null })
-      if (saved.viewMode) setViewMode(saved.viewMode)
-      if (Array.isArray(saved.visible) && saved.visible.length) setVisible(saved.visible)
       if (saved.columnFilters) setColumnFilters(saved.columnFilters)
     }
     setPrefsReady(true)
@@ -124,18 +108,11 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     if (!prefsReady) return
     saveUserJson(userId, 'dav', 'session', {
       filters: { ...filters, tags: null },
-      viewMode,
-      visible,
       columnFilters,
     })
-  }, [userId, prefsReady, filters, viewMode, visible, columnFilters])
+  }, [userId, prefsReady, filters, columnFilters])
 
-  useEffect(() => {
-    if (viewMode === 'compact') setVisible(COMPACT)
-    else if (viewMode === 'full') setVisible(ALL_COLS.map((c) => c.key))
-  }, [viewMode])
-
-  const cols = useMemo(() => ALL_COLS.filter((c) => visible.includes(c.key)).map((c) => {
+  const cols = useMemo(() => ALL_COLS.map((c) => {
     if (c.key === 'tagId') {
       return {
         ...c,
@@ -160,7 +137,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
       }
     }
     return c
-  }), [visible, configs])
+  }), [configs])
 
   const mergedFilters = useCallback(
     (cf, tagsOverride) => ({
@@ -180,7 +157,9 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     const active = { ...mergedFilters(cf, tagsOverride), ...(override || {}) }
     try {
       if (localMode || supabaseConfigured) {
-        const needGrade = !!active.hangBenhVien
+        const needGrade = Array.isArray(active.hangBenhVien)
+          ? active.hangBenhVien.length > 0
+          : !!active.hangBenhVien
         const searchFn = localMode
           ? (page, sz) => api.davSearch({ filters: active, page, size: sz })
           : (page, sz) => cloudDavSearch({ filters: active, page, size: sz })
@@ -192,7 +171,10 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           })
           if (stale()) return
           let items = allRaw.map(enrichRowTag)
-          items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, active.hangBenhVien))
+          const grades = Array.isArray(active.hangBenhVien)
+            ? active.hangBenhVien
+            : [active.hangBenhVien]
+          items = items.filter((r) => grades.some((g) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, g)))
           items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
           setData({ total: items.length, items, page: 0, size: items.length || size })
           setPage(0)
@@ -310,25 +292,19 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     filters.sanXuat, filters.dangKy, filters.nuocSanXuat,
     filters.ingredientCount, filters.dosageFormCount, filters.strengthCount,
     filters.hangBenhVien,
-  ].filter((v) => String(v ?? '').trim()).length
+  ].filter((v) => (Array.isArray(v) ? v.length > 0 : String(v ?? '').trim() !== '')).length
 
   const fieldSuggest = useCallback((fieldKey) => async (q) => {
     const needle = String(q || '').trim()
-    if (needle.length < 1) return []
     try {
       let items = []
       if (localMode || supabaseConfigured) {
+        const filters = needle
+          ? { ...mergedFilters(), [fieldKey]: needle, q: '' }
+          : { ...mergedFilters(), q: '' }
         const res = localMode
-          ? await api.davSearch({
-              filters: { ...mergedFilters(), [fieldKey]: needle, q: '' },
-              page: 0,
-              size: 30,
-            })
-          : await cloudDavSearch({
-              filters: { ...mergedFilters(), [fieldKey]: needle, q: '' },
-              page: 0,
-              size: 30,
-            })
+          ? await api.davSearch({ filters, page: 0, size: needle ? 40 : 80 })
+          : await cloudDavSearch({ filters, page: 0, size: needle ? 40 : 80 })
         items = res?.items || []
       }
       const seen = new Set()
@@ -342,7 +318,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
         if (!t || seen.has(t)) continue
         seen.add(t)
         out.push(t)
-        if (out.length >= 3) break
+        if (out.length >= (needle ? 8 : 12)) break
       }
       return out
     } catch {
@@ -398,8 +374,9 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
       ? (p, size) => api.davSearch({ filters: mergedFilters(), page: p, size })
       : (p, size) => cloudDavSearch({ filters: mergedFilters(), page: p, size })
     const all = await fetchAllPages(searchFn, { onProgress: setExportPct })
-    if (filters.hangBenhVien) {
-      return all.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, filters.hangBenhVien))
+    if (filters.hangBenhVien && (Array.isArray(filters.hangBenhVien) ? filters.hangBenhVien.length : true)) {
+      const grades = Array.isArray(filters.hangBenhVien) ? filters.hangBenhVien : [filters.hangBenhVien]
+      return all.filter((r) => grades.some((g) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, g)))
     }
     return all
   }, [localMode, mergedFilters, filters, selectedTags, tt20Index])
@@ -539,13 +516,8 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           <button type="button" className="btn ghost sm" onClick={() => runSearch()} title="Quét lại dữ liệu">
             {Icons.refresh} Quét lại
           </button>
-          <ViewModeSelect value={viewMode} onChange={(v) => { setViewMode(v); if (v === 'custom') setColPicker(true) }} />
-          {viewMode === 'custom' && (
-            <button type="button" className="btn ghost sm" onClick={() => setColPicker((v) => !v)}>{Icons.columns} Cột</button>
-          )}
         </TableToolbar>
 
-        <ColumnPicker allColumns={ALL_COLS} visible={visible} onChange={setVisible} open={colPicker} onClose={() => setColPicker(false)} />
         <ErrorNote>{err}</ErrorNote>
 
         <DataTable
@@ -605,7 +577,12 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
 
       <DetailModal
         row={detail}
-        fields={[...ALL_COLS, { key: 'soDangKyCu', label: 'Số ĐK cũ' }, { key: 'ngayGiaHan', label: 'Ngày gia hạn', text: (r) => fmtDate(r.ngayGiaHan) }, { key: 'dotCap', label: 'Đợt cấp' }, { key: 'diaChiDangKy', label: 'Địa chỉ ĐK' }, { key: 'phanLoai', label: 'Phân loại' }, { key: 'conHieuLuc', label: 'Còn hiệu lực' }, { key: 'dm93', label: 'Khớp DM93' }, { key: 'hasGiaHanPending', label: 'Đang nộp gia hạn' }, { key: 'ingredientCount', label: 'Số hoạt chất' }, { key: 'ghiChu', label: 'Ghi chú' }]}
+        fields={[
+          ...ALL_COLS,
+          { key: 'ngayGiaHan', label: 'Ngày gia hạn', text: (r) => fmtDate(r.ngayGiaHan) },
+          { key: 'conHieuLuc', label: 'Còn hiệu lực' },
+          { key: 'ingredientCount', label: 'Số SĐK cùng HC' },
+        ]}
         title={detail?.tenThuoc || 'Chi tiết thuốc'}
         subtitle={detail ? `SĐK ${detail.soDangKy}` : ''}
         sourceUrl={DAV_LOOKUP}
@@ -613,7 +590,6 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
         renderValue={(f, row, val) => {
           if (f.key === 'hoatChat') return <IngredientText text={row.hoatChat} />
           if (f.key === 'tagId') return <TagBadge tagId={row.tagId} configs={configs} detailed />
-          if (f.key === 'hasGiaHanPending') return row.hasGiaHanPending ? 'Có' : 'Không'
           return val
         }}
       />

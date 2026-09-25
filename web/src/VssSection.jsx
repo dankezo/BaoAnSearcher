@@ -3,8 +3,8 @@ import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, matchesYe
 import { cloudMeta, cloudVssSearch, supabaseConfigured } from './supabaseCloud'
 import { useAuth } from './auth'
 import {
-  ColumnPicker, DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons, MultiSelectField,
-  IngredientText, LoadingOverlay, Pagination, SuggestField, TableToolbar, UpdatedNote, ViewModeSelect,
+  DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons, MultiSelectField,
+  IngredientText, LoadingOverlay, Pagination, SuggestField, TableToolbar, UpdatedNote,
   applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters, useSectionMeta,
   useSelection, useLoadProgress, useTt20, } from './components'
 import { ingredientAllowedAtGrade } from './tt20'
@@ -38,43 +38,28 @@ const ALL_COLS = [
   { key: 'nhasx', label: 'Nhà SX', width: 170, truncateAt: 72 },
   { key: 'nuocsx', label: 'Nước SX', filter: 'select' },
   { key: 'ma_tinh', label: 'Mã tỉnh', mono: true, filter: 'select' },
+  { key: 'ten_tinh', label: 'Tỉnh / TP', filter: 'select' },
   { key: 'ma_cskcb', label: 'Mã CSKCB', mono: true },
   { key: 'tungay_hd', label: 'Từ ngày HĐ', nowrap: true, text: (r) => fmtDate(r.tungay_hd), render: (v) => fmtDate(v) },
   { key: 'denngay_hd', label: 'Đến ngày HĐ', nowrap: true, text: (r) => fmtDate(r.denngay_hd), render: (v) => fmtDate(v) },
-  { key: 'loai_thau', label: 'Loại thầu', filter: 'select' },
-  { key: 'dangbaoche', label: 'Dạng bào chế', truncateAt: 64 },
-  { key: 'donggoi', label: 'Đóng gói', truncateAt: 72 },
-  { key: 'tennhathau', label: 'Nhà thầu', width: 170, truncateAt: 72 },
-  { key: 'ten_tinh', label: 'Tỉnh', filter: 'select' },
-  { key: 'ten_cskcb', label: 'CSKCB', truncateAt: 80 },
-  { key: 'quyetdinh', label: 'Quyết định', mono: true },
-  { key: 'goithau', label: 'Gói thầu', truncateAt: 80 },
-  { key: 'congbo', label: 'Công bố', nowrap: true, text: (r) => fmtDate(r.congbo), render: (v) => fmtDate(v) },
 ]
 
-const DEFAULT = [
-  'hoatchat', 'sodk', 'ten', 'duongdung', 'hamluong', 'donvitinh',
-  'soluong', 'gia', 'thanhtien', 'nhomthau', 'nhasx', 'nuocsx',
-  'ma_tinh', 'ma_cskcb', 'tungay_hd', 'denngay_hd',
-]
-
-const EXTRA_DETAIL = [
-  { key: 'ma', label: 'Mã thuốc' }, { key: 'ma_gy', label: 'Mã GY' }, { key: 'maduongdung', label: 'Mã đường dùng' },
-  { key: 'madd_gy', label: 'Mã ĐD GY' }, { key: 'ten_don_vi', label: 'Đơn vị' },
-  { key: 'tungay', label: 'Từ ngày', text: (r) => fmtDate(r.tungay) }, { key: 'denngay', label: 'Đến ngày', text: (r) => fmtDate(r.denngay) },
-  { key: 'tieuchuan', label: 'Tiêu chuẩn' }, { key: 'sttpheduyet', label: 'STT phê duyệt' }, { key: 'hieuluc', label: 'Hiệu lực' },
-  { key: 'ht_thau', label: 'Hình thức thầu' }, { key: 'loai', label: 'Loại' },
-  { key: 'created_date', label: 'Ngày tạo', text: (r) => fmtDateTime(r.created_date) },
+const DETAIL_FIELDS = [
+  ...ALL_COLS,
+  { key: 'loai_thau', label: 'Loại thầu' },
+  { key: 'ten_cskcb', label: 'CSKCB' },
+  { key: 'nam', label: 'Năm' },
+  { key: 'congbo', label: 'Công bố', text: (r) => fmtDate(r.congbo) },
 ]
 
 const SERVER_MAP = {
   hoatchat: 'hoatchat', sodk: 'sodk', loai: 'loai', nhomthau: 'nhomthau', loai_thau: 'loai_thau',
-  duongdung: 'duongdung', ma_tinh: 'ma_tinh', nuocsx: 'nuocsx',
+  duongdung: 'duongdung', ma_tinh: 'ma_tinh', ten_tinh: 'ten_tinh', nuocsx: 'nuocsx',
 }
 
 const EMPTY_FILTERS = {
-  q: '', loai_thau: '', loai: 'Tân dược', nhomthau: [], hoatchat: '', sodk: '',
-  tuNgay: '', denNgay: '', nam: '', duongdung: '', ma_tinh: [], nuocsx: [], hangBenhVien: '',
+  q: '', loai_thau: [], loai: 'Tân dược', nhomthau: [], hoatchat: '', sodk: '',
+  tuNgay: '', denNgay: '', nam: [], duongdung: [], ma_tinh: [], ten_tinh: [], nuocsx: [], hangBenhVien: [],
 }
 
 function filterStatic(items, f, tt20Index) {
@@ -85,13 +70,16 @@ function filterStatic(items, f, tt20Index) {
   out = applyClientFilters(out, [
     { value: f.loai_thau, keys: ['loai_thau'] }, { value: f.loai, keys: ['loai'] }, { value: f.nhomthau, keys: ['nhomthau'] },
     { value: f.hoatchat, keys: ['hoatchat'] }, { value: f.sodk, keys: ['sodk'] }, { value: f.duongdung, keys: ['duongdung'] },
-    { value: f.ma_tinh, keys: ['ma_tinh'] }, { value: f.nuocsx, keys: ['nuocsx'] },
+    { value: f.ma_tinh, keys: ['ma_tinh'] }, { value: f.ten_tinh, keys: ['ten_tinh'] }, { value: f.nuocsx, keys: ['nuocsx'] },
   ])
-  if (f.nam) out = out.filter((r) => matchesYear(r, f.nam))
+  if (f.nam && (Array.isArray(f.nam) ? f.nam.length : String(f.nam).trim())) {
+    out = out.filter((r) => matchesYear(r, f.nam))
+  }
   if (f.tuNgay) out = out.filter((r) => String(r.tungay_hd || '') >= f.tuNgay)
   if (f.denNgay) out = out.filter((r) => String(r.denngay_hd || '') <= `${f.denNgay} 23:59:59`)
-  if (f.hangBenhVien) {
-    out = out.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, f.hangBenhVien))
+  const grades = Array.isArray(f.hangBenhVien) ? f.hangBenhVien : (f.hangBenhVien ? [f.hangBenhVien] : [])
+  if (grades.length) {
+    out = out.filter((r) => grades.some((g) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, g)))
   }
   return sortByDateDesc(out, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd', 'created_date'])
 }
@@ -100,9 +88,6 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const { user } = useAuth()
   const userId = userKeyPart(user)
   const { index: tt20Index } = useTt20()
-  const [colPicker, setColPicker] = useState(false)
-  const [viewMode, setViewMode] = useState('compact')
-  const [visible, setVisible] = useState(DEFAULT)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(false)
@@ -135,8 +120,6 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     const saved = loadUserJson(userId, 'vss', 'session', null)
     if (saved && typeof saved === 'object') {
       if (saved.filters) setFilters({ ...EMPTY_FILTERS, ...saved.filters })
-      if (saved.viewMode) setViewMode(saved.viewMode)
-      if (Array.isArray(saved.visible) && saved.visible.length) setVisible(saved.visible)
       if (saved.columnFilters) setColumnFilters(saved.columnFilters)
     }
     setPrefsReady(true)
@@ -144,8 +127,8 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
   useEffect(() => {
     if (!prefsReady) return
-    saveUserJson(userId, 'vss', 'session', { filters, viewMode, visible, columnFilters })
-  }, [userId, prefsReady, filters, viewMode, visible, columnFilters])
+    saveUserJson(userId, 'vss', 'session', { filters, columnFilters })
+  }, [userId, prefsReady, filters, columnFilters])
 
   useEffect(() => {
     if (localMode || !supabaseConfigured) return undefined
@@ -156,12 +139,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     return () => { alive = false }
   }, [localMode])
 
-  useEffect(() => {
-    if (viewMode === 'compact') setVisible(DEFAULT)
-    else if (viewMode === 'full') setVisible(ALL_COLS.map((c) => c.key))
-  }, [viewMode])
-
-  const cols = useMemo(() => ALL_COLS.filter((c) => visible.includes(c.key)), [visible])
+  const cols = ALL_COLS
 
   const filtersRef = useRef(filters)
   const columnFiltersRef = useRef(columnFilters)
@@ -186,7 +164,9 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     try {
       const useRemote = localMode || supabaseConfigured
       if (useRemote) {
-        const needGrade = !!active.hangBenhVien
+        const needGrade = Array.isArray(active.hangBenhVien)
+          ? active.hangBenhVien.length > 0
+          : !!active.hangBenhVien
         const searchFn = localMode
           ? (page, sz) => api.vssSearch({ filters: active, page, size: sz })
           : (page, sz) => cloudVssSearch({ filters: active, page, size: sz })
@@ -198,7 +178,10 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           })
           if (stale()) return
           let items = allRaw
-          items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, active.hangBenhVien))
+          const grades = Array.isArray(active.hangBenhVien)
+            ? active.hangBenhVien
+            : (active.hangBenhVien ? [active.hangBenhVien] : [])
+          items = items.filter((r) => grades.some((g) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, g)))
           items = sortByDateDesc(items, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd'])
           setData({ total: items.length, items, page: 0, size: items.length || size })
           setPage(0)
@@ -256,7 +239,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     if (e.key === 'Enter' && !e.nativeEvent?.isComposing) runSearch()
   }
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
-  const detailActive = ['duongdung', 'ma_tinh', 'nuocsx', 'hangBenhVien', 'loai_thau', 'nhomthau', 'hoatchat', 'sodk', 'tuNgay', 'denNgay', 'nam']
+  const detailActive = ['duongdung', 'ma_tinh', 'ten_tinh', 'nuocsx', 'hangBenhVien', 'loai_thau', 'nhomthau', 'hoatchat', 'sodk', 'tuNgay', 'denNgay', 'nam']
     .filter((k) => {
       const v = filters[k]
       if (Array.isArray(v)) return v.length > 0
@@ -265,13 +248,15 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
   const fieldSuggest = useCallback((fieldKey) => async (q) => {
     const needle = String(q || '').trim()
-    if (needle.length < 1) return []
     try {
       let items = []
       if (localMode || supabaseConfigured) {
+        const filters = needle
+          ? { ...mergedFilters(), [fieldKey]: needle, q: '' }
+          : { ...mergedFilters(), q: '' }
         const res = localMode
-          ? await api.vssSearch({ filters: { ...mergedFilters(), [fieldKey]: needle, q: '' }, page: 0, size: 30 })
-          : await cloudVssSearch({ filters: { ...mergedFilters(), [fieldKey]: needle, q: '' }, page: 0, size: 30 })
+          ? await api.vssSearch({ filters, page: 0, size: needle ? 40 : 80 })
+          : await cloudVssSearch({ filters, page: 0, size: needle ? 40 : 80 })
         items = res?.items || []
       }
       const seen = new Set()
@@ -285,7 +270,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         if (!t || seen.has(t)) continue
         seen.add(t)
         out.push(t)
-        if (out.length >= 3) break
+        if (out.length >= (needle ? 8 : 12)) break
       }
       return out
     } catch { return [] }
@@ -296,7 +281,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     list = applyMetricQuick(list, metricQuick, 'vss')
     return list
   }, [data.items, cols, columnFilters, metricQuick])
-  const rowKey = useCallback((r, i) => `${r.sodk}|${r.ma}|${r.ma_tinh}|${r.quyetdinh}|${r.stt ?? `${page}-${i}`}`, [page])
+  const rowKey = useCallback((r, i) => `${r.sodk}|${r.ma_tinh}|${r.tungay_hd}|${r.stt ?? `${page}-${i}`}`, [page])
   const pageSizeNum = resolvePageSize(pageSize)
   const metricsItems = metricsSample ?? data.items
 
@@ -359,7 +344,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
       <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
       <SuggestField label="Hoạt chất" value={filters.hoatchat} onChange={(v) => setF('hoatchat', v)} onSearch={(v) => runSearch({ hoatchat: v })} suggest={fieldSuggest('hoatchat')} />
       <SuggestField label="Số ĐK" value={filters.sodk} onChange={(v) => setF('sodk', v)} onSearch={(v) => runSearch({ sodk: v })} suggest={fieldSuggest('sodk')} />
-      <SuggestField label="Loại thầu" value={filters.loai_thau} onChange={(v) => setF('loai_thau', v)} onSearch={(v) => runSearch({ loai_thau: v })} suggest={fieldSuggest('loai_thau')} placeholder="vd: thau_tinh" />
+      <MultiSelectField label="Loại thầu" value={filters.loai_thau} onChange={(v) => setF('loai_thau', v)} suggest={fieldSuggest('loai_thau')} placeholder="vd: thau_tinh…" />
       <Field label="HĐ từ ngày"><input type="date" value={filters.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
       <Field label="HĐ đến ngày"><input type="date" value={filters.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
       <MultiSelectField
@@ -369,9 +354,10 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         options={Array.from({ length: 4 }, (_, i) => String(new Date().getFullYear() - i))}
         placeholder="Chọn năm…"
       />
-      <SuggestField label="Đường dùng" value={filters.duongdung} onChange={(v) => setF('duongdung', v)} onSearch={(v) => runSearch({ duongdung: v })} suggest={fieldSuggest('duongdung')} />
-      <MultiSelectField label="Mã tỉnh" value={filters.ma_tinh} onChange={(v) => setF('ma_tinh', v)} suggest={fieldSuggest('ma_tinh')} placeholder="Chọn tỉnh…" />
-      <MultiSelectField label="Nước SX" value={filters.nuocsx} onChange={(v) => setF('nuocsx', v)} suggest={fieldSuggest('nuocsx')} placeholder="Chọn nước…" />
+      <MultiSelectField label="Đường dùng" value={filters.duongdung} onChange={(v) => setF('duongdung', v)} suggest={fieldSuggest('duongdung')} placeholder="Chọn đường dùng…" />
+      <MultiSelectField label="Tỉnh / TP" value={filters.ten_tinh} onChange={(v) => setF('ten_tinh', v)} suggest={fieldSuggest('ten_tinh')} placeholder="Chọn tỉnh…" />
+      <MultiSelectField label="Mã tỉnh" value={filters.ma_tinh} onChange={(v) => setF('ma_tinh', v)} suggest={fieldSuggest('ma_tinh')} placeholder="Chọn mã tỉnh…" />
+      <MultiSelectField label="Nước sản xuất" value={filters.nuocsx} onChange={(v) => setF('nuocsx', v)} suggest={fieldSuggest('nuocsx')} placeholder="Chọn nước…" />
     </div>
   )
 
@@ -440,13 +426,8 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           <button type="button" className="btn ghost sm" onClick={() => runSearch()} title="Quét lại dữ liệu">
             {Icons.refresh} Quét lại
           </button>
-          <ViewModeSelect value={viewMode} onChange={(v) => { setViewMode(v); if (v === 'custom') setColPicker(true) }} />
-          {viewMode === 'custom' && (
-            <button type="button" className="btn ghost sm" onClick={() => setColPicker((v) => !v)}>{Icons.columns} Cột</button>
-          )}
         </TableToolbar>
 
-        <ColumnPicker allColumns={ALL_COLS} visible={visible} onChange={setVisible} open={colPicker} onClose={() => setColPicker(false)} />
         {infoNote && <div className="info-note">{infoNote}</div>}
         <ErrorNote>{err}</ErrorNote>
 
@@ -496,7 +477,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
       <DetailModal
         row={detail}
-        fields={[...ALL_COLS, ...EXTRA_DETAIL]}
+        fields={DETAIL_FIELDS}
         title={detail?.ten || detail?.hoatchat || 'Chi tiết'}
         subtitle={detail ? `BHYT VSS · SĐK ${detail.sodk || '—'} · ${detail.ten_tinh || ''}` : ''}
         onClose={() => setDetail(null)}
