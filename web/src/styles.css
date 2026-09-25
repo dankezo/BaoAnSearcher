@@ -361,6 +361,16 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
   transition: box-shadow .12s ease, transform .08s ease;
 }
 .compound-pill:active { transform: scale(0.97); }
+/* Read-only decision pills (no table filter): label + value, wraps instead of clipping */
+.compound-pill.info {
+  cursor: default;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+.compound-pill.info:active { transform: none; }
+.compound-pill.info .compound-pill-label::after { content: ':'; }
 .compound-pill.on {
   box-shadow: 0 0 0 2px var(--accent-ring, rgba(37, 99, 235, .35));
   font-weight: 650;
@@ -487,45 +497,8 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
   color: var(--ink-2);
   font-weight: 650;
 }
-/* Stacked decision lines inside the primary card */
-.insight-lines {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 6px 0 0;
-  border-top: 1px solid var(--line);
-  display: grid;
-  gap: 3px;
-  font-size: 11.5px;
-  line-height: 1.35;
-}
-.insight-lines li {
-  display: grid;
-  grid-template-columns: 8px minmax(0, auto) 1fr;
-  gap: 6px;
-  align-items: baseline;
-}
-.insight-lines li::before {
-  content: '•';
-  color: var(--muted);
-}
-.insight-line-label {
-  color: var(--muted);
-  white-space: nowrap;
-}
-.insight-line-label::after { content: ':'; }
-.insight-line-val {
-  color: var(--ink);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.insight-lines li.tone-ok .insight-line-val { color: var(--ok); }
-.insight-lines li.tone-warn .insight-line-val { color: var(--warn); }
-.insight-lines li.tone-danger .insight-line-val { color: var(--danger); }
-.insight-panel.metrics-flash {
+.insight-panel.metrics-flash,
+.compound-panel.metrics-flash {
   animation: metricsPulse .45s ease;
 }
 @keyframes metricsPulse {

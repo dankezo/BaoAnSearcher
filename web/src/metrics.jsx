@@ -841,8 +841,6 @@ function vssRunRateCard(rows, total, note) {
 
 export function computeVssCompound(items, total) {
   const rows = items || []
-  const byYear = new Map()
-  let qty = 0
   let pay12 = 0
   let payG12 = 0
   let payG4 = 0
@@ -851,16 +849,8 @@ export function computeVssCompound(items, total) {
   const cutoff = Date.now() - 365 * DAY_MS
 
   for (const r of rows) {
-    const q = num(r.soluong) ?? 0
-    qty += q
     const pay = vssLineValue(r)
-    const y = String(r.nam || '').trim()
-      || (parseDateMs(r.tungay_hd || r.congbo) != null
-        ? String(new Date(parseDateMs(r.tungay_hd || r.congbo)).getFullYear())
-        : '')
-    if (y) byYear.set(y, (byYear.get(y) || 0) + 1)
-
-    const t = parseDateMs(r.tungay_hd || r.congbo)
+    const t = parseDateMs(vssMonthRaw(r))
     if (t != null && t >= cutoff) {
       pay12 += pay
       const g = groupBucket(r.nhomthau)
@@ -874,10 +864,6 @@ export function computeVssCompound(items, total) {
     byProv.set(prov, (byProv.get(prov) || 0) + pay)
   }
 
-  const y2026 = byYear.get('2026') || 0
-  const y2025 = byYear.get('2025') || 0
-  const y2024 = byYear.get('2024') || 0
-  const ySum = y2024 + y2025 + y2026 || 1
   const gSum = payG12 + payG4 || 1
   const highShare = pay12 > 0 ? (payG12 / pay12) * 100 : (payG12 / gSum) * 100
 
