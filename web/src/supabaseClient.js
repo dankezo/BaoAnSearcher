@@ -117,11 +117,18 @@ export function isAllowedEmail(email) {
   return ALLOWED_EMAILS.includes(e)
 }
 
+/** Canonical production origin — OAuth must never fall back to localhost Site URL. */
+export const APP_ORIGIN = 'https://app.baoanpharma.com'
+
 export function appRedirectUrl() {
-  if (typeof window === 'undefined') return 'https://app.baoanpharma.com/'
-  const base = import.meta.env.BASE_URL || '/'
-  const path = base.endsWith('/') ? base : `${base}/`
-  return `${window.location.origin}${path}`
+  if (typeof window === 'undefined') return `${APP_ORIGIN}/`
+  const host = window.location.hostname
+  // Local Vite / preview only — keep same origin for PKCE
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return `${window.location.origin}/`
+  }
+  // Production / custom domain: always bounce to app.baoanpharma.com
+  return `${APP_ORIGIN}/`
 }
 
 /** If remember-until expired, clear session keys. Returns false when expired. */

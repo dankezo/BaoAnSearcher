@@ -24,9 +24,13 @@ VSS syncs `nam >= 2024` (full years through current). DAV/MSC sync full tables.
 
 1. Chạy thêm SQL [`migrations/002_auth_rls.sql`](migrations/002_auth_rls.sql) (chỉ `authenticated` đọc data).
 2. Authentication → Providers → Email: bật Email; **giữ Allow new users to sign up = ON** nếu dùng Outlook (lần đầu OAuth tạo user). App vẫn chỉ cho phép email trong allowlist.
-3. URL Configuration:
-   - Site URL: `https://app.baoanpharma.com`
-   - Redirect URLs: `https://app.baoanpharma.com/**`, `http://localhost:5173/**`
+3. URL Configuration (**quan trọng — nếu để localhost sẽ nhảy về localhost:3000**):
+   - Site URL: `https://app.baoanpharma.com`  ← **đổi ngay**, không để `http://localhost:3000`
+   - Redirect URLs (mỗi dòng một URL):
+     - `https://app.baoanpharma.com`
+     - `https://app.baoanpharma.com/**`
+     - `https://baoan-searcher.vercel.app/**`
+     - `http://localhost:5173/**` (chỉ khi dev Vite)
 4. Frontend: `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`.
 
 ### Đăng nhập Outlook (Microsoft Azure)

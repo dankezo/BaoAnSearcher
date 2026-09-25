@@ -28,6 +28,9 @@ function mapAuthError(err) {
   if (low.includes('signups not allowed') || low.includes('signup is disabled')) {
     return 'Không cho phép tự đăng ký. Liên hệ Admin để tạo tài khoản.'
   }
+  if (low.includes('unable to exchange') || low.includes('exchange external code')) {
+    return 'Outlook đăng nhập lỗi khi đổi mã Azure (thường do Client Secret sai / hết hạn, hoặc Site URL Supabase còn localhost). Kiểm tra Azure Secret Value + Supabase Authentication → URL Configuration → Site URL = https://app.baoanpharma.com'
+  }
   if (low.includes('provider is not enabled') || low.includes('unsupported provider')) {
     return 'Đăng nhập Outlook chưa bật trên máy chủ. Admin cần cấu hình Azure trong Supabase.'
   }
@@ -79,11 +82,12 @@ export function AuthProvider({ children }) {
 
     // OAuth / PKCE callback may land with ?code= or hash tokens
     const params = new URLSearchParams(window.location.search)
+    const hashParams = new URLSearchParams(String(window.location.hash || '').replace(/^#/, ''))
     const oauthErr = params.get('error_description') || params.get('error')
+      || hashParams.get('error_description') || hashParams.get('error')
     if (oauthErr) {
-      setAuthError(decodeURIComponent(String(oauthErr).replace(/\+/g, ' ')))
-      const clean = appRedirectUrl()
-      window.history.replaceState(null, '', clean)
+      setAuthError(mapAuthError(decodeURIComponent(String(oauthErr).replace(/\+/g, ' '))))
+      window.history.replaceState(null, '', appRedirectUrl())
     }
 
     sb.auth.getSession().then(async ({ data }) => {
