@@ -85,20 +85,39 @@ export function AuthProvider({ children }) {
       setAuthError(m)
       return { ok: false, error: m }
     }
-    const { data, error } = await sb.auth.signInWithPassword({ email: em, password })
-    if (error) {
-      const m = mapAuthError(error)
+    // Supabase Auth can hang when Postgres is down (disk full) — fail fast for UX
+    const timeoutMs = 20000
+    let timer
+    try {
+      const result = await Promise.race([
+        sb.auth.signInWithPassword({ email: em, password }),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
+        }),
+      ])
+      const { data, error } = result
+      if (error) {
+        const m = mapAuthError(error)
+        setAuthError(m)
+        return { ok: false, error: m }
+      }
+      if (data.user?.email && !isCompanyEmail(data.user.email)) {
+        await sb.auth.signOut()
+        const m = 'Tài khoản không thuộc quyền quản trị nội bộ'
+        setAuthError(m)
+        return { ok: false, error: m }
+      }
+      setSession(data.session)
+      return { ok: true }
+    } catch (e) {
+      const m = String(e?.message || e) === 'TIMEOUT'
+        ? 'Máy chủ Auth không phản hồi (Supabase DB có thể đang lỗi/đầy ổ). Thử lại sau hoặc liên hệ Admin.'
+        : mapAuthError(e)
       setAuthError(m)
       return { ok: false, error: m }
+    } finally {
+      if (timer) clearTimeout(timer)
     }
-    if (data.user?.email && !isCompanyEmail(data.user.email)) {
-      await sb.auth.signOut()
-      const m = 'Tài khoản không thuộc quyền quản trị nội bộ'
-      setAuthError(m)
-      return { ok: false, error: m }
-    }
-    setSession(data.session)
-    return { ok: true }
   }, [])
 
   const signOut = useCallback(async () => {

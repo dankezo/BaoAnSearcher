@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Upsert local SQLite → Supabase (service role). VSS nam>=2024 + full DAV/MSC.
+"""Upsert local SQLite → Turso (libSQL). Auth stays on Supabase; big data on Turso.
 
 Env (local only, never commit):
-  SUPABASE_URL
-  SUPABASE_SERVICE_ROLE_KEY
+  TURSO_DATABASE_URL=libsql://baoan-searcher-….turso.io
+  TURSO_AUTH_TOKEN=…
 
 Usage:
-  python scripts/sync_to_supabase.py
-  python scripts/sync_to_supabase.py --only vss
-  python scripts/sync_to_supabase.py --only dav,msc
+  python scripts/sync_to_turso.py
+  python scripts/sync_to_turso.py --only vss
+  VSS_SYNC_SKIP=100000 python scripts/sync_to_turso.py --only vss
 """
 from __future__ import annotations
 import argparse
@@ -24,10 +24,11 @@ sys.path.insert(0, str(ROOT))
 try:
     from dotenv import load_dotenv
     load_dotenv(ROOT / ".env")
-    load_dotenv(ROOT / "web" / ".env")
     load_dotenv(ROOT / "web" / ".env.local")
 except ImportError:
     pass
+
+import libsql_client
 
 from server import dav, msc, vss
 from server.common import MSC_DB, fold, now_iso
@@ -37,7 +38,7 @@ from scripts.export_all_for_pages import (
     VSS_SLIM_KEYS,
 )
 
-BATCH = 200
+BATCH = 100
 VSS_MIN_YEAR = 2024
 
 
@@ -49,51 +50,41 @@ def _env(name: str) -> str:
 
 
 def _client():
-    try:
-        from supabase import create_client
-    except ImportError:
-        raise SystemExit("pip install supabase python-dotenv")
-    return create_client(_env("SUPABASE_URL"), _env("SUPABASE_SERVICE_ROLE_KEY"))
+    url = _env("TURSO_DATABASE_URL")
+    token = _env("TURSO_AUTH_TOKEN")
+    return libsql_client.create_client_sync(url=url, auth_token=token)
 
 
-def _upsert(sb, table: str, rows: list[dict], on_conflict: str, retries: int = 6):
+def _upsert_rows(db, table: str, rows: list[dict], pk: str):
     if not rows:
         return
-    clean = []
+    cols = sorted({k for r in rows for k in r.keys()})
+    if pk not in cols:
+        cols.insert(0, pk)
+    placeholders = ", ".join("?" for _ in cols)
+    col_sql = ", ".join(cols)
+    updates = ", ".join(f"{c}=excluded.{c}" for c in cols if c != pk)
+    sql = (
+        f"INSERT INTO {table} ({col_sql}) VALUES ({placeholders}) "
+        f"ON CONFLICT({pk}) DO UPDATE SET {updates}"
+    )
+    stmts = []
     for r in rows:
-        clean.append({k: v for k, v in r.items() if v is not None and v != ""})
-    delay = 1.5
-    last = None
-    for attempt in range(retries):
-        try:
-            sb.table(table).upsert(clean, on_conflict=on_conflict).execute()
-            return
-        except Exception as e:
-            last = e
-            msg = str(e)
-            # statement timeout / transient — back off and retry (optionally split batch)
-            if attempt < retries - 1 and ("57014" in msg or "timeout" in msg.lower() or "502" in msg or "503" in msg):
-                if len(clean) > 50:
-                    mid = len(clean) // 2
-                    _upsert(sb, table, clean[:mid], on_conflict, retries=retries)
-                    _upsert(sb, table, clean[mid:], on_conflict, retries=retries)
-                    return
-                time.sleep(delay)
-                delay = min(delay * 1.8, 20)
-                continue
-            raise
-    raise last
+        args = [r.get(c) for c in cols]
+        stmts.append(libsql_client.Statement(sql, args))
+    db.batch(stmts)
 
 
-def _set_meta(sb, key: str, value: dict):
-    sb.table("app_meta").upsert(
-        {"key": key, "value": value, "updated_at": now_iso()},
-        on_conflict="key",
-    ).execute()
+def _set_meta(db, key: str, value: dict):
+    db.execute(
+        "INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+        [key, json.dumps(value, ensure_ascii=False), now_iso()],
+    )
 
 
-def sync_vss(sb) -> int:
-    print(f"VSS sync nam>={VSS_MIN_YEAR}…", flush=True)
+def sync_vss(db) -> int:
+    print(f"VSS → Turso nam>={VSS_MIN_YEAR}…", flush=True)
     skip = int(os.environ.get("VSS_SYNC_SKIP", "0") or "0")
     con = vss.connect()
     try:
@@ -122,21 +113,11 @@ def sync_vss(sb) -> int:
                     d["tungay_hd"] = tungay_hd
                 if not d.get("denngay_hd") and denngay_hd:
                     d["denngay_hd"] = denngay_hd
-                # Compact search (full folded blob blows free-tier disk ~434B/row)
                 parts = [
-                    d.get("hoatchat"),
-                    d.get("sodk"),
-                    d.get("ten"),
-                    d.get("tennhathau"),
-                    d.get("nhasx"),
-                    d.get("ten_tinh"),
-                    d.get("ten_cskcb"),
-                    d.get("hamluong"),
-                    d.get("duongdung"),
-                    d.get("dangbaoche"),
-                    d.get("nhomthau"),
-                    d.get("loai_thau"),
-                    d.get("loai"),
+                    d.get("hoatchat"), d.get("sodk"), d.get("ten"), d.get("tennhathau"),
+                    d.get("nhasx"), d.get("ten_tinh"), d.get("ten_cskcb"),
+                    d.get("hamluong"), d.get("duongdung"), d.get("dangbaoche"),
+                    d.get("nhomthau"), d.get("loai_thau"), d.get("loai"),
                 ]
                 compact = fold(" ".join(str(p) for p in parts if p))
                 row = {"fingerprint": fp, "search": compact or (search or "")[:240]}
@@ -151,7 +132,7 @@ def sync_vss(sb) -> int:
                     except (TypeError, ValueError):
                         del row["nam"]
                 batch.append(row)
-            _upsert(sb, "vss_bids", batch, "fingerprint")
+            _upsert_rows(db, "vss_bids", batch, "fingerprint")
             n += len(batch)
             batch = []
             if n % 5000 == 0 or n >= total:
@@ -162,13 +143,14 @@ def sync_vss(sb) -> int:
     meta["synced"] = n
     meta["synced_at"] = now_iso()
     meta["min_year"] = VSS_MIN_YEAR
-    _set_meta(sb, "vss", meta)
+    meta["backend"] = "turso"
+    _set_meta(db, "vss", meta)
     print(f"VSS done: {n:,}")
     return n
 
 
-def sync_dav(sb) -> int:
-    print("DAV sync…")
+def sync_dav(db) -> int:
+    print("DAV → Turso…", flush=True)
     con = dav.connect()
     try:
         rows = con.execute("SELECT raw FROM drugs").fetchall()
@@ -210,31 +192,32 @@ def sync_dav(sb) -> int:
             "so_quyet_dinh": flat.get("soQuyetDinh"),
             "tieu_chuan": flat.get("tieuChuan"),
             "ky_cap_nam": flat.get("kyCapNam"),
-            "con_hieu_luc": bool(flat.get("conHieuLuc")) if flat.get("conHieuLuc") is not None else None,
+            "con_hieu_luc": 1 if flat.get("conHieuLuc") else (0 if flat.get("conHieuLuc") is not None else None),
             "ingredient_count": flat.get("ingredientCount"),
             "tag_id": flat.get("tagId") if not isinstance(flat.get("tagId"), list)
             else ",".join(str(x) for x in flat.get("tagId") or []),
         }
-        batch.append(row)
+        batch.append({k: v for k, v in row.items() if v is not None and v != ""})
         if len(batch) >= BATCH:
-            _upsert(sb, "dav_drugs", batch, "id")
+            _upsert_rows(db, "dav_drugs", batch, "id")
             n += len(batch)
             batch = []
             if n % 5000 == 0:
-                print(f"  … {n:,}")
+                print(f"  … {n:,}", flush=True)
     if batch:
-        _upsert(sb, "dav_drugs", batch, "id")
+        _upsert_rows(db, "dav_drugs", batch, "id")
         n += len(batch)
     meta = dav.meta_info()
     meta["synced"] = n
     meta["synced_at"] = now_iso()
-    _set_meta(sb, "dav", meta)
+    meta["backend"] = "turso"
+    _set_meta(db, "dav", meta)
     print(f"DAV done: {n:,}")
     return n
 
 
-def sync_msc(sb) -> int:
-    print("MSC sync…")
+def sync_msc(db) -> int:
+    print("MSC → Turso…", flush=True)
     if not MSC_DB.exists():
         print("  skip — no MSC DB")
         return 0
@@ -268,38 +251,41 @@ def sync_msc(sb) -> int:
                 if v is None or v == "":
                     continue
                 row[k] = v if not isinstance(v, (dict, list)) else json.dumps(v, ensure_ascii=False)
-            row["collected_at"] = collected
             batch.append(row)
             if len(batch) >= BATCH:
-                _upsert(sb, table, batch, "source_id")
+                _upsert_rows(db, table, batch, "source_id")
                 n += len(batch)
                 batch = []
         if batch:
-            _upsert(sb, table, batch, "source_id")
+            _upsert_rows(db, table, batch, "source_id")
             n += len(batch)
-        print(f"  {kind}: {n:,}")
+        print(f"  {kind}: {n:,}", flush=True)
         total_n += n
     meta = msc.meta_info()
     meta["synced"] = total_n
     meta["synced_at"] = now_iso()
-    _set_meta(sb, "msc", meta)
+    meta["backend"] = "turso"
+    _set_meta(db, "msc", meta)
     print(f"MSC done: {total_n:,}")
     return total_n
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", default="vss,dav,msc", help="Comma list: vss,dav,msc")
+    ap.add_argument("--only", default="vss,dav,msc")
     args = ap.parse_args()
     only = {x.strip().lower() for x in args.only.split(",") if x.strip()}
     t0 = time.time()
-    sb = _client()
-    if "vss" in only:
-        sync_vss(sb)
-    if "dav" in only:
-        sync_dav(sb)
-    if "msc" in only:
-        sync_msc(sb)
+    db = _client()
+    try:
+        if "vss" in only:
+            sync_vss(db)
+        if "dav" in only:
+            sync_dav(db)
+        if "msc" in only:
+            sync_msc(db)
+    finally:
+        db.close()
     print(f"ALL OK in {time.time() - t0:.1f}s")
 
 

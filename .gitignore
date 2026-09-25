@@ -5,6 +5,8 @@ server/secrets.local.json
 *.sqlite3-*
 **/*.sqlite3
 **/*.sqlite3-*
+baoan_data.db
+*.db
 
 # Large source dumps & crawl artifacts (local only — never push)
 *.xls
@@ -22,6 +24,8 @@ test zone/procurement/vendor/
 /data/crawl_status.json
 /data/vss_exports/
 /data/vss_crawl_logs/
+/data/turso_batches/
+/data/turso_chunks/
 /db/
 
 # Empty / unrelated

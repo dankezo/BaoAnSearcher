@@ -163,7 +163,7 @@ export default function App() {
                 localMode
                   ? 'Kết nối API local 127.0.0.1:8787'
                   : supabaseConfigured
-                    ? 'Cloud → Supabase (đã đăng nhập)'
+                    ? 'Hybrid: Supabase Auth + Turso data (fallback Supabase RPC)'
                     : 'Thiếu VITE_SUPABASE_* — cấu hình rồi build lại'
               }
             >
@@ -173,7 +173,7 @@ export default function App() {
                 : localMode
                   ? 'Local API'
                   : supabaseConfigured
-                    ? 'Cloud · Supabase'
+                    ? 'Cloud · Auth+Turso'
                     : 'Chưa cấu hình Cloud'}
             </div>
             {user?.email && (

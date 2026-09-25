@@ -1,0 +1,9 @@
+{
+  "name": "baoan-searcher-root",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "@supabase/supabase-js": "^2.117.1"
+  }
+}
