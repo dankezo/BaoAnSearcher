@@ -1,7 +1,6 @@
-/** Decision metrics panels for DAV / MSC / VSS (3 stats + chart). */
-import { useMemo } from 'react'
-import { TAG_CAM } from './tagConfig'
-import { matchToken, tokenizeIngredients } from './tt20'
+/** Decision metrics panels for DAV / MSC / VSS — filter-reactive with light motion. */
+import { useEffect, useMemo, useState } from 'react'
+import { TAG_CAM, TAG_VANG, TAG_XAM, TAG_XANH } from './tagConfig'
 
 const num = (v) => {
   if (v == null || v === '') return null
@@ -22,26 +21,18 @@ export function fmtMoney(n) {
   return v.toLocaleString('vi-VN')
 }
 
+export function fmtPct(n, digits = 1) {
+  if (n == null || Number.isNaN(Number(n))) return '—'
+  const v = Number(n)
+  const sign = v > 0 ? '+' : ''
+  return `${sign}${v.toFixed(digits)}%`
+}
+
 function monthsLeft(iso) {
   if (!iso) return null
   const t = Date.parse(String(iso).slice(0, 19))
   if (!Number.isFinite(t)) return null
   return (t - Date.now()) / (30.4375 * 24 * 3600 * 1000)
-}
-
-function sdkOrigin(sdk) {
-  const s = String(sdk || '').trim().toUpperCase()
-  if (s.startsWith('GC')) return 'gc'
-  if (s.startsWith('VD')) return 'vd'
-  if (s.startsWith('VN')) return 'vn'
-  return 'other'
-}
-
-function routeBucket(duong) {
-  const s = String(duong || '').toLowerCase()
-  if (/tiêm|truyền|inject|iv\b|im\b/.test(s)) return 'inject'
-  if (/uống|oral|viên|nang|gói|sirô|siro|hỗn dịch uống/.test(s)) return 'oral'
-  return 'other'
 }
 
 function buyerTier(buyer) {
@@ -51,26 +42,85 @@ function buyerTier(buyer) {
   return 'bv'
 }
 
-/** Parse BHYT co-pay % from TT20 note; default 100% if listed without %; 0 if not in catalog. */
-export function parseBhytRate(ghiChu, inCatalog) {
-  if (!inCatalog) return 0
-  const note = String(ghiChu || '')
-  const m = note.match(/thanh toán\s*(\d+)\s*%/i) || note.match(/(\d+)\s*%/)
-  if (m) return Math.min(100, Math.max(0, parseInt(m[1], 10)))
-  return 100
+function parseMonthKey(raw) {
+  if (!raw) return null
+  const s = String(raw).trim()
+  const m = s.match(/^(\d{4})-(\d{2})/)
+  if (m) return `${m[1]}-${m[2]}`
+  const t = Date.parse(s.replace(' ', 'T').slice(0, 19))
+  if (!Number.isFinite(t)) return null
+  const d = new Date(t)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-export function DonutChart({ slices, size = 112 }) {
+function parseQuarterKey(raw) {
+  const mk = parseMonthKey(raw)
+  if (!mk) return null
+  const [y, m] = mk.split('-').map(Number)
+  const q = Math.ceil(m / 3)
+  return `${y}-Q${q}`
+}
+
+function prevMonthKey(mk) {
+  if (!mk) return null
+  const [y, m] = mk.split('-').map(Number)
+  if (m === 1) return `${y - 1}-12`
+  return `${y}-${String(m - 1).padStart(2, '0')}`
+}
+
+function prevQuarterKey(qk) {
+  if (!qk) return null
+  const m = qk.match(/^(\d{4})-Q(\d)$/)
+  if (!m) return null
+  let y = Number(m[1])
+  let q = Number(m[2]) - 1
+  if (q < 1) { y -= 1; q = 4 }
+  return `${y}-Q${q}`
+}
+
+function ingredientKey(text) {
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .slice(0, 80) || '—'
+}
+
+function groupBucket(g) {
+  const s = String(g || '').toLowerCase()
+  if (/nhóm\s*1|\bn1\b|group\s*1|^1$/.test(s)) return '1'
+  if (/nhóm\s*2|\bn2\b|group\s*2|^2$/.test(s)) return '2'
+  if (/nhóm\s*3|\bn3\b|group\s*3|^3$/.test(s)) return '3'
+  if (/nhóm\s*4|\bn4\b|group\s*4|^4$/.test(s)) return '4'
+  if (/nhóm\s*5|\bn5\b|group\s*5|^5$/.test(s)) return '5'
+  return null
+}
+
+function useFlashKey(dep) {
+  const [flash, setFlash] = useState(false)
+  useEffect(() => {
+    setFlash(true)
+    const t = setTimeout(() => setFlash(false), 420)
+    return () => clearTimeout(t)
+  }, [dep])
+  return flash
+}
+
+export function DonutChart({ slices, size = 100 }) {
   const total = slices.reduce((s, x) => s + (x.value || 0), 0) || 1
-  const r = 40
+  const r = 36
   const c = 2 * Math.PI * r
   let offset = 0
+  const sum = slices.reduce((a, s) => a + (s.value || 0), 0)
   return (
     <div className="donut-wrap">
       <svg width={size} height={size} viewBox="0 0 100 100" className="donut-svg" aria-hidden>
-        <circle cx="50" cy="50" r={r} fill="none" stroke="var(--line)" strokeWidth="12" />
+        <circle cx="50" cy="50" r={r} fill="none" stroke="var(--line)" strokeWidth="11" />
         {slices.map((sl) => {
-          const len = (sl.value / total) * c
+          const len = ((sl.value || 0) / total) * c
           const el = (
             <circle
               key={sl.key}
@@ -79,16 +129,17 @@ export function DonutChart({ slices, size = 112 }) {
               r={r}
               fill="none"
               stroke={sl.color}
-              strokeWidth="12"
+              strokeWidth="11"
               strokeDasharray={`${len} ${c - len}`}
               strokeDashoffset={-offset}
               transform="rotate(-90 50 50)"
+              className="donut-seg"
             />
           )
           offset += len
           return el
         })}
-        <text x="50" y="52" textAnchor="middle" className="donut-center">{fmtInt(total === 1 && slices.every((s) => !s.value) ? 0 : slices.reduce((a, s) => a + s.value, 0))}</text>
+        <text x="50" y="53" textAnchor="middle" className="donut-center">{fmtInt(sum)}</text>
       </svg>
       <ul className="donut-legend">
         {slices.map((sl) => (
@@ -103,10 +154,28 @@ export function DonutChart({ slices, size = 112 }) {
   )
 }
 
-export function MiniBars({ bars }) {
+export function MiniBars({ bars, horizontal = false }) {
   const max = Math.max(1, ...bars.map((b) => b.value || 0))
+  if (horizontal) {
+    return (
+      <div className="h-bars" role="img">
+        {bars.map((b) => (
+          <div key={b.key} className="h-bar-row">
+            <div className="h-bar-label" title={b.label}>{b.label}</div>
+            <div className="h-bar-track">
+              <div
+                className="h-bar-fill"
+                style={{ width: `${Math.round(((b.value || 0) / max) * 100)}%`, background: b.color || '#0d9488' }}
+              />
+            </div>
+            <div className="h-bar-val">{b.display || fmtInt(b.value)}</div>
+          </div>
+        ))}
+      </div>
+    )
+  }
   return (
-    <div className="mini-bars" role="img" aria-label="So sánh giá theo nhóm">
+    <div className="mini-bars" role="img">
       {bars.map((b) => (
         <div key={b.key} className="mini-bar-col">
           <div className="mini-bar-track">
@@ -133,42 +202,32 @@ function StatCard({ kicker, value, sub, badge, tone }) {
   )
 }
 
-export function MetricsPanel({ title, stats, chart, chartTitle }) {
+export function MetricsPanel({ title, stats, charts, flash }) {
   return (
-    <aside className="filters-stats insight-panel" aria-label={title || 'Chỉ số quyết định'}>
+    <aside className={`filters-stats insight-panel${flash ? ' metrics-flash' : ''}`} aria-label={title || 'Chỉ số quyết định'}>
       {title && <div className="insight-title">{title}</div>}
-      <div className="insight-stats">
-        {stats.map((s) => (
-          <StatCard key={s.key} {...s} />
+      {stats?.length > 0 && (
+        <div className="insight-stats">
+          {stats.map((s) => (
+            <StatCard key={s.key} {...s} />
+          ))}
+        </div>
+      )}
+      <div className="insight-charts">
+        {(charts || []).map((c) => (
+          <div key={c.key} className="stats-card insight-chart">
+            {c.title && <div className="stats-kicker">{c.title}</div>}
+            {c.node}
+          </div>
         ))}
-      </div>
-      <div className="stats-card insight-chart">
-        {chartTitle && <div className="stats-kicker">{chartTitle}</div>}
-        {chart}
       </div>
     </aside>
   )
 }
 
 /* ---- DAV ---- */
-export function computeDavMetrics(items, totalHint) {
+export function computeDavMetrics(items) {
   const rows = items || []
-  const n = totalHint != null ? totalHint : rows.length
-  const densityTone = n <= 2 ? 'ok' : n <= 5 ? 'warn' : 'danger'
-  const densityBadge = n <= 2
-    ? { text: 'Ô vàng', tone: 'ok' }
-    : n <= 5
-      ? { text: 'Cân nhắc', tone: 'warn' }
-      : { text: 'Đại dương đỏ', tone: 'danger' }
-
-  const dm93Hit = rows.some((r) => r.tagId === TAG_CAM || r.dm93 === 'match')
-  const euDomestic = rows.filter((r) => {
-    const nuoc = String(r.nuocSanXuat || '').toLowerCase()
-    const tieu = String(r.tieuChuan || '').toUpperCase()
-    return (nuoc.includes('việt') || nuoc.includes('viet')) && /EU|GMP/.test(tieu)
-  }).length
-  const banned = dm93Hit || euDomestic >= 3
-
   let safe = 0
   let cycle3 = 0
   for (const r of rows) {
@@ -180,61 +239,105 @@ export function computeDavMetrics(items, totalHint) {
   const base = rows.length || 1
   const safePct = Math.round((safe / base) * 100)
 
-  const origin = { vd: 0, vn: 0, gc: 0, other: 0 }
-  for (const r of rows) origin[sdkOrigin(r.soDangKy)] += 1
+  // Per hoạt chất: count distinct SĐK
+  const byIng = new Map()
+  const formsByIng = new Map()
+  for (const r of rows) {
+    const ik = ingredientKey(r.hoatChat)
+    if (!byIng.has(ik)) byIng.set(ik, new Set())
+    byIng.get(ik).add(String(r.soDangKy || r.id || Math.random()))
+    if (!formsByIng.has(ik)) formsByIng.set(ik, new Set())
+    const form = String(r.dangBaoChe || '').trim().toLowerCase()
+    if (form) formsByIng.get(ik).add(form)
+  }
+  const sdkBuckets = { '1-2': 0, '3-4': 0, '5-10': 0, '10+': 0 }
+  for (const set of byIng.values()) {
+    const n = set.size
+    if (n <= 2) sdkBuckets['1-2'] += 1
+    else if (n <= 4) sdkBuckets['3-4'] += 1
+    else if (n <= 10) sdkBuckets['5-10'] += 1
+    else sdkBuckets['10+'] += 1
+  }
+  const formBuckets = { '1': 0, '2': 0, '3': 0, '4+': 0 }
+  for (const set of formsByIng.values()) {
+    const n = set.size || 1
+    if (n <= 1) formBuckets['1'] += 1
+    else if (n === 2) formBuckets['2'] += 1
+    else if (n === 3) formBuckets['3'] += 1
+    else formBuckets['4+'] += 1
+  }
+
+  const tags = { xanh: 0, vang: 0, cam: 0, xam: 0 }
+  for (const r of rows) {
+    if (r.tagId === TAG_XANH) tags.xanh += 1
+    else if (r.tagId === TAG_VANG) tags.vang += 1
+    else if (r.tagId === TAG_CAM) tags.cam += 1
+    else if (r.tagId === TAG_XAM) tags.xam += 1
+    else tags.vang += 1
+  }
 
   return {
     stats: [
       {
-        key: 'density',
-        kicker: 'Mật độ SĐK · ô kỹ thuật',
-        value: `${fmtInt(n)} SĐK`,
-        badge: densityBadge,
-        tone: densityTone,
-        sub: 'Theo bộ lọc hiện tại',
-      },
-      {
-        key: 'dm93',
-        kicker: 'Bẫy Danh mục 93',
-        value: banned ? 'Cấm hàng ngoại' : 'Tự do nhập khẩu',
-        badge: banned
-          ? { text: '⛔ DM93', tone: 'danger' }
-          : { text: '🛡️ OK', tone: 'ok' },
-        tone: banned ? 'danger' : 'ok',
-        sub: banned ? '≥3 CS EU-GMP nội / khớp DM93' : 'Chưa đủ điều kiện cấm nhập',
-      },
-      {
         key: 'cycle',
         kicker: 'An toàn chu kỳ thầu 36 tháng',
         value: `${safePct}%`,
-        badge: cycle3 > 0 ? { text: `${fmtInt(cycle3)} SĐK · 3 năm`, tone: 'warn' } : null,
+        badge: cycle3 > 0 ? { text: `${fmtInt(cycle3)} SĐK · 3 năm`, tone: 'warn' } : { text: 'Ổn định', tone: 'ok' },
         tone: safePct >= 50 ? 'ok' : 'warn',
-        sub: 'Hạn >18 tháng & cấp ~5 năm',
+        sub: 'Hạn >18 tháng & cấp ~5 năm · theo bộ lọc',
       },
     ],
-    slices: [
-      { key: 'vd', label: 'Nội địa (VD)', value: origin.vd, color: '#0d9488' },
-      { key: 'vn', label: 'Nhập khẩu (VN)', value: origin.vn, color: '#2563eb' },
-      { key: 'gc', label: 'Gia công (GC)', value: origin.gc, color: '#d97706' },
-      ...(origin.other ? [{ key: 'other', label: 'Khác', value: origin.other, color: '#94a3b8' }] : []),
+    charts: [
+      {
+        key: 'sdk',
+        title: 'Hoạt chất theo số SĐK',
+        slices: [
+          { key: '1-2', label: '1–2 SĐK', value: sdkBuckets['1-2'], color: '#0d9488' },
+          { key: '3-4', label: '3–4 SĐK', value: sdkBuckets['3-4'], color: '#2563eb' },
+          { key: '5-10', label: '5–10 SĐK', value: sdkBuckets['5-10'], color: '#d97706' },
+          { key: '10+', label: '10+ SĐK', value: sdkBuckets['10+'], color: '#dc2626' },
+        ],
+      },
+      {
+        key: 'forms',
+        title: 'Hoạt chất theo số dạng bào chế',
+        slices: [
+          { key: '1', label: '1 dạng', value: formBuckets['1'], color: '#0d9488' },
+          { key: '2', label: '2 dạng', value: formBuckets['2'], color: '#2563eb' },
+          { key: '3', label: '3 dạng', value: formBuckets['3'], color: '#d97706' },
+          { key: '4+', label: '4+ dạng', value: formBuckets['4+'], color: '#7c3aed' },
+        ],
+      },
+      {
+        key: 'tags',
+        title: 'Cơ cấu trạng thái',
+        slices: [
+          { key: 'xanh', label: 'Xanh', value: tags.xanh, color: '#22c55e' },
+          { key: 'vang', label: 'Vàng', value: tags.vang, color: '#eab308' },
+          { key: 'cam', label: 'Cam DM93', value: tags.cam, color: '#f97316' },
+          { key: 'xam', label: 'Xám', value: tags.xam, color: '#64748b' },
+        ],
+      },
     ],
   }
 }
 
 export function DavMetrics({ items, total }) {
-  const m = useMemo(() => computeDavMetrics(items, total), [items, total])
-  const sampleNote = (items?.length || 0) < (total || 0)
+  const m = useMemo(() => computeDavMetrics(items), [items])
+  const flash = useFlashKey(`${items?.length}|${total}|${m.stats[0]?.value}`)
+  const sample = (items?.length || 0) < (total || 0)
     ? ` · mẫu ${fmtInt(items.length)}/${fmtInt(total)}`
     : ''
-  const stats = m.stats.map((s, i) => (
-    i === 0 ? s : { ...s, sub: `${s.sub || ''}${sampleNote}` }
-  ))
   return (
     <MetricsPanel
-      title="Rào cản gia nhập"
-      stats={stats}
-      chartTitle={`Cơ cấu nguồn gốc SĐK${sampleNote}`}
-      chart={<DonutChart slices={m.slices} />}
+      title={`Chỉ số DAV${sample}`}
+      flash={flash}
+      stats={m.stats}
+      charts={m.charts.map((c) => ({
+        key: c.key,
+        title: c.title,
+        node: <DonutChart slices={c.slices} />,
+      }))}
     />
   )
 }
@@ -244,45 +347,54 @@ export function computeMscPriceMetrics(items) {
   const rows = items || []
   let volume = 0
   let value = 0
-  const byWinner = new Map()
-  const byGroup = { g2: [], g4: [], plan: [] }
+  const byGroup = new Map()
+  const byProv = new Map()
+  const byQuarter = new Map()
 
   for (const r of rows) {
     const qty = num(r.quantity) ?? 0
     const price = num(r.unit_price ?? r.unitPrice) ?? 0
+    const line = qty * price
     volume += qty
-    value += qty * price
-    const w = String(r.winner || '').trim() || '—'
-    byWinner.set(w, (byWinner.get(w) || 0) + (qty * price || 1))
-    const g = String(r.group_name ?? r.groupName ?? '').toLowerCase()
-    if (/nhóm\s*2|\bn2\b|group\s*2|^2$/.test(g)) byGroup.g2.push(price)
-    if (/nhóm\s*4|\bn4\b|group\s*4|^4$/.test(g)) byGroup.g4.push(price)
-    const plan = num(r.plan_price ?? r.planPrice ?? r.gia_ke_hoach)
-    if (plan != null) byGroup.plan.push(plan)
+    value += line
+    const g = groupBucket(r.group_name ?? r.groupName) || String(r.group_name || r.groupName || 'Khác').trim() || 'Khác'
+    byGroup.set(g, (byGroup.get(g) || 0) + (line || qty || 1))
+    const prov = String(r.province || '').trim() || '—'
+    byProv.set(prov, (byProv.get(prov) || 0) + (line || qty || 1))
+    const qk = parseQuarterKey(r.published || r.decision_date || r.collected_at)
+    if (qk) byQuarter.set(qk, (byQuarter.get(qk) || 0) + (qty || 1))
   }
 
-  let topName = '—'
-  let topShare = 0
-  let sumW = 0
-  for (const v of byWinner.values()) sumW += v
-  for (const [name, v] of byWinner) {
-    const share = sumW ? v / sumW : 0
-    if (share > topShare) { topShare = share; topName = name }
-  }
+  const groupBars = [...byGroup.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([k, v], i) => ({
+      key: k,
+      label: /^[1-5]$/.test(k) ? `Nhóm ${k}` : (k.length > 14 ? `${k.slice(0, 12)}…` : k),
+      value: v,
+      display: fmtMoney(v),
+      color: ['#0d9488', '#2563eb', '#d97706', '#7c3aed', '#dc2626'][i % 5],
+    }))
 
-  const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null)
-  const planAvg = avg(byGroup.plan)
-  const winPrices = rows.map((r) => num(r.unit_price ?? r.unitPrice)).filter((x) => x != null)
-  const winAvg = avg(winPrices)
-  let discount = null
-  if (planAvg != null && winAvg != null && planAvg > 0) {
-    discount = ((planAvg - winAvg) / planAvg) * 100
-  } else if (winPrices.length >= 2) {
-    const mx = Math.max(...winPrices)
-    const mn = Math.min(...winPrices)
-    discount = mx > 0 ? ((mx - mn) / mx) * 100 : null
-  }
-  const discTone = discount == null ? '' : discount < 5 ? 'ok' : discount > 15 ? 'danger' : 'warn'
+  const provBars = [...byProv.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([k, v]) => ({
+      key: k,
+      label: k.length > 16 ? `${k.slice(0, 14)}…` : k,
+      value: v,
+      display: fmtMoney(v),
+      color: '#0f766e',
+    }))
+
+  const quarters = [...byQuarter.keys()].sort()
+  const latestQ = quarters[quarters.length - 1]
+  const prevQ = prevQuarterKey(latestQ)
+  const curVol = latestQ ? (byQuarter.get(latestQ) || 0) : 0
+  const prevVol = prevQ ? (byQuarter.get(prevQ) || 0) : 0
+  let qoq = null
+  if (prevVol > 0) qoq = ((curVol - prevVol) / prevVol) * 100
+  else if (curVol > 0 && prevQ) qoq = 100
 
   return {
     stats: [
@@ -290,49 +402,46 @@ export function computeMscPriceMetrics(items) {
         key: 'vol',
         kicker: 'Dung lượng tiêu thụ (KQLCNT)',
         value: fmtInt(volume),
-        sub: `≈ ${fmtMoney(value)} VNĐ · ${fmtInt(rows.length)} dòng`,
+        sub: `≈ ${fmtMoney(value)} · ${fmtInt(rows.length)} dòng lọc`,
       },
       {
-        key: 'disc',
-        kicker: planAvg != null ? 'Biên độ giảm giá (KH → trúng)' : 'Biên độ giá trong kết quả',
-        value: discount == null ? '—' : `${discount.toFixed(1)}%`,
-        badge: discount == null ? null : discount < 5
-          ? { text: 'Giữ giá', tone: 'ok' }
-          : discount > 15
-            ? { text: 'Phá giá', tone: 'danger' }
-            : { text: 'Cạnh tranh', tone: 'warn' },
-        tone: discTone,
-        sub: planAvg != null ? 'So giá kế hoạch vs trúng TB' : 'Thiếu giá KH — dùng (max−min)/max',
-      },
-      {
-        key: 'top',
-        kicker: 'Đơn vị dẫn đầu thị phần',
-        value: topName.length > 28 ? `${topName.slice(0, 26)}…` : topName,
-        badge: { text: `${Math.round(topShare * 100)}%`, tone: topShare >= 0.5 ? 'warn' : 'ok' },
-        sub: 'Theo giá trị trúng trong kết quả lọc',
+        key: 'qoq',
+        kicker: 'Tiêu thụ so quý trước (QoQ)',
+        value: fmtPct(qoq),
+        badge: qoq == null
+          ? null
+          : qoq >= 0
+            ? { text: 'Tăng', tone: 'ok' }
+            : { text: 'Giảm', tone: 'danger' },
+        tone: qoq == null ? '' : qoq >= 0 ? 'ok' : 'danger',
+        sub: latestQ && prevQ ? `${latestQ} vs ${prevQ} · theo SL` : 'Thiếu dữ liệu quý trước trong mẫu',
       },
     ],
-    bars: [
-      { key: 'plan', label: 'Giá KH', value: planAvg || 0, display: planAvg != null ? fmtInt(planAvg) : '—', color: '#64748b' },
-      { key: 'g2', label: 'Nhóm 2', value: avg(byGroup.g2) || 0, display: avg(byGroup.g2) != null ? fmtInt(avg(byGroup.g2)) : '—', color: '#2563eb' },
-      { key: 'g4', label: 'Nhóm 4', value: avg(byGroup.g4) || 0, display: avg(byGroup.g4) != null ? fmtInt(avg(byGroup.g4)) : '—', color: '#0d9488' },
+    charts: [
+      { key: 'groups', title: 'So sánh giá trị theo nhóm thuốc', bars: groupBars, horizontal: false },
+      { key: 'prov', title: 'So sánh giá trị theo tỉnh', bars: provBars, horizontal: true },
     ],
   }
 }
 
 export function MscPriceMetrics({ items }) {
   const m = useMemo(() => computeMscPriceMetrics(items), [items])
+  const flash = useFlashKey(`${items?.length}|${m.stats[0]?.value}|${m.stats[1]?.value}`)
   return (
     <MetricsPanel
-      title="Định giá · P&L"
+      title="Định giá · thị trường"
+      flash={flash}
       stats={m.stats}
-      chartTitle="Giá KH vs Nhóm 2 · 4"
-      chart={<MiniBars bars={m.bars} />}
+      charts={m.charts.map((c) => ({
+        key: c.key,
+        title: c.title,
+        node: <MiniBars bars={c.bars} horizontal={c.horizontal} />,
+      }))}
     />
   )
 }
 
-/* ---- MSC tenders ---- */
+/* ---- MSC tenders (keep) ---- */
 export function computeMscTenderMetrics(items) {
   const rows = items || []
   const now = Date.now()
@@ -396,104 +505,139 @@ export function computeMscTenderMetrics(items) {
 
 export function MscTenderMetrics({ items }) {
   const m = useMemo(() => computeMscTenderMetrics(items), [items])
+  const flash = useFlashKey(`${items?.length}|${m.stats[0]?.value}`)
   return (
     <MetricsPanel
       title="Săn thầu · dòng tiền"
+      flash={flash}
       stats={m.stats}
-      chartTitle="Cấp mời thầu"
-      chart={<DonutChart slices={m.slices} />}
+      charts={[{ key: 'tier', title: 'Cấp mời thầu', node: <DonutChart slices={m.slices} /> }]}
     />
   )
 }
 
-/* ---- VSS (via TT20) ---- */
-export function computeVssMetrics(items, tt20Index) {
+/* ---- VSS ---- */
+export function computeVssMetrics(items) {
   const rows = items || []
-  const routes = { oral: 0, inject: 0, other: 0 }
-  for (const r of rows) routes[routeBucket(r.duongdung)] += 1
+  const byMonth = new Map()
+  const byProv = new Map()
+  const byGroup = new Map()
+  let totalPay = 0
 
-  let entry = null
-  if (tt20Index) {
-    for (const r of rows) {
-      const segs = tokenizeIngredients(r.hoatchat).filter((s) => !s.sep && String(s.text || '').trim())
-      for (const s of segs) {
-        const g = matchToken(tt20Index, s.text)
-        if (g?.entries?.length) {
-          entry = g.entries[0]
-          break
-        }
-      }
-      if (entry) break
+  const cutoff = new Date()
+  cutoff.setMonth(cutoff.getMonth() - 12)
+  const cutoffMs = cutoff.getTime()
+
+  for (const r of rows) {
+    const pay = num(r.thanhtien) ?? ((num(r.gia) || 0) * (num(r.soluong) || 0))
+    totalPay += pay
+    const dateRaw = r.tungay_hd || r.congbo || r.created_date || r.tungay
+    const mk = parseMonthKey(dateRaw)
+    if (mk) byMonth.set(mk, (byMonth.get(mk) || 0) + pay)
+    const prov = String(r.ten_tinh || r.ma_tinh || '').trim() || '—'
+    byProv.set(prov, (byProv.get(prov) || 0) + pay)
+
+    const t = dateRaw ? Date.parse(String(dateRaw).replace(' ', 'T').slice(0, 19)) : NaN
+    if (Number.isFinite(t) && t >= cutoffMs) {
+      const g = groupBucket(r.nhomthau) || String(r.nhomthau || 'Khác').trim() || 'Khác'
+      byGroup.set(g, (byGroup.get(g) || 0) + pay)
     }
   }
 
-  const inCatalog = !!entry
-  const rate = parseBhytRate(entry?.ghiChu, inCatalog)
-  const grades = {
-    db: !!String(entry?.hangDB_I || '').trim(),
-    ii: !!String(entry?.hangII || '').trim(),
-    iii: !!String(entry?.hangIII_IV || '').trim(),
-    tram: !!String(entry?.tramYT || '').trim(),
+  const months = [...byMonth.keys()].sort()
+  const latest = months[months.length - 1]
+  const prev = prevMonthKey(latest)
+  const cur = latest ? (byMonth.get(latest) || 0) : 0
+  const prv = prev ? (byMonth.get(prev) || 0) : 0
+  let mom = null
+  if (prv > 0) mom = ((cur - prv) / prv) * 100
+  else if (cur > 0 && prev) mom = 100
+
+  const provBars = [...byProv.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([k, v]) => ({
+      key: k,
+      label: k.length > 18 ? `${k.slice(0, 16)}…` : k,
+      value: totalPay > 0 ? (v / totalPay) * 100 : 0,
+      display: totalPay > 0 ? `${((v / totalPay) * 100).toFixed(1)}%` : '—',
+      color: '#0f766e',
+    }))
+
+  const groupBars = ['1', '2', '3', '4', '5']
+    .map((k, i) => ({
+      key: k,
+      label: `N${k}`,
+      value: byGroup.get(k) || 0,
+      display: fmtMoney(byGroup.get(k) || 0),
+      color: ['#0d9488', '#2563eb', '#d97706', '#7c3aed', '#dc2626'][i],
+    }))
+    .filter((b) => b.value > 0)
+  // include "Khác" if present
+  const other = [...byGroup.entries()].filter(([k]) => !/^[1-5]$/.test(k))
+  for (const [k, v] of other.slice(0, 2)) {
+    groupBars.push({
+      key: k,
+      label: k.length > 8 ? `${k.slice(0, 6)}…` : k,
+      value: v,
+      display: fmtMoney(v),
+      color: '#94a3b8',
+    })
   }
-  const fullCover = grades.db && grades.ii && grades.iii && grades.tram
-  const note = String(entry?.ghiChu || '').trim()
-  const restricted = note.length > 0
 
   return {
     stats: [
       {
-        key: 'rate',
-        kicker: 'Tỷ lệ chi trả BHYT (TT20)',
-        value: inCatalog ? `${rate}%` : '0%',
-        badge: !inCatalog
-          ? { text: 'Tự chi trả', tone: 'danger' }
-          : rate >= 100
-            ? { text: 'Ưu tiên kê', tone: 'ok' }
-            : { text: 'Đồng chi trả', tone: 'warn' },
-        tone: !inCatalog ? 'danger' : rate >= 100 ? 'ok' : 'warn',
-        sub: inCatalog ? 'Theo ghi chú TT 20/2022' : 'Không thấy trong danh mục TT20',
+        key: 'mom',
+        kicker: 'Tăng trưởng chi trả BHYT MoM',
+        value: fmtPct(mom),
+        badge: mom == null
+          ? null
+          : mom >= 0
+            ? { text: 'MoM ↑', tone: 'ok' }
+            : { text: 'MoM ↓', tone: 'danger' },
+        tone: mom == null ? '' : mom >= 0 ? 'ok' : 'danger',
+        sub: latest && prev
+          ? `${latest} vs ${prev} · nhịp trần quỹ`
+          : 'Thiếu tháng trước trong mẫu lọc',
       },
       {
-        key: 'grade',
-        kicker: 'Phủ tuyến KCB',
-        value: fullCover ? 'Phủ toàn tuyến' : inCatalog ? 'Hạn chế tuyến' : '—',
-        badge: fullCover
-          ? { text: 'ĐB → Hạng IV', tone: 'ok' }
-          : inCatalog
-            ? { text: 'Chỉ tuyến cao', tone: 'danger' }
-            : null,
-        tone: fullCover ? 'ok' : 'danger',
-        sub: inCatalog
-          ? `ĐB/I ${grades.db ? '✓' : '—'} · II ${grades.ii ? '✓' : '—'} · III/IV ${grades.iii ? '✓' : '—'} · Trạm ${grades.tram ? '✓' : '—'}`
-          : 'Cần khớp hoạt chất TT20',
-      },
-      {
-        key: 'rx',
-        kicker: 'Rào cản chỉ định lâm sàng',
-        value: !inCatalog ? '—' : restricted ? 'Siết điều kiện' : 'Kê đơn tự do',
-        badge: !inCatalog ? null : restricted
-          ? { text: '⚠️ Ghi chú', tone: 'warn' }
-          : { text: '🟢 Tự do', tone: 'ok' },
-        tone: restricted ? 'warn' : 'ok',
-        sub: restricted ? 'Có điều kiện thanh toán / hội chẩn' : 'Cột ghi chú trống',
+        key: 'pay',
+        kicker: 'Tổng chi trả (mẫu lọc)',
+        value: fmtMoney(totalPay),
+        sub: `${fmtInt(rows.length)} dòng · theo thành tiền`,
       },
     ],
-    slices: [
-      { key: 'oral', label: 'Đường uống', value: routes.oral, color: '#0d9488' },
-      { key: 'inject', label: 'Tiêm / truyền', value: routes.inject, color: '#2563eb' },
-      { key: 'other', label: 'Ngoài / khác', value: routes.other, color: '#d97706' },
+    charts: [
+      {
+        key: 'prov',
+        title: 'Tỷ trọng chi trả BHYT theo tỉnh',
+        bars: provBars,
+        horizontal: true,
+      },
+      {
+        key: 'group',
+        title: 'Hấp thụ tiền · nhóm kỹ thuật 12 tháng',
+        bars: groupBars.length ? groupBars : [{ key: '0', label: '—', value: 0, display: '—', color: '#94a3b8' }],
+        horizontal: false,
+      },
     ],
   }
 }
 
-export function VssMetrics({ items, tt20Index }) {
-  const m = useMemo(() => computeVssMetrics(items, tt20Index), [items, tt20Index])
+export function VssMetrics({ items }) {
+  const m = useMemo(() => computeVssMetrics(items), [items])
+  const flash = useFlashKey(`${items?.length}|${m.stats[0]?.value}|${m.stats[1]?.value}`)
   return (
     <MetricsPanel
       title="Thanh toán BHYT"
+      flash={flash}
       stats={m.stats}
-      chartTitle="Cơ cấu đường dùng"
-      chart={<DonutChart slices={m.slices} />}
+      charts={m.charts.map((c) => ({
+        key: c.key,
+        title: c.title,
+        node: <MiniBars bars={c.bars} horizontal={c.horizontal} />,
+      }))}
     />
   )
 }

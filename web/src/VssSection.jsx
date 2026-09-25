@@ -399,7 +399,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
                 <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
               </div>
             </div>
-            {!embedded && <VssMetrics items={metricsItems} tt20Index={tt20Index} />}
+            {!embedded && <VssMetrics items={metricsItems} />}
           </div>
         </div>
 

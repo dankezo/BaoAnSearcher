@@ -177,6 +177,25 @@ export function AuthProvider({ children }) {
       return { ok: false, error: m }
     }
     try {
+      // Fail fast if Azure provider is still off in Supabase Dashboard
+      try {
+        const { data: settings } = await sb.auth.getSession() // warm client
+        void settings
+        const base = (import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '')
+        const anon = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+        if (base && anon) {
+          const res = await fetch(`${base}/auth/v1/settings`, { headers: { apikey: anon } })
+          if (res.ok) {
+            const conf = await res.json()
+            if (!conf?.external?.azure) {
+              const m = 'Outlook chưa bật trên Supabase (baoan-auth). Vào Authentication → Providers → Azure → Enable, dán Client ID + Secret từ Azure App Registration, rồi Save.'
+              setAuthError(m)
+              return { ok: false, error: m }
+            }
+          }
+        }
+      } catch { /* continue to OAuth */ }
+
       const { data, error } = await sb.auth.signInWithOAuth({
         provider: 'azure',
         options: {
@@ -192,7 +211,6 @@ export function AuthProvider({ children }) {
         setAuthError(m)
         return { ok: false, error: m }
       }
-      // Browser navigates to Microsoft; url present when redirect starts
       if (data?.url) {
         window.location.assign(data.url)
         return { ok: true, redirecting: true }

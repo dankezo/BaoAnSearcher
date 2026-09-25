@@ -23,7 +23,7 @@ VSS syncs `nam >= 2024` (full years through current). DAV/MSC sync full tables.
 ## Auth (nội bộ @baoanpharma.com)
 
 1. Chạy thêm SQL [`migrations/002_auth_rls.sql`](migrations/002_auth_rls.sql) (chỉ `authenticated` đọc data).
-2. Authentication → Providers → Email: bật Email, **tắt** “Allow new users to sign up” (admin dùng mật khẩu; staff Sales/Import dùng Outlook).
+2. Authentication → Providers → Email: bật Email; **giữ Allow new users to sign up = ON** nếu dùng Outlook (lần đầu OAuth tạo user). App vẫn chỉ cho phép email trong allowlist.
 3. URL Configuration:
    - Site URL: `https://app.baoanpharma.com`
    - Redirect URLs: `https://app.baoanpharma.com/**`, `http://localhost:5173/**`
@@ -41,11 +41,14 @@ App có nút **Đăng nhập với Outlook**. Cần bật provider Azure một l
 3. **API permissions** → Microsoft Graph (Delegated): `openid`, `profile`, `email`, `offline_access`, `User.Read` → **Grant admin consent**
 4. **Enterprise applications** → BaoAn Searcher → Users and groups → **Add** `sales@baoanpharma.com` và `importer@baoanpharma.com` (Assignment required = Yes nếu muốn chỉ 2 TK này)
 5. **Supabase** → Authentication → Providers → **Azure**
-   - Enable
+   - Enable = **ON** (bắt buộc — chỉ tạo App trên Azure chưa đủ)
    - Application (client) ID
    - Client secret (Value)
    - Azure Tenant URL (optional, single-tenant): `https://login.microsoftonline.com/<TENANT_ID>`
-6. Soft-launch: mở `https://app.baoanpharma.com` → **Đăng nhập với Outlook** → chọn sales/importer.
+6. Authentication → Providers → Email: **Allow new users to sign up = ON** (OAuth lần đầu cần tạo user; app vẫn chặn email ngoài allowlist).
+7. Soft-launch: mở `https://app.baoanpharma.com` → **Đăng nhập với Outlook** → chọn sales/importer.
+
+Kiểm tra: `GET https://gojdltnquedwpcqvecob.supabase.co/auth/v1/settings` → `external.azure` phải là `true`.
 
 Allowlist trong code: `sales@`, `importer@`, `admin@`, `sonnguyen@`, `tuanvu@` (`web/src/supabaseClient.js`). Thêm email mới = sửa list + redeploy.
 
