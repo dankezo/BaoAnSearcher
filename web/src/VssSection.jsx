@@ -12,7 +12,7 @@ import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
 import { VssMetrics, applyMetricQuick, VSS_METRICS_YEARS } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
-const METRICS_CAP = 80_000
+const METRICS_CAP = Infinity
 
 const toNum = (v) => {
   if (v == null || v === '') return ''
@@ -120,13 +120,15 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const [refreshKey, setRefreshKey] = useState(0)
   const [prefsReady, setPrefsReady] = useState(false)
   const [loadPct, setLoadPct] = useState(null)
-  const [metricsSample, setMetricsSample] = useState([])
+  const [metricsTotal, setMetricsTotal] = useState(null)
+  const [metricsSample, setMetricsSample] = useState(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricActiveId, setMetricActiveId] = useState(null)
   const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc BHYT VSS', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
+  useEffect(() => () => { reqSeq.current += 1 }, [])
   const meta = useSectionMeta('vss', localMode, staticFallback, refreshKey)
 
   useEffect(() => {
@@ -181,11 +183,9 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     setErr('')
     setInfoNote('')
     const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
-    // Metrics luôn nạp 2025–2026 (hoặc năm user đã chọn)
-    const namList = Array.isArray(active.nam) ? active.nam.filter(Boolean) : (active.nam ? [active.nam] : [])
     const metricsActive = {
       ...active,
-      nam: namList.length ? namList : VSS_METRICS_YEARS.map(String),
+      nam: VSS_METRICS_YEARS.map(String),
     }
     try {
       const useRemote = localMode || supabaseConfigured
@@ -194,9 +194,13 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         const searchFn = localMode
           ? (page, sz) => api.vssSearch({ filters: active, page, size: sz })
           : (page, sz) => cloudVssSearch({ filters: active, page, size: sz })
-        const metricsFn = localMode
-          ? (page, sz) => api.vssSearch({ filters: metricsActive, page, size: sz })
-          : (page, sz) => cloudVssSearch({ filters: metricsActive, page, size: sz })
+        const metricsFn = async (page, size) => {
+          const result = localMode
+            ? await api.vssSearch({ filters: metricsActive, page, size })
+            : await cloudVssSearch({ filters: metricsActive, page, size })
+          if (!stale()) setMetricsTotal(result.total)
+          return result
+        }
 
         if (needGrade) {
           const allRaw = await fetchAllPages(searchFn, {
@@ -209,14 +213,22 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           items = sortByDateDesc(items, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd'])
           setData({ total: items.length, items, page: 0, size: items.length || size })
           setPage(0)
-          setMetricsSample(items.slice(0, METRICS_CAP))
+          setMetricsLoading(!embedded)
+          if (!embedded) fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: stale }).then((all) => {
+            if (stale()) return
+            const scoped = all.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, active.hangBenhVien))
+            setMetricsSample(scoped)
+            setMetricsTotal(scoped.length)
+          }).catch(() => { if (!stale()) setMetricsSample([]) })
+            .finally(() => { if (!stale()) setMetricsLoading(false) })
         } else {
           const res = await searchFn(p, size)
           if (stale()) return
           setData(res)
           setPage(p)
+          if (embedded) return
           setMetricsLoading(true)
-          fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP }).then((all) => {
+          fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: stale }).then((all) => {
             if (!stale()) setMetricsSample(all)
           }).catch(() => { if (!stale()) setMetricsSample(res.items || []) })
             .finally(() => { if (!stale()) setMetricsLoading(false) })
@@ -234,7 +246,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         setRefreshKey((k) => k + 1)
       }
     }
-  }, [localMode, mergedFilters, tt20Index])
+  }, [localMode, mergedFilters, tt20Index, embedded])
 
   useEffect(() => {
     if (!prefsReady) return
@@ -290,7 +302,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   }, [data.items, cols, columnFilters, metricQuick])
   const rowKey = useCallback((r, i) => `${r.sodk}|${r.ma}|${r.ma_tinh}|${r.quyetdinh}|${r.stt ?? `${page}-${i}`}`, [page])
   const pageSizeNum = resolvePageSize(pageSize)
-  const metricsItems = metricsSample.length ? metricsSample : (rows.length ? rows : data.items)
+  const metricsItems = metricsSample ?? data.items
 
   const onMetricFilter = useCallback((patch, id) => {
     if (metricActiveId === id) {
@@ -322,7 +334,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
       return all.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, filtersRef.current.hangBenhVien))
     }
     return all
-  }, [localMode, mergedFilters, tt20Index])
+  }, [localMode, mergedFilters, tt20Index, embedded])
 
   const doExport = async () => {
     setExporting(true)
@@ -339,39 +351,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     }
   }
 
-  const primaryFilters = (
-    <div className="filter-grid cols-5">
-      <MultiSelectField
-        label="Nhóm thầu"
-        value={filters.nhomthau}
-        onChange={(v) => setF('nhomthau', v)}
-        options={['N1', 'N2', 'N3', 'N4', 'N5']}
-      />
-      <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
-      <SuggestField label="Hoạt chất" value={filters.hoatchat} onChange={(v) => setF('hoatchat', v)} onSearch={(v) => runSearch({ hoatchat: v })} suggest={fieldSuggest('hoatchat')} />
-      <SuggestField label="Số ĐK" value={filters.sodk} onChange={(v) => setF('sodk', v)} onSearch={(v) => runSearch({ sodk: v })} suggest={fieldSuggest('sodk')} />
-      <SuggestField label="Loại thầu" value={filters.loai_thau} onChange={(v) => setF('loai_thau', v)} onSearch={(v) => runSearch({ loai_thau: v })} suggest={fieldSuggest('loai_thau')} placeholder="vd: thau_tinh" />
-    </div>
-  )
-
-  const detailFilters = (
-    <div className="filter-grid tight cols-6">
-      <Field label="HĐ từ ngày"><input type="date" value={filters.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
-      <Field label="HĐ đến ngày"><input type="date" value={filters.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
-      <MultiSelectField
-        label="Năm hiệu lực"
-        value={filters.nam}
-        onChange={(v) => setF('nam', v)}
-        options={['2024', '2025', '2026']}
-        placeholder="Chọn năm…"
-      />
-      <SuggestField label="Đường dùng" value={filters.duongdung} onChange={(v) => setF('duongdung', v)} onSearch={(v) => runSearch({ duongdung: v })} suggest={fieldSuggest('duongdung')} />
-      <MultiSelectField label="Mã tỉnh" value={filters.ma_tinh} onChange={(v) => setF('ma_tinh', v)} suggest={fieldSuggest('ma_tinh')} placeholder="Chọn tỉnh…" />
-      <MultiSelectField label="Nước SX" value={filters.nuocsx} onChange={(v) => setF('nuocsx', v)} suggest={fieldSuggest('nuocsx')} placeholder="Chọn nước…" />
-    </div>
-  )
-
-  /** In multi-view: everything except keyword goes into the modal. */
+  /** Shared fields keep single-view and pane filters consistent. */
   const modalFilters = (
     <div className="filter-grid">
       <MultiSelectField
@@ -390,7 +370,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         label="Năm hiệu lực"
         value={filters.nam}
         onChange={(v) => setF('nam', v)}
-        options={['2024', '2025', '2026']}
+        options={Array.from({ length: 4 }, (_, i) => String(new Date().getFullYear() - i))}
         placeholder="Chọn năm…"
       />
       <SuggestField label="Đường dùng" value={filters.duongdung} onChange={(v) => setF('duongdung', v)} onSearch={(v) => runSearch({ duongdung: v })} suggest={fieldSuggest('duongdung')} />
@@ -425,8 +405,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
                   <div className="filter-keyword">
                     <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" />
                   </div>
-                  {primaryFilters}
-                  {detailFilters}
+                  {modalFilters}
                 </>
               )}
               <div className="filter-actions">
@@ -445,7 +424,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
               </div>
             </div>
             {!embedded && (
-              <VssMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading || loading} />
+              <VssMetrics items={metricsItems} total={metricsTotal ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading || loading} />
             )}
           </div>
         </div>

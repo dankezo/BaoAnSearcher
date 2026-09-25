@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
 import { useAuth } from './auth'
-import { Tt20Provider } from './components'
+import { PaneOverlayContext, Tt20Provider } from './components'
 import { supabaseConfigured } from './supabaseCloud'
 import DavSection from './DavSection'
 import MscSection from './MscSection'
@@ -29,6 +29,7 @@ function SectionById({ id, localMode, embedded, filtersInModal }) {
 }
 
 function SplitPane({ side, appId, onSelect, onClear, localMode }) {
+  const [overlayHost, setOverlayHost] = useState(null)
   const [picking, setPicking] = useState(!appId)
   const label = SPLIT_APPS.find((a) => a.id === appId)?.label || 'Chọn ứng dụng'
 
@@ -37,7 +38,8 @@ function SplitPane({ side, appId, onSelect, onClear, localMode }) {
   }, [appId])
 
   return (
-    <div className={`split-pane${picking || !appId ? ' empty' : ''}`}>
+    <div ref={setOverlayHost} className={`split-pane${picking || !appId ? ' empty' : ''}`}>
+      <PaneOverlayContext.Provider value={overlayHost}>
       <div className="split-pane-bar">
         <span className="split-pane-side">{side === 'left' ? 'Trái' : 'Phải'}</span>
         <strong className="split-pane-title">{appId ? label : 'Chưa chọn'}</strong>
@@ -52,7 +54,7 @@ function SplitPane({ side, appId, onSelect, onClear, localMode }) {
 
       {appId && !picking && (
         <div className="split-pane-body">
-          <SectionById id={appId} localMode={localMode} embedded filtersInModal />
+          <SectionById key={appId} id={appId} localMode={localMode} embedded filtersInModal />
         </div>
       )}
 
@@ -79,6 +81,7 @@ function SplitPane({ side, appId, onSelect, onClear, localMode }) {
           </div>
         </div>
       )}
+      </PaneOverlayContext.Provider>
     </div>
   )
 }

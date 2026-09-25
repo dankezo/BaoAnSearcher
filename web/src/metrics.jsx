@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { TAG_CAM, TAG_VANG, TAG_XAM, TAG_XANH } from './tagConfig'
 import { resolveBidStatusFromRow } from './bidStatus'
+import { Modal } from './components'
 
 const MONTH_MS = 30.4375 * 24 * 3600 * 1000
 const DAY_MS = 86400000
@@ -98,29 +99,28 @@ function useFlashKey(dep) {
 /** Current calendar year used for “từ đầu năm” fixed totals. */
 export const METRICS_YEAR = new Date().getFullYear()
 /** VSS metrics load window (inclusive). */
-export const VSS_METRICS_YEARS = [METRICS_YEAR - 1, METRICS_YEAR]
+export const VSS_METRICS_YEARS = [METRICS_YEAR]
 
 function sampleNote(items, total, opts = {}) {
-  if (opts.years?.length) return `từ ${opts.years.join('–')}`
-  if (opts.yearFrom) return `từ đầu năm ${opts.yearFrom}`
   const n = items?.length || 0
   const t = Number(total)
-  if (Number.isFinite(t) && t > n && n > 0) return `đang nạp ${fmtInt(n)}/${fmtInt(t)}`
-  return null
+  const scope = opts.years?.length ? `từ đầu năm ${opts.years.join('–')}` : opts.yearFrom ? `từ đầu năm ${opts.yearFrom}` : ''
+  const partial = Number.isFinite(t) && t > n ? `đã nạp ${fmtInt(n)}/${fmtInt(t)}` : ''
+  return [scope, partial].filter(Boolean).join(' · ') || null
 }
 
 function inYearFrom(raw, yearFrom) {
   if (!yearFrom) return true
   const t = parseDateMs(raw)
-  if (t == null) return true
-  return t >= new Date(yearFrom, 0, 1).getTime()
+  if (t == null) return false
+  return t >= new Date(yearFrom, 0, 1).getTime() && t <= Date.now()
 }
 
 function inYears(row, years, dateKeys = []) {
   if (!years?.length) return true
   const set = new Set(years.map(Number))
   const nam = Number(row?.nam)
-  if (Number.isFinite(nam) && set.has(nam)) return true
+  if (nam >= 1900 && nam <= 2200) return set.has(nam)
   for (const k of dateKeys) {
     const t = parseDateMs(row?.[k])
     if (t != null && set.has(new Date(t).getFullYear())) return true
@@ -207,7 +207,6 @@ export function CompoundMetricCard({
       <div className="compound-head">
         <span className="compound-title">{title}</span>
         <span className="compound-head-right">
-          {scope === 'fixed' && <span className="compound-scope-tag">cố định</span>}
           {subtitle && <span className="compound-sub">{subtitle}</span>}
         </span>
       </div>
@@ -261,8 +260,6 @@ export function CompoundMetricCard({
 }
 
 export function CompoundMetricsGrid({ title, cards, flash, activeId, onFilter, loading = false }) {
-  const fixed = cards.filter((c) => c.scope === 'fixed')
-  const live = cards.filter((c) => c.scope !== 'fixed')
   return (
     <aside className={`filters-stats compound-panel${flash ? ' metrics-flash' : ''}${loading ? ' is-loading' : ''}`} aria-label={title || 'Chỉ số'}>
       {title && (
@@ -271,22 +268,11 @@ export function CompoundMetricsGrid({ title, cards, flash, activeId, onFilter, l
           {loading && <span className="compound-loading"> · đang nạp…</span>}
         </div>
       )}
-      {fixed.length > 0 && (
-        <div className="compound-fixed-cluster" aria-label="Chỉ số cố định theo năm">
-          <div className="compound-grid">
-            {fixed.map((c) => (
-              <CompoundMetricCard key={c.key} {...c} activeId={activeId} onFilter={onFilter} filtering={loading && c.scope === 'live'} />
-            ))}
-          </div>
-        </div>
-      )}
-      {live.length > 0 && (
-        <div className="compound-grid">
-          {live.map((c) => (
-            <CompoundMetricCard key={c.key} {...c} activeId={activeId} onFilter={onFilter} filtering={loading} />
-          ))}
-        </div>
-      )}
+      <div className="compound-grid">
+        {cards.map((c) => (
+          <CompoundMetricCard key={c.key} {...c} activeId={activeId} onFilter={onFilter} filtering={loading} />
+        ))}
+      </div>
     </aside>
   )
 }
@@ -294,9 +280,7 @@ export function CompoundMetricsGrid({ title, cards, flash, activeId, onFilter, l
 /* ---- DAV ---- */
 export function computeDavCompound(items, total) {
   const all = items || []
-  const yearFrom = METRICS_YEAR
-  let rows = all.filter((r) => inYearFrom(r.ngayCap || r.ngayGiaHan, yearFrom))
-  if (rows.length < Math.min(20, all.length)) rows = all
+  const rows = all
 
   const byIng = new Map()
   for (const r of rows) {
@@ -335,7 +319,7 @@ export function computeDavCompound(items, total) {
     if (m != null && m >= 0 && m < 12) riskShort += 1
   }
 
-  const note = sampleNote(all, total, { yearFrom })
+  const note = sampleNote(all, total) || 'Toàn bộ dữ liệu'
   const densitySlices = [
     { key: 'b', label: '1–2 SĐK', value: blue, color: '#22c55e' },
     { key: 'm', label: '3–5 SĐK', value: mid, color: '#eab308' },
@@ -356,7 +340,7 @@ export function computeDavCompound(items, total) {
       mainValue: fmtInt(blue),
       unit: 'ô xanh',
       subtitle: note,
-      titleTip: `Tổng từ đầu năm ${yearFrom} — không đổi theo lọc bảng`,
+      titleTip: 'Tổng hồ sơ DAV trên toàn bộ các năm',
       chart: <DonutChart slices={densitySlices} size={96} />,
       subMetrics: [
         { id: 'sdk_1_2', label: '1–2 SĐK', count: fmtInt(blue), tone: 'ok', patch: { ingredientCount: '1' } },
@@ -412,7 +396,7 @@ export function computeDavCompound(items, total) {
 export function DavMetrics({ items, total, activeId, onFilter, loading }) {
   const cards = useMemo(() => computeDavCompound(items, total), [items, total])
   const flash = useFlashKey(`${items?.length}|${total}|${cards[0]?.mainValue}`)
-  const note = sampleNote(items, total, { yearFrom: METRICS_YEAR })
+  const note = sampleNote(items, total) || 'Toàn bộ dữ liệu'
   return (
     <CompoundMetricsGrid
       title={`DAV${note ? ` · ${note}` : ''}`}
@@ -460,7 +444,6 @@ export function computeMscTenderCompound(items, total) {
   const all = items || []
   const yearFrom = METRICS_YEAR
   let rows = all.filter((r) => inYearFrom(r.published || r.close_date, yearFrom))
-  if (rows.length < Math.min(20, all.length)) rows = all
 
   const now = Date.now()
   let openN = 0
@@ -664,7 +647,7 @@ export function RankExploreModal({
   if (!open) return null
   return (
     <div className="modal-backdrop rank-modal" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="modal-panel rank-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal rank-panel" onClick={(e) => e.stopPropagation()}>
         <header className="rank-head">
           <div>
             <h2>{title}</h2>
@@ -774,7 +757,6 @@ export function computeMscPriceCompound(items, total, { onExploreWinners } = {})
   const all = items || []
   const yearFrom = METRICS_YEAR
   let rows = all.filter((r) => inYearFrom(r.published || r.decision_date, yearFrom))
-  if (rows.length < Math.min(20, all.length)) rows = all
   // Discount proxy: vs max price of same ingredient in sample
   const byIngPrices = new Map()
   for (const r of rows) {
@@ -923,6 +905,7 @@ export function computeMscPriceCompound(items, total, { onExploreWinners } = {})
 
 export function MscPriceMetrics({ items, total, activeId, onFilter, loading }) {
   const [explore, setExplore] = useState(false)
+  const scopedItems = useMemo(() => (items || []).filter((r) => inYearFrom(r.published || r.decision_date, METRICS_YEAR)), [items])
   const cards = useMemo(
     () => computeMscPriceCompound(items, total, { onExploreWinners: () => setExplore(true) }),
     [items, total],
@@ -943,7 +926,7 @@ export function MscPriceMetrics({ items, total, activeId, onFilter, loading }) {
         open={explore}
         onClose={() => setExplore(false)}
         title="Xếp hạng nhà thầu theo doanh thu"
-        rows={items}
+        rows={scopedItems}
         nameKey="winner"
         valueFn={(r) => (num(r.quantity) || 0) * (num(r.unit_price ?? r.unitPrice) || 0)}
         dateKey="published"
@@ -1197,12 +1180,12 @@ export function computeVssCompound(items, total, { onExploreProvinces } = {}) {
   const all = items || []
   const years = VSS_METRICS_YEARS
   let rows = all.filter((r) => inYears(r, years, ['tungay_hd', 'tungay', 'congbo', 'denngay_hd']))
-  if (rows.length < Math.min(20, all.length)) rows = all
 
   const payG = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
   let payAll = 0
   const cskcb = new Set()
-  const byProv = new Map()
+  const provinceRows = buildProvinceTable(rows)
+  const byProv = new Map(provinceRows.map((p) => [p.key, p.value]))
 
   for (const r of rows) {
     const pay = vssLineValue(r)
@@ -1212,14 +1195,12 @@ export function computeVssCompound(items, total, { onExploreProvinces } = {}) {
 
     const cs = String(r.ma_cskcb || r.ten_cskcb || '').trim()
     if (cs) cskcb.add(cs)
-    const prov = String(r.ten_tinh || r.ma_tinh || '').trim() || '—'
-    byProv.set(prov, (byProv.get(prov) || 0) + pay)
   }
 
   const gSum = Object.values(payG).reduce((a, b) => a + b, 0) || 1
   const highShare = ((payG[1] + payG[2]) / (payAll || gSum)) * 100
-  const totalPay = [...byProv.values()].reduce((a, b) => a + b, 0) || 1
-  const top1 = [...byProv.entries()].sort((a, b) => b[1] - a[1])[0]
+  const totalPay = [...byProv.values()].reduce((a, b) => a + b, 0)
+  const topProvinces = provinceRows.slice(0, 5).map((p) => [p.name, p.value, p.key])
   const note = sampleNote(all, total, { years })
 
   let twLike = 0
@@ -1279,23 +1260,88 @@ export function computeVssCompound(items, total, { onExploreProvinces } = {}) {
     {
       key: 'region',
       scope: 'fixed',
-      title: 'Tỉnh / doanh thu',
-      mainValue: top1 ? `${((top1[1] / totalPay) * 100).toFixed(0)}%` : '—',
-      unit: 'Top 1',
+      title: 'Giá trị trúng thầu theo tỉnh',
+      mainValue: fmtMoney(totalPay),
+      unit: `${byProv.size} tỉnh / nhóm`,
       subtitle: note,
-      explore: (
-        <RankExploreButton
-          label={top1 ? (top1[0].length > 22 ? `${top1[0].slice(0, 20)}…` : top1[0]) : 'Chưa có tỉnh'}
-          topHint={top1 ? `${fmtMoney(top1[1])} · ${byProv.size} tỉnh` : null}
-          onOpen={() => onExploreProvinces?.()}
-        />
-      ),
+      chart: <ol className="province-top-list">
+        {topProvinces.map(([name, value, key], i) => <li key={key}>
+          <span className="province-position">{i + 1}</span>
+          <span className="province-name" title={name}>{name}</span>
+          <strong>{fmtMoney(value)}</strong>
+          <span className="province-share">{(value / (totalPay || 1) * 100).toFixed(1)}%</span>
+        </li>)}
+      </ol>,
+      explore: <button type="button" className="province-detail-btn" onClick={() => onExploreProvinces?.()}>Xem tất cả tỉnh →</button>,
     },
   ]
 }
 
+export function provinceName(row) {
+  const name = String(row.ten_tinh || '').trim()
+  const code = String(row.ma_tinh || '').trim()
+  return name || (code ? `Tỉnh mã ${code}` : 'Chưa xác định tỉnh')
+}
+
+export function buildProvinceTable(rows) {
+  const groups = new Map()
+  for (const row of rows || []) {
+    const code = String(row.ma_tinh || '').trim()
+    const name = provinceName(row)
+    const key = code || name
+    if (!groups.has(key)) groups.set(key, { key, code, name, value: 0, count: 0, facilities: new Set(), groups: [0, 0, 0, 0, 0] })
+    const item = groups.get(key)
+    if (String(row.ten_tinh || '').trim()) item.name = name
+    const value = vssLineValue(row)
+    item.value += value
+    item.count++
+    const facility = row.ma_cskcb || row.ten_cskcb
+    if (facility) item.facilities.add(facility)
+    const group = groupBucket(row.nhomthau)
+    if (group) item.groups[Number(group) - 1] += value
+  }
+  const total = [...groups.values()].reduce((sum, p) => sum + p.value, 0)
+  return [...groups.values()].sort((a, b) => b.value - a.value).map((p) => ({
+    ...p, facilities: p.facilities.size, share: total ? p.value / total * 100 : 0,
+  }))
+}
+
+function ProvinceExploreModal({ open, onClose, rows, total, loading, onPick }) {
+  const [query, setQuery] = useState('')
+  const ranked = useMemo(() => buildProvinceTable(rows), [rows])
+  const shown = ranked.filter((p) => ingredientKey(`${p.name} ${p.code}`).includes(ingredientKey(query)))
+  const visible = query.trim() ? shown : ranked
+  return <Modal open={open} onClose={onClose} title="Giá trị trúng thầu theo tỉnh"
+    subtitle={`Từ đầu năm ${METRICS_YEAR} · toàn bộ tỉnh có trong dữ liệu`} width={1120}>
+    <div className="province-summary">
+      <div><span>Tổng giá trị</span><strong>{fmtVnd(ranked.reduce((sum, p) => sum + p.value, 0))}</strong></div>
+      <div><span>Tỉnh / nhóm</span><strong>{fmtInt(ranked.length)}</strong></div>
+      <div><span>Dòng trúng thầu</span><strong>{fmtInt(rows?.length || 0)}</strong></div>
+    </div>
+    <div className="province-toolbar">
+      <input aria-label="Tìm tỉnh hoặc mã tỉnh" placeholder="Tìm tỉnh hoặc mã tỉnh…" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <span>{visible.length} / {ranked.length} tỉnh / nhóm</span>
+    </div>
+    {(loading || Number(total) > (rows?.length || 0)) && <p className="province-note">{loading ? 'Đang nạp dữ liệu, các giá trị sẽ tiếp tục cập nhật.' : 'Thống kê trên dữ liệu đã nạp; chưa đủ toàn bộ kết quả.'}</p>}
+    <div className="rank-table-wrap province-table-wrap">
+      <table className="rank-table province-table">
+        <thead><tr><th>#</th><th>Tỉnh / TP</th><th>Giá trị trúng thầu</th><th>Tỷ trọng</th><th>CSKCB</th><th>Số dòng</th>{[1, 2, 3, 4, 5].map((n) => <th key={n}>Nhóm {n}</th>)}<th>Tra cứu</th></tr></thead>
+        <tbody>{visible.map((p) => <tr key={p.key}>
+          <td>{ranked.indexOf(p) + 1}</td><td><strong>{p.name}</strong>{p.code && <small>Mã {p.code}</small>}</td>
+          <td className="mono">{fmtVnd(p.value)}</td><td>{p.share.toFixed(1)}%</td><td>{fmtInt(p.facilities)}</td><td>{fmtInt(p.count)}</td>
+          {p.groups.map((v, i) => <td key={i} className="mono">{fmtMoney(v)}</td>)}
+          <td>{(p.code || p.name !== 'Chưa xác định tỉnh') && <button className="btn secondary tiny" onClick={() => onPick(p)}>Lọc tỉnh</button>}</td>
+        </tr>)}</tbody>
+      </table>
+      {!visible.length && <p className="empty">{ranked.length ? 'Không có tỉnh phù hợp.' : 'Chưa có dữ liệu tỉnh trong kỳ này.'}</p>}
+    </div>
+    <p className="province-note">Giá trị trúng thầu = thành tiền hoặc đơn giá × số lượng, không phải doanh thu thực thu. Dòng thiếu tên tỉnh được ghi rõ theo mã; dòng thiếu cả mã được gom vào “Chưa xác định tỉnh”.</p>
+  </Modal>
+}
+
 export function VssMetrics({ items, total, activeId, onFilter, loading }) {
   const [explore, setExplore] = useState(false)
+  const scopedItems = useMemo(() => (items || []).filter((r) => inYears(r, VSS_METRICS_YEARS, ['tungay_hd', 'tungay', 'congbo', 'denngay_hd'])), [items])
   const cards = useMemo(
     () => computeVssCompound(items, total, { onExploreProvinces: () => setExplore(true) }),
     [items, total],
@@ -1312,17 +1358,10 @@ export function VssMetrics({ items, total, activeId, onFilter, loading }) {
         onFilter={onFilter}
         loading={loading}
       />
-      <RankExploreModal
-        open={explore}
-        onClose={() => setExplore(false)}
-        title="Xếp hạng tỉnh theo giá trị trúng thầu"
-        rows={items}
-        nameKey="ten_tinh"
-        valueFn={vssLineValue}
-        dateKey="tungay_hd"
-        onPick={(name) => {
+      <ProvinceExploreModal open={explore} onClose={() => setExplore(false)} rows={scopedItems} total={total} loading={loading}
+        onPick={(province) => {
           setExplore(false)
-          onFilter?.({ ten_tinh: name, ma_tinh: name }, `prov:${name}`)
+          onFilter?.({ ma_tinh: province.code || province.name }, `prov:${province.key}`)
         }}
       />
     </>

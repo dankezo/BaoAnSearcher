@@ -84,13 +84,14 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const [suggesting, setSuggesting] = useState(false)
   const [prefsReady, setPrefsReady] = useState(false)
   const [loadPct, setLoadPct] = useState(null)
-  const [metricsSample, setMetricsSample] = useState([])
+  const [metricsSample, setMetricsSample] = useState(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricActiveId, setMetricActiveId] = useState(null)
   const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc thuốc DAV', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
+  useEffect(() => () => { reqSeq.current += 1 }, [])
   const suggestSeq = useRef(0)
   const suggestTimer = useRef(null)
   const meta = useSectionMeta('dav', localMode, staticFallback, refreshKey)
@@ -203,9 +204,10 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
           setData({ ...res, items })
           setPage(p)
+          if (embedded) return
           // Background metrics — DAV lấy đủ (không cắt 2000)
           setMetricsLoading(true)
-          fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP }).then((all) => {
+          fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP, shouldCancel: stale }).then((all) => {
             if (stale()) return
             setMetricsSample(all.map(enrichRowTag))
           }).catch(() => {
@@ -227,7 +229,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
         setRefreshKey((k) => k + 1)
       }
     }
-  }, [localMode, mergedFilters, tt20Index])
+  }, [localMode, mergedFilters, tt20Index, embedded])
 
   // Initial load + pageSize only — status ticks never auto-search
   useEffect(() => {
@@ -354,7 +356,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   }, [data.items, cols, columnFilters, metricQuick])
   const rowKey = useCallback((r, i) => (r.id != null ? `id:${r.id}` : `${r.soDangKy}|${page}|${i}`), [page])
   const pageSizeNum = resolvePageSize(pageSize)
-  const metricsItems = metricsSample.length ? metricsSample : (rows.length ? rows : data.items)
+  const metricsItems = metricsSample ?? data.items
 
   const onMetricFilter = useCallback((patch, id) => {
     if (metricActiveId === id) {

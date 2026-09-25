@@ -1958,3 +1958,100 @@ tr.bid-open.selected > td {
   min-width: 120px;
 }
 
+/* The available panel width, rather than screen width, drives the dashboard. */
+.section { animation: none; min-width: 0; }
+.filters { container: dashboard / inline-size; padding: 12px; }
+.filters-split { grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: stretch; }
+.filters-left { gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.filters-left > * { min-width: 0; }
+.filters-left .search-hero { grid-template-columns: minmax(0, 1fr); }
+.filters-left .search-hero-bar { min-width: 0; }
+.filters-left .tag-filter { max-width: 100%; }
+.filters-left .tag-filter-trigger { max-width: 100%; min-height: 34px; height: auto; flex-wrap: wrap; padding-block: 6px; }
+.filters-left .filter-grid,
+.filter-modal-body .filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  gap: 10px;
+}
+.filters-left .filter-grid > *, .filter-modal-body .filter-grid > * { min-width: 0; width: auto; }
+.filters-left .field, .filters-left input, .filters-left select { min-width: 0; max-width: 100%; }
+.filters-left .filter-actions { flex-wrap: wrap; gap: 8px; }
+.compound-panel, .filters-stats.compound-panel { display: grid !important; gap: 8px; align-content: start; }
+.compound-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.compound-card, .compound-card.scope-fixed {
+  min-width: 0; min-height: 0; padding: 12px; gap: 9px;
+  border: 1px solid var(--line); background: var(--surface);
+  justify-content: flex-start; overflow-wrap: anywhere;
+}
+.compound-head { flex-wrap: wrap; gap: 4px; }
+.compound-title { font-size: 11px; letter-spacing: .02em; }
+.compound-head-right { min-width: 0; }
+.compound-sub { white-space: normal; }
+.compound-value { font-size: clamp(18px, 1.4vw, 24px); line-height: 1.2; }
+.compound-pills { gap: 5px; }
+.compound-pill { max-width: 100%; white-space: normal; text-align: left; }
+.compound-card .compound-bar { margin-top: auto; }
+.compound-card .donut-wrap { gap: 10px; min-width: 0; }
+.compound-card .donut-svg { width: 72px; height: 72px; flex: 0 0 72px; }
+.compound-card .donut-legend { min-width: 0; flex: 1; }
+.compound-card .donut-legend li { min-width: 0; gap: 5px; }
+.compound-card .donut-label { min-width: 0; }
+@container dashboard (min-width: 850px) {
+  .compound-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@container dashboard (min-width: 1200px) {
+  .filters-split:not(.no-stats) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compound-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .filters-left { align-content: stretch; }
+  .filters-left .filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; }
+  .compound-panel { align-content: stretch; grid-template-rows: auto 1fr; }
+}
+@container dashboard (min-width: 1800px) {
+  .compound-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .filters-left .filter-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@container dashboard (max-width: 420px) {
+  .compound-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.split-pane { contain: layout paint; isolation: isolate; }
+.split-pane > .filter-modal-backdrop { position: absolute; padding: 12px; }
+.split-pane .filter-modal { width: 100%; max-height: 100%; min-height: 0; }
+.split-pane .filter-modal-body { min-height: 0; overscroll-behavior: contain; }
+.split-pane .loading-overlay { inset: 44px 0 0; padding: 12px; }
+.split-pane .loading-card { min-width: 0; width: min(340px, 100%); }
+.split-pane .split-picker { top: 44px; }
+.split-pane .split-pane-bar { position: relative; z-index: 81; }
+.split-picker-card { min-width: 0; max-width: 100%; }
+.rank-panel { background: var(--surface); border-radius: 16px; box-shadow: var(--shadow-3); overflow: auto; }
+.rank-modal .rank-panel { width: min(100%, 1020px); padding: 20px; gap: 16px; }
+.rank-head h2 { font-size: 20px; margin: 0; }
+.rank-head p { margin: 6px 0 0; color: var(--muted); }
+.rank-heat-grid { overflow: auto; min-height: 0; }
+.province-top-list { display: grid; gap: 7px; padding: 0; margin: 0; list-style: none; }
+.province-top-list li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: baseline; gap: 6px; font-size: 11px; }
+.province-position, .province-share { color: var(--muted); font-variant-numeric: tabular-nums; }
+.province-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.province-top-list strong { font-variant-numeric: tabular-nums; }
+.province-detail-btn { color: var(--accent); background: var(--accent-soft); border: 0; padding: 7px 10px; border-radius: 6px; text-align: left; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; margin-top: auto; }
+.province-summary { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.province-summary > div { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.province-summary span { font-size: 12px; color: var(--muted); }
+.province-summary strong { font-size: 20px; overflow-wrap: anywhere; }
+.province-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
+.province-toolbar input { flex: 1 1 220px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.province-toolbar span, .province-note { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.province-table-wrap { max-height: 52vh; }
+.province-table { min-width: 960px; }
+.province-table td { padding: 12px 10px; }
+.province-table td:nth-child(2) { min-width: 150px; }
+.province-table td small { display: block; color: var(--muted); margin-top: 3px; }
+.province-table tbody tr:hover { background: var(--surface-2); }
+@media (max-width: 640px) {
+  .province-summary { grid-template-columns: 1fr 1fr; }
+  .province-summary > div:first-child { grid-column: 1 / -1; }
+  .modal-backdrop { padding: 10px; }
+  .rank-modal .rank-panel { padding: 12px; }
+  .rank-windows { flex-wrap: wrap; }
+}
+

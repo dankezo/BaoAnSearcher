@@ -7,7 +7,7 @@ import {
   SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize,
   serverFilters, useSectionMeta, useSelection, useLoadProgress, } from './components'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
-import { MscPriceMetrics, MscTenderMetrics, applyMetricQuick, mscStatusDisplay, METRICS_YEAR } from './metrics'
+import { MscPriceMetrics, MscTenderMetrics, applyMetricQuick, mscStatusDisplay } from './metrics'
 import { StatusBadge, resolveBidStatusFromRow } from './bidStatus'
 
 const PAGE_SIZE_DEFAULT = 100
@@ -116,13 +116,14 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [loadPct, setLoadPct] = useState(null)
-  const [metricsSample, setMetricsSample] = useState([])
+  const [metricsSample, setMetricsSample] = useState(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricActiveId, setMetricActiveId] = useState(null)
   const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc thầu MSC', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
+  useEffect(() => () => { reqSeq.current += 1 }, [])
   const meta = useSectionMeta('msc', localMode, staticFallback, refreshKey)
 
   useEffect(() => {
@@ -179,16 +180,11 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         if (stale()) return
         setData(res)
         setPage(p)
+        if (embedded) return
         setMetricsLoading(true)
-        fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP }).then((all) => {
+        fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP, shouldCancel: stale }).then((all) => {
           if (stale()) return
-          // Fixed totals từ đầu năm hiện tại
-          const y0 = `${METRICS_YEAR}-01-01`
-          const scoped = (all || []).filter((r) => {
-            const d = String(r.published || r.close_date || '').slice(0, 10)
-            return !d || d >= y0
-          })
-          setMetricsSample(scoped.length ? scoped : all)
+          setMetricsSample(all)
         }).catch(() => { if (!stale()) setMetricsSample(res.items || []) })
           .finally(() => { if (!stale()) setMetricsLoading(false) })
         return
@@ -204,13 +200,13 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         setRefreshKey((k) => k + 1)
       }
     }
-  }, [kind, localMode, mergedFilters])
+  }, [kind, localMode, mergedFilters, embedded])
 
   useEffect(() => {
     if (!prefsReady) return
     sel.clear()
     setColumnFilters({})
-    setMetricsSample([])
+    setMetricsSample(null)
     setMetricActiveId(null)
     setMetricQuick(null)
     search(0, {})
@@ -256,7 +252,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   }, [data.items, cols, columnFilters, metricQuick, kind])
   const rowKey = useCallback((r, i) => String(r.source_id || r.tender_no || `${page}-${i}`), [page])
   const pageSizeNum = resolvePageSize(pageSize)
-  const metricsItems = metricsSample.length ? metricsSample : (rows.length ? rows : data.items)
+  const metricsItems = metricsSample ?? data.items
 
   const onMetricFilter = useCallback((patch, id) => {
     if (metricActiveId === id) {

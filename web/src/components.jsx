@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { fold, fmtDateTime, getStaticStatus, getStatus, relativeTime, sectionMeta } from './api'
 import { cloudMeta, supabaseConfigured } from './supabaseCloud'
 import { exportXlsx } from './export'
@@ -516,17 +517,30 @@ export function SuggestInput({
 }
 
 /** Modal shell for secondary filters (used in multi-view). */
+export const PaneOverlayContext = createContext(null)
+
 export function FilterModal({ open, title = 'Bộ lọc chi tiết', onClose, onApply, children }) {
+  const host = useContext(PaneOverlayContext)
+  const dialogRef = useRef(null)
   useEffect(() => {
     if (!open) return undefined
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+    const previous = document.activeElement
+    dialogRef.current?.focus()
+    return () => { if (previous?.isConnected) previous.focus() }
+  }, [open])
   if (!open) return null
-  return (
+  return createPortal(
     <div className="filter-modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
-      <div className="filter-modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="filter-modal" role="dialog" aria-modal={host ? undefined : true} aria-label={title} tabIndex={-1} ref={dialogRef}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.stopPropagation(); onClose?.() }
+          if (e.key !== 'Tab') return
+          const focusable = [...e.currentTarget.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')].filter((node) => node.getClientRects().length)
+          const first = focusable[0]
+          const last = focusable.at(-1)
+          if (e.shiftKey && (document.activeElement === first || document.activeElement === e.currentTarget)) { e.preventDefault(); last?.focus() }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() }
+        }}>
         <div className="filter-modal-head">
           <strong>{title}</strong>
           <button type="button" className="icon-btn" aria-label="Đóng" onClick={onClose}>{I.x}</button>
@@ -537,7 +551,7 @@ export function FilterModal({ open, title = 'Bộ lọc chi tiết', onClose, on
           <button type="button" className="btn" onClick={() => { onApply?.(); onClose?.() }}>{I.search} Áp dụng</button>
         </div>
       </div>
-    </div>
+    </div>, host || document.body
   )
 }
 
@@ -822,7 +836,7 @@ export const PAGE_SIZE_FULL_CHUNK = 500
 /** Soft cap for non-DAV metrics samples (year-scoped). */
 export const PAGE_SIZE_FULL_CAP = 8000
 /** DAV must load the full filtered set for metrics. */
-export const DAV_METRICS_CAP = 100_000
+export const DAV_METRICS_CAP = Infinity
 export function resolvePageSize(choice) {
   if (choice === 'full' || choice === 0) return 100 // legacy full → safe default
   const n = Number(choice)
@@ -1358,14 +1372,22 @@ export async function fetchAllPages(fetchPage, {
   size = PAGE_SIZE_FULL_CHUNK,
   cap = PAGE_SIZE_FULL_CAP,
   onProgress,
+  shouldCancel,
 } = {}) {
+  const checkCancelled = () => {
+    if (shouldCancel?.()) throw new DOMException('Đã hủy nạp dữ liệu', 'AbortError')
+  }
+  checkCancelled()
   const first = await fetchPage(0, size)
+  checkCancelled()
   const items = [...(first.items || [])]
   const total = Math.min(first.total || items.length, cap)
   onProgress?.(items.length && total ? Math.min(99, Math.round((items.length / total) * 100)) : 5)
   let page = 1
-  while (items.length < total && page < 500) {
+  while (items.length < total) {
+    checkCancelled()
     const more = await fetchPage(page, size)
+    checkCancelled()
     if (!more.items?.length) break
     items.push(...more.items)
     onProgress?.(Math.min(99, Math.round((items.length / Math.max(total, 1)) * 100)))
