@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { TAG_CAM, TAG_VANG, TAG_XAM, TAG_XANH } from './tagConfig'
 import { resolveBidStatusFromRow } from './bidStatus'
+import { Modal } from './components'
 
 const MONTH_MS = 30.4375 * 24 * 3600 * 1000
 const DAY_MS = 86400000
@@ -95,37 +96,45 @@ function useFlashKey(dep) {
   return flash
 }
 
-/** Current calendar year used for “từ đầu năm” fixed totals. */
+/** Current calendar year (display only). Metrics use full loaded sample — not year-filtered. */
 export const METRICS_YEAR = new Date().getFullYear()
-/** VSS metrics load window (inclusive). */
-export const VSS_METRICS_YEARS = [METRICS_YEAR - 1, METRICS_YEAR]
+/** Kept for callers; empty = all years (fixed total load). */
+export const VSS_METRICS_YEARS = []
 
-function sampleNote(items, total, opts = {}) {
-  if (opts.years?.length) return `từ ${opts.years.join('–')}`
-  if (opts.yearFrom) return `từ đầu năm ${opts.yearFrom}`
+function sampleNote(items, total) {
   const n = items?.length || 0
   const t = Number(total)
-  if (Number.isFinite(t) && t > n && n > 0) return `đang nạp ${fmtInt(n)}/${fmtInt(t)}`
-  return null
+  const partial = Number.isFinite(t) && t > n ? `đã nạp ${fmtInt(n)}/${fmtInt(t)}` : ''
+  return partial || 'Toàn bộ dữ liệu đã nạp'
 }
 
 function inYearFrom(raw, yearFrom) {
   if (!yearFrom) return true
   const t = parseDateMs(raw)
-  if (t == null) return true
-  return t >= new Date(yearFrom, 0, 1).getTime()
+  if (t == null) return false
+  return t >= new Date(yearFrom, 0, 1).getTime() && t <= Date.now()
 }
 
 function inYears(row, years, dateKeys = []) {
   if (!years?.length) return true
   const set = new Set(years.map(Number))
   const nam = Number(row?.nam)
-  if (Number.isFinite(nam) && set.has(nam)) return true
+  if (nam >= 1900 && nam <= 2200) return set.has(nam)
   for (const k of dateKeys) {
     const t = parseDateMs(row?.[k])
     if (t != null && set.has(new Date(t).getFullYear())) return true
   }
   return false
+}
+
+function formKey(text) {
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim() || '—'
 }
 
 /* ------------------------------------------------------------------ */
@@ -207,7 +216,6 @@ export function CompoundMetricCard({
       <div className="compound-head">
         <span className="compound-title">{title}</span>
         <span className="compound-head-right">
-          {scope === 'fixed' && <span className="compound-scope-tag">cố định</span>}
           {subtitle && <span className="compound-sub">{subtitle}</span>}
         </span>
       </div>
@@ -261,8 +269,6 @@ export function CompoundMetricCard({
 }
 
 export function CompoundMetricsGrid({ title, cards, flash, activeId, onFilter, loading = false }) {
-  const fixed = cards.filter((c) => c.scope === 'fixed')
-  const live = cards.filter((c) => c.scope !== 'fixed')
   return (
     <aside className={`filters-stats compound-panel${flash ? ' metrics-flash' : ''}${loading ? ' is-loading' : ''}`} aria-label={title || 'Chỉ số'}>
       {title && (
@@ -271,32 +277,19 @@ export function CompoundMetricsGrid({ title, cards, flash, activeId, onFilter, l
           {loading && <span className="compound-loading"> · đang nạp…</span>}
         </div>
       )}
-      {fixed.length > 0 && (
-        <div className="compound-fixed-cluster" aria-label="Chỉ số cố định theo năm">
-          <div className="compound-grid">
-            {fixed.map((c) => (
-              <CompoundMetricCard key={c.key} {...c} activeId={activeId} onFilter={onFilter} filtering={loading && c.scope === 'live'} />
-            ))}
-          </div>
-        </div>
-      )}
-      {live.length > 0 && (
-        <div className="compound-grid">
-          {live.map((c) => (
-            <CompoundMetricCard key={c.key} {...c} activeId={activeId} onFilter={onFilter} filtering={loading} />
-          ))}
-        </div>
-      )}
+      <div className="compound-grid">
+        {cards.map((c) => (
+          <CompoundMetricCard key={c.key} {...c} activeId={activeId} onFilter={onFilter} filtering={loading} />
+        ))}
+      </div>
     </aside>
   )
 }
 
 /* ---- DAV ---- */
 export function computeDavCompound(items, total) {
-  const all = items || []
-  const yearFrom = METRICS_YEAR
-  let rows = all.filter((r) => inYearFrom(r.ngayCap || r.ngayGiaHan, yearFrom))
-  if (rows.length < Math.min(20, all.length)) rows = all
+  const rows = items || []
+  const note = sampleNote(rows, total)
 
   const byIng = new Map()
   for (const r of rows) {
@@ -313,7 +306,6 @@ export function computeDavCompound(items, total) {
     else if (n <= 5) mid += 1
     else red += 1
   }
-  const cells = blue + mid + red || 1
 
   const tags = { xanh: 0, vang: 0, cam: 0, xam: 0 }
   for (const r of rows) {
@@ -323,30 +315,37 @@ export function computeDavCompound(items, total) {
     else if (r.tagId === TAG_XAM) tags.xam += 1
     else tags.vang += 1
   }
-  const tagN = rows.length || 1
 
-  let safeLong = 0
-  let riskShort = 0
-  let live = 0
+  // Per ingredient: distinct dosage forms → buckets 1 / 2 / 3 / 4+
+  const byIngForms = new Map()
   for (const r of rows) {
-    const m = r.monthsLeft != null ? Number(r.monthsLeft) : monthsLeft(r.ngayHetHan)
-    if (m != null && m > 0) live += 1
-    if (m != null && m > 24) safeLong += 1
-    if (m != null && m >= 0 && m < 12) riskShort += 1
+    const ik = ingredientKey(r.hoatChat)
+    if (!byIngForms.has(ik)) byIngForms.set(ik, new Set())
+    byIngForms.get(ik).add(formKey(r.dangBaoChe))
   }
+  const forms = { 1: 0, 2: 0, 3: 0, '4+': 0 }
+  for (const set of byIngForms.values()) {
+    const n = set.size
+    if (n <= 1) forms[1] += 1
+    else if (n === 2) forms[2] += 1
+    else if (n === 3) forms[3] += 1
+    else forms['4+'] += 1
+  }
+  const formTotal = forms[1] + forms[2] + forms[3] + forms['4+']
 
-  const note = sampleNote(all, total, { yearFrom })
-  const densitySlices = [
-    { key: 'b', label: '1–2 SĐK', value: blue, color: '#22c55e' },
-    { key: 'm', label: '3–5 SĐK', value: mid, color: '#eab308' },
-    { key: 'r', label: '>5 SĐK', value: red, color: '#ef4444' },
-  ]
-  const tagSlices = [
-    { key: 'x', label: 'Xanh', value: tags.xanh, color: '#22c55e' },
-    { key: 'v', label: 'Vàng', value: tags.vang, color: '#eab308' },
-    { key: 'c', label: 'Cam', value: tags.cam, color: '#f97316' },
-    { key: 'g', label: 'Xám', value: tags.xam, color: '#94a3b8' },
-  ]
+  const now = Date.now()
+  let new3 = 0
+  let new6 = 0
+  let new12 = 0
+  for (const r of rows) {
+    const t = parseDateMs(r.ngayCap)
+    if (t == null) continue
+    const age = now - t
+    if (age < 0) continue
+    if (age <= 3 * MONTH_MS) new3 += 1
+    if (age <= 6 * MONTH_MS) new6 += 1
+    if (age <= 12 * MONTH_MS) new12 += 1
+  }
 
   return [
     {
@@ -354,10 +353,8 @@ export function computeDavCompound(items, total) {
       scope: 'fixed',
       title: 'Ô kỹ thuật · mật độ SĐK',
       mainValue: fmtInt(blue),
-      unit: 'ô xanh',
+      unit: 'ô 1–2 SĐK',
       subtitle: note,
-      titleTip: `Tổng từ đầu năm ${yearFrom} — không đổi theo lọc bảng`,
-      chart: <DonutChart slices={densitySlices} size={96} />,
       subMetrics: [
         { id: 'sdk_1_2', label: '1–2 SĐK', count: fmtInt(blue), tone: 'ok', patch: { ingredientCount: '1' } },
         { id: 'sdk_3_5', label: '3–5 SĐK', count: fmtInt(mid), tone: 'warn', patch: { ingredientCount: '3' } },
@@ -371,40 +368,41 @@ export function computeDavCompound(items, total) {
       mainValue: fmtInt(tags.xanh),
       unit: 'SĐK xanh',
       subtitle: note,
-      chart: <DonutChart slices={tagSlices} size={96} />,
       subMetrics: [
         { id: 'tag_xanh', label: 'Xanh', count: fmtInt(tags.xanh), tone: 'ok', patch: { _tag: TAG_XANH } },
         { id: 'tag_vang', label: 'Vàng', count: fmtInt(tags.vang), tone: 'warn', patch: { _tag: TAG_VANG } },
+        { id: 'tag_cam', label: 'Cam', count: fmtInt(tags.cam), tone: 'danger', patch: { _tag: TAG_CAM } },
         { id: 'tag_xam', label: 'Xám', count: fmtInt(tags.xam), tone: 'neutral', patch: { _tag: TAG_XAM } },
       ],
     },
     {
-      key: 'dm93',
-      scope: 'live',
-      title: 'Rào cản DM93',
-      mainValue: fmtInt(tags.cam),
-      unit: 'SĐK cam',
+      key: 'forms',
+      scope: 'fixed',
+      title: 'Dạng bào chế / hoạt chất',
+      mainValue: fmtInt(formTotal),
+      unit: 'HC',
       subtitle: note,
+      titleTip: 'Số hoạt chất có 1 / 2 / 3 / ≥4 dạng bào chế khác nhau trong danh mục',
       subMetrics: [
-        { id: 'tag_cam', label: 'Tag Cam', count: fmtInt(tags.cam), tone: 'danger', patch: { _tag: TAG_CAM } },
-        { id: 'tag_xanh2', label: 'Sẵn sàng thầu', count: fmtInt(tags.xanh), tone: 'ok', patch: { _tag: TAG_XANH } },
+        { id: 'form_1', label: '1 dạng', count: fmtInt(forms[1]), tone: 'ok', patch: { dosageFormCount: '1' } },
+        { id: 'form_2', label: '2 dạng', count: fmtInt(forms[2]), tone: 'warn', patch: { dosageFormCount: '2' } },
+        { id: 'form_3', label: '3 dạng', count: fmtInt(forms[3]), tone: 'warn', patch: { dosageFormCount: '3' } },
+        { id: 'form_4', label: '4+ dạng', count: fmtInt(forms['4+']), tone: 'danger', patch: { dosageFormCount: '4' } },
       ],
-      progressPercent: tagN ? (tags.cam / tagN) * 100 : 0,
-      progressColor: '#f97316',
     },
     {
-      key: 'life',
-      scope: 'live',
-      title: 'Chu kỳ thầu 36 tháng',
-      mainValue: fmtInt(live),
-      unit: 'còn HL',
+      key: 'new_sdk',
+      scope: 'fixed',
+      title: 'SĐK mới cấp',
+      mainValue: fmtInt(new12),
+      unit: '12 tháng',
       subtitle: note,
+      titleTip: 'Số SĐK có ngày cấp trong 3 / 6 / 12 tháng gần nhất',
       subMetrics: [
-        { id: 'safe_24', label: '>24 th', count: fmtInt(safeLong), tone: 'ok', patch: { _quick: 'safe_24' } },
-        { id: 'risk_12', label: '<12 th', count: fmtInt(riskShort), tone: 'warn', patch: { _quick: 'risk_12' } },
+        { id: 'new_3m', label: '3 th', count: fmtInt(new3), tone: 'ok', patch: { _quick: 'new_3m' } },
+        { id: 'new_6m', label: '6 th', count: fmtInt(new6), tone: 'warn', patch: { _quick: 'new_6m' } },
+        { id: 'new_12m', label: '12 th', count: fmtInt(new12), tone: 'neutral', patch: { _quick: 'new_12m' } },
       ],
-      progressPercent: live ? (safeLong / live) * 100 : 0,
-      progressColor: '#0d9488',
     },
   ]
 }
@@ -412,10 +410,10 @@ export function computeDavCompound(items, total) {
 export function DavMetrics({ items, total, activeId, onFilter, loading }) {
   const cards = useMemo(() => computeDavCompound(items, total), [items, total])
   const flash = useFlashKey(`${items?.length}|${total}|${cards[0]?.mainValue}`)
-  const note = sampleNote(items, total, { yearFrom: METRICS_YEAR })
+  const note = sampleNote(items, total)
   return (
     <CompoundMetricsGrid
-      title={`DAV${note ? ` · ${note}` : ''}`}
+      title={`DAV · ${note}`}
       flash={flash}
       cards={cards}
       activeId={activeId}
@@ -457,11 +455,8 @@ export function mscStatusDisplay(r) {
 }
 
 export function computeMscTenderCompound(items, total) {
-  const all = items || []
-  const yearFrom = METRICS_YEAR
-  let rows = all.filter((r) => inYearFrom(r.published || r.close_date, yearFrom))
-  if (rows.length < Math.min(20, all.length)) rows = all
-
+  const rows = items || []
+  const note = sampleNote(rows, total)
   const now = Date.now()
   let openN = 0
   let reviewN = 0
@@ -500,24 +495,22 @@ export function computeMscTenderCompound(items, total) {
   const n = rows.length || 1
   const bondN = under50m + over50m || 1
   const freePct = Math.round((under50m / n) * 100)
-  const note = sampleNote(all, total, { yearFrom })
-  const highlightOpen = openN + newN + closingN // empty OPEN only (not DXT) // DXT/trống family still “mở”
+  const highlightOpen = openN + newN + closingN
   const pipelineN = highlightOpen + reviewN || 1
 
   return [
     {
       key: 'pipeline',
-      scope: 'live',
+      scope: 'fixed',
       title: 'Nhịp thầu & cơ hội mở',
       mainValue: fmtInt(highlightOpen),
       unit: 'đang mở',
       subtitle: note,
-      titleTip: 'Đang mở = trống status_code (OPEN). DXT = đang xét. Thứ tự: mở → xét → mới mở → sắp đóng',
       subMetrics: [
-        { id: 'open_dxt', label: 'Đang mở (trống)', count: fmtInt(openN), tone: 'ok', patch: { _quick: 'open_dxt' } },
-        { id: 'reviewing', label: 'Đang xét thầu', count: fmtInt(reviewN), tone: 'warn', patch: { _quick: 'reviewing' } },
-        { id: 'new_72h', label: 'Mới mở <72h', count: fmtInt(newN), tone: 'ok', patch: { _quick: 'new_72h' } },
-        { id: 'closing_7d', label: 'Sắp đóng <7d', count: fmtInt(closingN), tone: 'danger', patch: { _quick: 'closing_7d' } },
+        { id: 'open_dxt', label: 'Đang mở', count: fmtInt(openN), tone: 'ok', patch: { _quick: 'open_dxt' } },
+        { id: 'reviewing', label: 'Đang xét', count: fmtInt(reviewN), tone: 'warn', patch: { _quick: 'reviewing' } },
+        { id: 'new_72h', label: 'Mới <72h', count: fmtInt(newN), tone: 'ok', patch: { _quick: 'new_72h' } },
+        { id: 'closing_7d', label: 'Sắp đóng', count: fmtInt(closingN), tone: 'danger', patch: { _quick: 'closing_7d' } },
       ],
       segments: [
         { key: 'o', pct: (openN / pipelineN) * 100, color: '#22c55e', label: 'Đang mở' },
@@ -528,7 +521,7 @@ export function computeMscTenderCompound(items, total) {
     },
     {
       key: 'budget',
-      scope: 'live',
+      scope: 'fixed',
       title: 'Ngân sách mời thầu (đang mở)',
       mainValue: fmtMoney(openVal),
       unit: 'đ',
@@ -537,12 +530,10 @@ export function computeMscTenderCompound(items, total) {
         { id: 'big_50t', label: 'Gói >50 Tỷ', count: fmtInt(big50t), tone: 'warn', patch: { _quick: 'big_50t' } },
         { id: 'small_10t', label: 'Gói <10 Tỷ', count: fmtInt(small10t), tone: 'ok', patch: { _quick: 'small_10t' } },
       ],
-      progressPercent: openVal > 0 ? Math.min(100, (big50t / (big50t + small10t || 1)) * 100) : 0,
-      progressColor: '#7c3aed',
     },
     {
       key: 'bond',
-      scope: 'live',
+      scope: 'fixed',
       title: 'Miễn bảo lãnh NH',
       mainValue: `${freePct}%`,
       unit: 'gói ≤50 Tr',
@@ -558,7 +549,7 @@ export function computeMscTenderCompound(items, total) {
     },
     {
       key: 'tier',
-      scope: 'live',
+      scope: 'fixed',
       title: 'Cấp mời thầu',
       mainValue: fmtInt(buyers.size),
       unit: 'CĐT',
@@ -582,7 +573,7 @@ export function MscTenderMetrics({ items, total, activeId, onFilter, loading }) 
   const flash = useFlashKey(`${items?.length}|${cards[0]?.mainValue}`)
   return (
     <CompoundMetricsGrid
-      title={`Gói thầu${sampleNote(items, total, { yearFrom: METRICS_YEAR }) ? ` · ${sampleNote(items, total, { yearFrom: METRICS_YEAR })}` : ''}`}
+      title={`Gói thầu · ${sampleNote(items, total)}`}
       flash={flash}
       cards={cards}
       activeId={activeId}
@@ -592,21 +583,57 @@ export function MscTenderMetrics({ items, total, activeId, onFilter, loading }) 
   )
 }
 
-/* ---- Rank detail (1/3/6/12 tháng) ---- */
-const RANK_WINDOWS = [
-  { id: 1, label: '1 th' },
-  { id: 3, label: '3 th' },
-  { id: 6, label: '6 th' },
-  { id: 12, label: '12 th' },
-]
+/* ---- Province YoY rank (12 tháng vs cùng kỳ năm trước) ---- */
+const YEAR_MS = 365.25 * DAY_MS
 
-/** Build ranked list with growth vs prior window of same length. */
+/** Rank all provinces by YoY revenue growth (trailing 12m vs prior 12m). */
+export function buildProvinceYoYTable(rows, {
+  nameKey = 'province',
+  valueFn,
+  dateKey = 'published',
+} = {}) {
+  const now = Date.now()
+  const curFrom = now - YEAR_MS
+  const prevFrom = now - 2 * YEAR_MS
+  const cur = new Map()
+  const prev = new Map()
+  const allNames = new Set()
+
+  for (const r of rows || []) {
+    const name = String(r[nameKey] || '').trim() || 'Chưa xác định tỉnh'
+    allNames.add(name)
+    const v = valueFn?.(r) || 0
+    if (!(v > 0)) continue
+    const t = parseDateMs(r[dateKey])
+    if (t == null) continue
+    if (t >= curFrom && t <= now) cur.set(name, (cur.get(name) || 0) + v)
+    else if (t >= prevFrom && t < curFrom) prev.set(name, (prev.get(name) || 0) + v)
+  }
+
+  const totalCur = [...cur.values()].reduce((s, v) => s + v, 0) || 1
+  return [...allNames]
+    .map((name) => {
+      const value = cur.get(name) || 0
+      const p = prev.get(name) || 0
+      const growth = p > 0 ? ((value - p) / p) * 100 : (value > 0 ? null : 0)
+      return { name, value, prev: p, share: (value / totalCur) * 100, growth }
+    })
+    .sort((a, b) => {
+      if (a.growth == null && b.growth == null) return b.value - a.value
+      if (a.growth == null) return 1
+      if (b.growth == null) return -1
+      if (b.growth !== a.growth) return b.growth - a.growth
+      return b.value - a.value
+    })
+}
+
+/** @deprecated kept for tests — prefer buildProvinceYoYTable */
 export function buildRankTable(rows, {
   nameKey,
   valueFn,
   dateKey,
-  months = 3,
-  limit = 25,
+  months = 12,
+  limit = 9999,
 } = {}) {
   const now = Date.now()
   const winMs = months * MONTH_MS
@@ -655,107 +682,84 @@ export function RankExploreModal({
   dateKey,
   onPick,
 }) {
-  const [months, setMonths] = useState(3)
-  const [mode, setMode] = useState('table')
+  const [query, setQuery] = useState('')
   const ranked = useMemo(
-    () => buildRankTable(rows, { nameKey, valueFn, dateKey, months, limit: 40 }),
-    [rows, nameKey, valueFn, dateKey, months],
+    () => buildProvinceYoYTable(rows, { nameKey, valueFn, dateKey }),
+    [rows, nameKey, valueFn, dateKey],
   )
-  if (!open) return null
+  const visible = useMemo(() => {
+    const q = ingredientKey(query)
+    if (!q) return ranked
+    return ranked.filter((r) => ingredientKey(r.name).includes(q))
+  }, [ranked, query])
+
   return (
-    <div className="modal-backdrop rank-modal" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="modal-panel rank-panel" onClick={(e) => e.stopPropagation()}>
-        <header className="rank-head">
-          <div>
-            <h2>{title}</h2>
-            <p>Xếp hạng theo giá trị · tăng trưởng so kỳ liền trước · mặc định 3 tháng</p>
-          </div>
-          <button type="button" className="btn ghost" onClick={onClose}>Đóng</button>
-        </header>
-        <div className="rank-toolbar">
-          <div className="rank-windows" role="tablist">
-            {RANK_WINDOWS.map((w) => (
-              <button
-                key={w.id}
-                type="button"
-                className={`rank-win${months === w.id ? ' on' : ''}`}
-                onClick={() => setMonths(w.id)}
-              >
-                {w.label}
-              </button>
-            ))}
-          </div>
-          <div className="rank-modes">
-            <button type="button" className={mode === 'table' ? 'on' : ''} onClick={() => setMode('table')}>Bảng</button>
-            <button type="button" className={mode === 'heat' ? 'on' : ''} onClick={() => setMode('heat')}>Heat map</button>
-          </div>
-        </div>
-        {mode === 'heat' ? (
-          <div className="rank-heat-grid">
-            {ranked.map((r, i) => (
-              <button
-                key={r.name}
-                type="button"
-                className="rank-heat-cell"
-                style={{
-                  background: `color-mix(in srgb, ${r.growth != null && r.growth < 0 ? '#ef4444' : '#0d9488'} ${Math.min(85, 20 + r.share * 1.2)}%, var(--surface))`,
-                }}
-                title={`${r.name}: ${fmtMoney(r.value)} · ${fmtPct(r.growth)}`}
-                onClick={() => onPick?.(r.name)}
-              >
-                <span className="rank-heat-rank">#{i + 1}</span>
-                <span className="rank-heat-name">{r.name}</span>
-                <span className="rank-heat-meta">{fmtMoney(r.value)} · {r.share.toFixed(0)}%</span>
-                <span className={`rank-heat-g ${r.growth != null && r.growth < 0 ? 'down' : 'up'}`}>
-                  {r.growth == null ? '—' : fmtPct(r.growth)}
-                </span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="rank-table-wrap">
-            <table className="rank-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Tên</th>
-                  <th>Giá trị</th>
-                  <th>Tỷ lệ</th>
-                  <th>Tăng vs kỳ trước</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {ranked.map((r, i) => (
-                  <tr key={r.name}>
-                    <td>{i + 1}</td>
-                    <td>
-                      <button type="button" className="linkish" onClick={() => onPick?.(r.name)}>{r.name}</button>
-                    </td>
-                    <td className="mono">{fmtMoney(r.value)}</td>
-                    <td>
-                      <div className="rank-share-cell">
-                        <RankHeatRow share={r.share} growth={r.growth} />
-                        <span>{r.share.toFixed(1)}%</span>
-                      </div>
-                    </td>
-                    <td className={r.growth != null && r.growth < 0 ? 'neg' : 'pos'}>
-                      {r.growth == null ? '—' : fmtPct(r.growth)}
-                    </td>
-                    <td>
-                      <button type="button" className="btn secondary tiny" onClick={() => onPick?.(r.name)}>Lọc</button>
-                    </td>
-                  </tr>
-                ))}
-                {!ranked.length && (
-                  <tr><td colSpan={6} className="empty">Chưa đủ dữ liệu trong cửa sổ {months} tháng.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={title}
+      subtitle="Doanh thu 12 tháng gần nhất so cùng kỳ năm trước · đủ tất cả tỉnh"
+      width={980}
+      footer={(
+        <>
+          <span className="muted">{ranked.length} tỉnh</span>
+          <div className="spacer" />
+          <button type="button" className="btn secondary" onClick={onClose}>Đóng</button>
+        </>
+      )}
+    >
+      <div className="province-toolbar">
+        <input
+          aria-label="Tìm tỉnh"
+          placeholder="Tìm tỉnh…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <span>{visible.length} / {ranked.length} tỉnh</span>
       </div>
-    </div>
+      <div className="rank-table-wrap province-table-wrap">
+        <table className="rank-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Tỉnh / TP</th>
+              <th>DT 12 th</th>
+              <th>Cùng kỳ NH</th>
+              <th>Tỷ trọng</th>
+              <th>YoY %</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((r) => (
+              <tr key={r.name}>
+                <td>{ranked.indexOf(r) + 1}</td>
+                <td>
+                  <button type="button" className="linkish" onClick={() => onPick?.(r.name)}>{r.name}</button>
+                </td>
+                <td className="mono">{fmtMoney(r.value)}</td>
+                <td className="mono">{fmtMoney(r.prev)}</td>
+                <td>
+                  <div className="rank-share-cell">
+                    <RankHeatRow share={r.share} growth={r.growth} />
+                    <span>{r.share.toFixed(1)}%</span>
+                  </div>
+                </td>
+                <td className={r.growth != null && r.growth < 0 ? 'neg' : 'pos'}>
+                  {r.growth == null ? '—' : fmtPct(r.growth)}
+                </td>
+                <td>
+                  <button type="button" className="btn secondary tiny" onClick={() => onPick?.(r.name)}>Lọc</button>
+                </td>
+              </tr>
+            ))}
+            {!visible.length && (
+              <tr><td colSpan={7} className="empty">Chưa có dữ liệu tỉnh.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Modal>
   )
 }
 
@@ -770,12 +774,14 @@ function RankExploreButton({ label, topHint, onOpen }) {
 }
 
 /* ---- MSC prices ---- */
-export function computeMscPriceCompound(items, total, { onExploreWinners } = {}) {
-  const all = items || []
-  const yearFrom = METRICS_YEAR
-  let rows = all.filter((r) => inYearFrom(r.published || r.decision_date, yearFrom))
-  if (rows.length < Math.min(20, all.length)) rows = all
-  // Discount proxy: vs max price of same ingredient in sample
+function mscLineValue(r) {
+  return (num(r.quantity) || 0) * (num(r.unit_price ?? r.unitPrice) || 0)
+}
+
+export function computeMscPriceCompound(items, total, { onExploreProvinces } = {}) {
+  const rows = items || []
+  const note = sampleNote(rows, total)
+
   const byIngPrices = new Map()
   for (const r of rows) {
     const ik = ingredientKey(r.ingredient || r.name)
@@ -807,27 +813,18 @@ export function computeMscPriceCompound(items, total, { onExploreWinners } = {})
 
   const g2 = []
   const g4 = []
-  const byWinner = new Map()
+  const byProv = new Map()
   let value = 0
-  const byIngMinMax = new Map()
 
   for (const r of rows) {
-    const qty = num(r.quantity) ?? 0
-    const price = num(r.unit_price ?? r.unitPrice) ?? 0
-    const line = qty * price
+    const line = mscLineValue(r)
     value += line
     const g = groupBucket(r.group_name)
+    const price = num(r.unit_price ?? r.unitPrice)
     if (g === '2' && price > 0) g2.push(price)
     if (g === '4' && price > 0) g4.push(price)
-    const w = String(r.winner || '').trim() || '—'
-    byWinner.set(w, (byWinner.get(w) || 0) + line)
-    const ik = ingredientKey(r.ingredient || r.name)
-    if (price > 0) {
-      const cur = byIngMinMax.get(ik) || { min: price, max: price }
-      cur.min = Math.min(cur.min, price)
-      cur.max = Math.max(cur.max, price)
-      byIngMinMax.set(ik, cur)
-    }
+    const prov = String(r.province || '').trim() || 'Chưa xác định tỉnh'
+    byProv.set(prov, (byProv.get(prov) || 0) + line)
   }
 
   const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null)
@@ -835,38 +832,28 @@ export function computeMscPriceCompound(items, total, { onExploreWinners } = {})
   const avg4 = avg(g4)
   const margin = avg4 > 0 && avg2 != null ? ((avg2 - avg4) / avg4) * 100 : null
 
-  const sortedW = [...byWinner.entries()].sort((a, b) => b[1] - a[1])
-  const top1Share = value > 0 && sortedW[0] ? (sortedW[0][1] / value) * 100 : 0
-
-  let spreadSum = 0
-  let spreadN = 0
-  let minSeen = null
-  let maxSeen = null
-  for (const { min, max } of byIngMinMax.values()) {
-    if (max > min) {
-      spreadSum += (max - min) / ((min + max) / 2)
-      spreadN += 1
-    }
-    if (minSeen == null || min < minSeen) minSeen = min
-    if (maxSeen == null || max > maxSeen) maxSeen = max
-  }
-  const avgSpreadPct = spreadN ? (spreadSum / spreadN) * 100 : null
-  const note = sampleNote(all, total, { yearFrom })
+  const sortedProv = [...byProv.entries()].sort((a, b) => b[1] - a[1])
+  const topProv = sortedProv[0]
+  const yoy = buildProvinceYoYTable(rows, {
+    nameKey: 'province',
+    valueFn: mscLineValue,
+    dateKey: 'published',
+  })
+  const topGrowth = yoy.find((p) => p.growth != null) || yoy[0]
   const discN = dLow + dMid + dHigh || 1
 
   return [
     {
       key: 'discount',
-      scope: 'live',
-      title: 'Giảm giá vs đỉnh HC (mẫu)',
+      scope: 'fixed',
+      title: 'Giảm giá vs đỉnh HC',
       mainValue: dN ? `${avgDisc.toFixed(1)}%` : '—',
       unit: 'TB',
       subtitle: note,
-      titleTip: 'Không có giá kế hoạch — đo so với giá cao nhất cùng hoạt chất trong mẫu',
       subMetrics: [
-        { id: 'disc_low', label: 'Giữ giá <5%', count: fmtInt(dLow), tone: 'ok', patch: { _quick: 'disc_low' } },
+        { id: 'disc_low', label: '<5%', count: fmtInt(dLow), tone: 'ok', patch: { _quick: 'disc_low' } },
         { id: 'disc_mid', label: '5–15%', count: fmtInt(dMid), tone: 'warn', patch: { _quick: 'disc_mid' } },
-        { id: 'disc_high', label: 'Phá giá >15%', count: fmtInt(dHigh), tone: 'danger', patch: { _quick: 'disc_high' } },
+        { id: 'disc_high', label: '>15%', count: fmtInt(dHigh), tone: 'danger', patch: { _quick: 'disc_high' } },
       ],
       segments: [
         { key: 'l', pct: (dLow / discN) * 100, color: '#22c55e' },
@@ -876,7 +863,7 @@ export function computeMscPriceCompound(items, total, { onExploreWinners } = {})
     },
     {
       key: 'g24',
-      scope: 'live',
+      scope: 'fixed',
       title: 'Biên giá N2 vs N4',
       mainValue: margin == null ? '—' : fmtPct(margin),
       unit: 'TB',
@@ -885,38 +872,35 @@ export function computeMscPriceCompound(items, total, { onExploreWinners } = {})
         { id: 'g2', label: 'Giá TB N2', count: avg2 != null ? fmtInt(avg2) : '—', tone: 'ok', patch: { group_name: '2' } },
         { id: 'g4', label: 'Giá TB N4', count: avg4 != null ? fmtInt(avg4) : '—', tone: 'neutral', patch: { group_name: '4' } },
       ],
-      progressPercent: margin != null ? Math.min(100, Math.abs(margin) / 2) : 0,
-      progressColor: '#2563eb',
     },
     {
-      key: 'share',
+      key: 'province_lead',
       scope: 'fixed',
-      title: 'Thị phần nhà thầu',
-      mainValue: `${top1Share.toFixed(0)}%`,
-      unit: 'Top 1',
+      title: 'Tỉnh dẫn đầu doanh thu',
+      mainValue: topProv ? (topProv[0].length > 18 ? `${topProv[0].slice(0, 16)}…` : topProv[0]) : '—',
+      unit: topProv ? fmtMoney(topProv[1]) : '',
       subtitle: note,
-      titleTip: 'Mở bảng xếp hạng 1/3/6/12 tháng — xem tăng trưởng doanh thu',
+      titleTip: 'Tỉnh có tổng thành tiền (SL × ĐG) cao nhất trên toàn bộ dữ liệu đã nạp',
+      subMetrics: [
+        { id: 'prov_n', label: 'Số tỉnh', count: fmtInt(byProv.size), tone: 'neutral', info: true },
+        { id: 'prov_total', label: 'Tổng DT', count: fmtMoney(value), tone: 'ok', info: true },
+      ],
+    },
+    {
+      key: 'province_yoy',
+      scope: 'fixed',
+      title: 'Tăng trưởng YoY theo tỉnh',
+      mainValue: topGrowth?.growth == null ? '—' : fmtPct(topGrowth.growth),
+      unit: topGrowth ? (topGrowth.name.length > 14 ? `${topGrowth.name.slice(0, 12)}…` : topGrowth.name) : '',
+      subtitle: note,
+      titleTip: '12 tháng gần nhất so cùng kỳ năm trước — xếp hạng đủ tất cả tỉnh',
       explore: (
         <RankExploreButton
-          label={sortedW[0] ? (sortedW[0][0].length > 28 ? `${sortedW[0][0].slice(0, 26)}…` : sortedW[0][0]) : 'Chưa có NT'}
-          topHint={sortedW[0] ? `${fmtMoney(sortedW[0][1])} · ${sortedW.length} NT` : null}
-          onOpen={() => onExploreWinners?.()}
+          label={topGrowth?.name || 'Chưa có tỉnh'}
+          topHint={topGrowth ? `${fmtMoney(topGrowth.value)} · ${yoy.length} tỉnh` : null}
+          onOpen={() => onExploreProvinces?.()}
         />
       ),
-    },
-    {
-      key: 'spread',
-      scope: 'live',
-      title: 'Biên đơn giá (min–max HC)',
-      mainValue: avgSpreadPct == null ? '—' : `${avgSpreadPct.toFixed(0)}%`,
-      unit: 'TB',
-      subtitle: note,
-      subMetrics: [
-        { id: 'pmin', label: 'Sàn', count: minSeen != null ? fmtInt(minSeen) : '—', tone: 'ok', patch: { _quick: 'price_floor' } },
-        { id: 'pmax', label: 'Trần', count: maxSeen != null ? fmtInt(maxSeen) : '—', tone: 'warn', patch: { _quick: 'price_ceil' } },
-      ],
-      progressPercent: avgSpreadPct != null ? Math.min(100, avgSpreadPct) : 0,
-      progressColor: '#0d9488',
     },
   ]
 }
@@ -924,15 +908,15 @@ export function computeMscPriceCompound(items, total, { onExploreWinners } = {})
 export function MscPriceMetrics({ items, total, activeId, onFilter, loading }) {
   const [explore, setExplore] = useState(false)
   const cards = useMemo(
-    () => computeMscPriceCompound(items, total, { onExploreWinners: () => setExplore(true) }),
+    () => computeMscPriceCompound(items, total, { onExploreProvinces: () => setExplore(true) }),
     [items, total],
   )
   const flash = useFlashKey(`${items?.length}|${cards[0]?.mainValue}`)
-  const note = sampleNote(items, total, { yearFrom: METRICS_YEAR })
+  const note = sampleNote(items, total)
   return (
     <>
       <CompoundMetricsGrid
-        title={`Đơn giá${note ? ` · ${note}` : ''}`}
+        title={`Đơn giá · ${note}`}
         flash={flash}
         cards={cards}
         activeId={activeId}
@@ -942,14 +926,14 @@ export function MscPriceMetrics({ items, total, activeId, onFilter, loading }) {
       <RankExploreModal
         open={explore}
         onClose={() => setExplore(false)}
-        title="Xếp hạng nhà thầu theo doanh thu"
+        title="Xếp hạng tỉnh theo tăng trưởng doanh thu YoY"
         rows={items}
-        nameKey="winner"
-        valueFn={(r) => (num(r.quantity) || 0) * (num(r.unit_price ?? r.unitPrice) || 0)}
+        nameKey="province"
+        valueFn={mscLineValue}
         dateKey="published"
         onPick={(name) => {
           setExplore(false)
-          onFilter?.({ winner: name }, `winner:${name}`)
+          onFilter?.({ province: name }, `province:${name}`)
         }}
       />
     </>
@@ -1194,15 +1178,13 @@ function vssRunRateCard(rows, total, note) {
 }
 
 export function computeVssCompound(items, total, { onExploreProvinces } = {}) {
-  const all = items || []
-  const years = VSS_METRICS_YEARS
-  let rows = all.filter((r) => inYears(r, years, ['tungay_hd', 'tungay', 'congbo', 'denngay_hd']))
-  if (rows.length < Math.min(20, all.length)) rows = all
+  const rows = items || []
+  const note = sampleNote(rows, total)
 
   const payG = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
   let payAll = 0
   const cskcb = new Set()
-  const byProv = new Map()
+  const provinceRows = buildProvinceTable(rows)
 
   for (const r of rows) {
     const pay = vssLineValue(r)
@@ -1212,15 +1194,11 @@ export function computeVssCompound(items, total, { onExploreProvinces } = {}) {
 
     const cs = String(r.ma_cskcb || r.ten_cskcb || '').trim()
     if (cs) cskcb.add(cs)
-    const prov = String(r.ten_tinh || r.ma_tinh || '').trim() || '—'
-    byProv.set(prov, (byProv.get(prov) || 0) + pay)
   }
 
-  const gSum = Object.values(payG).reduce((a, b) => a + b, 0) || 1
-  const highShare = ((payG[1] + payG[2]) / (payAll || gSum)) * 100
-  const totalPay = [...byProv.values()].reduce((a, b) => a + b, 0) || 1
-  const top1 = [...byProv.entries()].sort((a, b) => b[1] - a[1])[0]
-  const note = sampleNote(all, total, { years })
+  const highShare = ((payG[1] + payG[2]) / (payAll || 1)) * 100
+  const top = provinceRows[0]
+  const totalPay = provinceRows.reduce((a, b) => a + b.value, 0)
 
   let twLike = 0
   let localLike = 0
@@ -1231,30 +1209,29 @@ export function computeVssCompound(items, total, { onExploreProvinces } = {}) {
   }
   const tierN = twLike + localLike || 1
 
-  const GROUP_COLORS = { 1: '#2563eb', 2: '#0d9488', 3: '#7c3aed', 4: '#d97706', 5: '#94a3b8' }
-  const groupSlices = [1, 2, 3, 4, 5].map((n) => ({
-    key: `n${n}`,
-    label: `N${n}`,
-    value: payG[n],
-    display: fmtMoney(payG[n]),
-    color: GROUP_COLORS[n],
-  }))
-
-  const runCard = { ...vssRunRateCard(rows, total, note), scope: 'fixed' }
-
   return [
-    runCard,
+    {
+      key: 'total',
+      scope: 'fixed',
+      title: 'Tổng giá trị trúng thầu',
+      mainValue: fmtMoney(payAll),
+      unit: 'đ',
+      subtitle: note,
+      subMetrics: [
+        { id: 'rows', label: 'Dòng', count: fmtInt(rows.length), tone: 'neutral', info: true },
+        { id: 'n12', label: 'N1+N2', count: `${highShare.toFixed(0)}%`, tone: 'ok', info: true },
+      ],
+    },
     {
       key: 'groups',
       scope: 'fixed',
-      title: 'Dòng tiền nhóm KT (đủ 5)',
+      title: 'Dòng tiền theo nhóm',
       mainValue: `${highShare.toFixed(0)}%`,
       unit: 'N1+N2',
       subtitle: note,
-      chart: <DonutChart slices={groupSlices} size={104} center={`${highShare.toFixed(0)}%`} />,
       subMetrics: [1, 2, 3, 4, 5].map((n) => ({
         id: `g${n}`,
-        label: `Nhóm ${n}`,
+        label: `N${n}`,
         count: fmtMoney(payG[n]),
         tone: n <= 2 ? 'ok' : n === 4 ? 'warn' : 'neutral',
         patch: { nhomthau: [`${n}`, `N${n}`] },
@@ -1262,14 +1239,14 @@ export function computeVssCompound(items, total, { onExploreProvinces } = {}) {
     },
     {
       key: 'cskcb',
-      scope: 'live',
+      scope: 'fixed',
       title: 'Phủ CSKCB',
       mainValue: fmtInt(cskcb.size),
       unit: 'cơ sở',
       subtitle: note,
       subMetrics: [
-        { id: 'tw', label: 'TW / Hạng I (ước)', count: fmtInt(twLike), tone: 'warn', patch: { _quick: 'cskcb_tw' } },
-        { id: 'local', label: 'Tỉnh–Huyện (ước)', count: fmtInt(localLike), tone: 'ok', patch: { _quick: 'cskcb_local' } },
+        { id: 'tw', label: 'TW / Hạng I', count: fmtInt(twLike), tone: 'warn', patch: { _quick: 'cskcb_tw' } },
+        { id: 'local', label: 'Tỉnh–Huyện', count: fmtInt(localLike), tone: 'ok', patch: { _quick: 'cskcb_local' } },
       ],
       segments: [
         { key: 't', pct: (twLike / tierN) * 100, color: '#7c3aed' },
@@ -1279,19 +1256,90 @@ export function computeVssCompound(items, total, { onExploreProvinces } = {}) {
     {
       key: 'region',
       scope: 'fixed',
-      title: 'Tỉnh / doanh thu',
-      mainValue: top1 ? `${((top1[1] / totalPay) * 100).toFixed(0)}%` : '—',
-      unit: 'Top 1',
+      title: 'Tỉnh dẫn đầu doanh thu',
+      mainValue: top ? (top.name.length > 18 ? `${top.name.slice(0, 16)}…` : top.name) : '—',
+      unit: top ? fmtMoney(top.value) : '',
       subtitle: note,
-      explore: (
-        <RankExploreButton
-          label={top1 ? (top1[0].length > 22 ? `${top1[0].slice(0, 20)}…` : top1[0]) : 'Chưa có tỉnh'}
-          topHint={top1 ? `${fmtMoney(top1[1])} · ${byProv.size} tỉnh` : null}
-          onOpen={() => onExploreProvinces?.()}
-        />
-      ),
+      titleTip: 'Tỉnh có tổng thành tiền cao nhất — mở bảng để xem đủ xếp hạng tất cả tỉnh',
+      subMetrics: [
+        { id: 'prov_n', label: 'Số tỉnh', count: fmtInt(provinceRows.length), tone: 'neutral', info: true },
+        { id: 'prov_share', label: 'Tỷ trọng', count: top ? `${top.share.toFixed(1)}%` : '—', tone: 'ok', info: true },
+        { id: 'prov_total', label: 'Tổng', count: fmtMoney(totalPay), tone: 'ok', info: true },
+      ],
+      explore: <button type="button" className="province-detail-btn" onClick={() => onExploreProvinces?.()}>Xem tất cả tỉnh →</button>,
     },
   ]
+}
+
+export function provinceName(row) {
+  const name = String(row.ten_tinh || '').trim()
+  const code = String(row.ma_tinh || '').trim()
+  return name || (code ? `Tỉnh mã ${code}` : 'Chưa xác định tỉnh')
+}
+
+export function buildProvinceTable(rows) {
+  const groups = new Map()
+  for (const row of rows || []) {
+    const code = String(row.ma_tinh || '').trim()
+    const name = provinceName(row)
+    const key = code || name
+    if (!groups.has(key)) groups.set(key, { key, code, name, value: 0, count: 0, facilities: new Set(), groups: [0, 0, 0, 0, 0] })
+    const item = groups.get(key)
+    if (String(row.ten_tinh || '').trim()) item.name = name
+    const value = vssLineValue(row)
+    item.value += value
+    item.count++
+    const facility = row.ma_cskcb || row.ten_cskcb
+    if (facility) item.facilities.add(facility)
+    const group = groupBucket(row.nhomthau)
+    if (group) item.groups[Number(group) - 1] += value
+  }
+  const total = [...groups.values()].reduce((sum, p) => sum + p.value, 0)
+  return [...groups.values()].sort((a, b) => b.value - a.value).map((p) => ({
+    ...p, facilities: p.facilities.size, share: total ? p.value / total * 100 : 0,
+  }))
+}
+
+function ProvinceExploreModal({ open, onClose, rows, total, loading, onPick }) {
+  const [query, setQuery] = useState('')
+  const ranked = useMemo(() => buildProvinceTable(rows), [rows])
+  const shown = ranked.filter((p) => ingredientKey(`${p.name} ${p.code}`).includes(ingredientKey(query)))
+  const visible = query.trim() ? shown : ranked
+  return <Modal open={open} onClose={onClose} title="Giá trị trúng thầu theo tỉnh"
+    subtitle="Toàn bộ tỉnh có trong dữ liệu đã nạp · sắp xếp theo doanh thu"
+    width={1120}
+    footer={(
+      <>
+        <span className="muted">{ranked.length} tỉnh</span>
+        <div className="spacer" />
+        <button type="button" className="btn secondary" onClick={onClose}>Đóng</button>
+      </>
+    )}
+  >
+    <div className="province-summary">
+      <div><span>Tổng giá trị</span><strong>{fmtVnd(ranked.reduce((sum, p) => sum + p.value, 0))}</strong></div>
+      <div><span>Tỉnh / nhóm</span><strong>{fmtInt(ranked.length)}</strong></div>
+      <div><span>Dòng trúng thầu</span><strong>{fmtInt(rows?.length || 0)}</strong></div>
+    </div>
+    <div className="province-toolbar">
+      <input aria-label="Tìm tỉnh hoặc mã tỉnh" placeholder="Tìm tỉnh hoặc mã tỉnh…" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <span>{visible.length} / {ranked.length} tỉnh</span>
+    </div>
+    {(loading || Number(total) > (rows?.length || 0)) && <p className="province-note">{loading ? 'Đang nạp dữ liệu, các giá trị sẽ tiếp tục cập nhật.' : 'Thống kê trên dữ liệu đã nạp; chưa đủ toàn bộ kết quả.'}</p>}
+    <div className="rank-table-wrap province-table-wrap">
+      <table className="rank-table province-table">
+        <thead><tr><th>#</th><th>Tỉnh / TP</th><th>Giá trị trúng thầu</th><th>Tỷ trọng</th><th>CSKCB</th><th>Số dòng</th>{[1, 2, 3, 4, 5].map((n) => <th key={n}>Nhóm {n}</th>)}<th>Tra cứu</th></tr></thead>
+        <tbody>{visible.map((p) => <tr key={p.key}>
+          <td>{ranked.indexOf(p) + 1}</td><td><strong>{p.name}</strong>{p.code && <small>Mã {p.code}</small>}</td>
+          <td className="mono">{fmtVnd(p.value)}</td><td>{p.share.toFixed(1)}%</td><td>{fmtInt(p.facilities)}</td><td>{fmtInt(p.count)}</td>
+          {p.groups.map((v, i) => <td key={i} className="mono">{fmtMoney(v)}</td>)}
+          <td>{(p.code || p.name !== 'Chưa xác định tỉnh') && <button className="btn secondary tiny" onClick={() => onPick(p)}>Lọc tỉnh</button>}</td>
+        </tr>)}</tbody>
+      </table>
+      {!visible.length && <p className="empty">{ranked.length ? 'Không có tỉnh phù hợp.' : 'Chưa có dữ liệu tỉnh.'}</p>}
+    </div>
+    <p className="province-note">Giá trị trúng thầu = thành tiền hoặc đơn giá × số lượng. Dòng thiếu tên tỉnh được ghi theo mã; thiếu cả mã gom vào “Chưa xác định tỉnh”.</p>
+  </Modal>
 }
 
 export function VssMetrics({ items, total, activeId, onFilter, loading }) {
@@ -1301,28 +1349,21 @@ export function VssMetrics({ items, total, activeId, onFilter, loading }) {
     [items, total],
   )
   const flash = useFlashKey(`${items?.length}|${cards[0]?.mainValue}`)
-  const note = sampleNote(items, total, { years: VSS_METRICS_YEARS })
+  const note = sampleNote(items, total)
   return (
     <>
       <CompoundMetricsGrid
-        title={`BHYT VSS${note ? ` · ${note}` : ''}`}
+        title={`BHYT VSS · ${note}`}
         flash={flash}
         cards={cards}
         activeId={activeId}
         onFilter={onFilter}
         loading={loading}
       />
-      <RankExploreModal
-        open={explore}
-        onClose={() => setExplore(false)}
-        title="Xếp hạng tỉnh theo giá trị trúng thầu"
-        rows={items}
-        nameKey="ten_tinh"
-        valueFn={vssLineValue}
-        dateKey="tungay_hd"
-        onPick={(name) => {
+      <ProvinceExploreModal open={explore} onClose={() => setExplore(false)} rows={items} total={total} loading={loading}
+        onPick={(province) => {
           setExplore(false)
-          onFilter?.({ ten_tinh: name, ma_tinh: name }, `prov:${name}`)
+          onFilter?.({ ma_tinh: province.code || province.name }, `prov:${province.key}`)
         }}
       />
     </>
@@ -1354,9 +1395,11 @@ export function applyMetricQuick(rows, quick, kind) {
   }
   if (kind === 'dav') {
     return rows.filter((r) => {
-      const m = r.monthsLeft != null ? Number(r.monthsLeft) : monthsLeft(r.ngayHetHan)
-      if (quick === 'safe_24') return m != null && m > 24
-      if (quick === 'risk_12') return m != null && m >= 0 && m < 12
+      const t = parseDateMs(r.ngayCap)
+      const age = t == null ? null : Date.now() - t
+      if (quick === 'new_3m') return age != null && age >= 0 && age <= 3 * MONTH_MS
+      if (quick === 'new_6m') return age != null && age >= 0 && age <= 6 * MONTH_MS
+      if (quick === 'new_12m') return age != null && age >= 0 && age <= 12 * MONTH_MS
       return true
     })
   }

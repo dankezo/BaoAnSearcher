@@ -7,7 +7,7 @@ import {
   SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize,
   serverFilters, useSectionMeta, useSelection, useLoadProgress, } from './components'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
-import { MscPriceMetrics, MscTenderMetrics, applyMetricQuick, mscStatusDisplay, METRICS_YEAR } from './metrics'
+import { MscPriceMetrics, MscTenderMetrics, applyMetricQuick, mscStatusDisplay } from './metrics'
 import { StatusBadge, resolveBidStatusFromRow } from './bidStatus'
 
 const PAGE_SIZE_DEFAULT = 100
@@ -45,29 +45,24 @@ const TENDER_COLS = [
 
 const PRICE_DETAIL = [
   { key: 'name', label: 'Tên thuốc' }, { key: 'ingredient', label: 'Hoạt chất' }, { key: 'strength', label: 'Hàm lượng' },
-  { key: 'registration', label: 'Số đăng ký' }, { key: 'registration_keys', label: 'SĐK chuẩn hóa' },
+  { key: 'registration', label: 'Số đăng ký' },
   { key: 'unit_price', label: 'Đơn giá' }, { key: 'quantity', label: 'Số lượng' }, { key: 'unit', label: 'Đơn vị tính' },
   { key: 'group_name', label: 'Nhóm thuốc' }, { key: 'medicine_type', label: 'Loại thuốc' },
-  { key: 'route', label: 'Đường dùng' }, { key: 'dosage_form', label: 'Dạng bào chế' }, { key: 'packaging', label: 'Quy cách đóng gói' },
   { key: 'manufacturer', label: 'Nhà sản xuất' }, { key: 'country', label: 'Nước sản xuất' },
-  { key: 'winner', label: 'Nhà thầu trúng' }, { key: 'winner_code', label: 'Mã nhà thầu' },
-  { key: 'buyer', label: 'Bệnh viện / Chủ đầu tư' }, { key: 'buyer_code', label: 'Mã CĐT' }, { key: 'province', label: 'Tỉnh / TP' },
+  { key: 'winner', label: 'Nhà thầu trúng' },
+  { key: 'buyer', label: 'Bệnh viện / Chủ đầu tư' }, { key: 'province', label: 'Tỉnh / TP' },
   { key: 'tender_no', label: 'Mã TBMT' }, { key: 'published', label: 'Ngày KQLCNT', text: (r) => fmtDateTime(r.published) },
-  { key: 'decision', label: 'Quyết định' }, { key: 'decision_date', label: 'Ngày quyết định', text: (r) => fmtDateTime(r.decision_date) },
-  { key: 'source_label', label: 'Nguồn' }, { key: 'source_url', label: 'Trang nguồn' }, { key: 'import_note', label: 'Ghi chú import' },
-  { key: 'source_id', label: 'ID nguồn' }, { key: 'collected_at', label: 'Thu thập lúc', text: (r) => fmtDateTime(r.collected_at) },
+  { key: 'source_url', label: 'Trang nguồn' },
 ]
 
 const TENDER_DETAIL = [
   { key: 'tender_no', label: 'Mã TBMT' }, { key: 'name', label: 'Tên gói thầu' }, { key: 'buyer', label: 'Chủ đầu tư' },
-  { key: 'buyer_code', label: 'Mã CĐT' }, { key: 'province', label: 'Tỉnh / TP' },
+  { key: 'province', label: 'Tỉnh / TP' },
   { key: 'published', label: 'Ngày đăng', text: (r) => fmtDateTime(r.published) },
   { key: 'close_date', label: 'Thời điểm đóng thầu', text: (r) => fmtDateTime(r.close_date) },
-  { key: 'status_label', label: 'Trạng thái' }, { key: 'status_code', label: 'Mã trạng thái' }, { key: 'source_status', label: 'Trạng thái nguồn' },
-  { key: 'bid_price', label: 'Giá gói thầu' }, { key: 'bid_form', label: 'Hình thức LCNT' }, { key: 'plan_no', label: 'Mã KHLCNT' },
-  { key: 'version', label: 'Phiên bản' }, { key: 'medicine_evidence', label: 'Dấu hiệu thuốc' },
-  { key: 'source_label', label: 'Nguồn' }, { key: 'source_url', label: 'Trang nguồn' }, { key: 'source_id', label: 'ID nguồn' },
-  { key: 'collected_at', label: 'Thu thập lúc', text: (r) => fmtDateTime(r.collected_at) },
+  { key: 'status_label', label: 'Trạng thái' }, { key: 'status_code', label: 'Mã trạng thái' },
+  { key: 'bid_price', label: 'Giá gói thầu' }, { key: 'bid_form', label: 'Hình thức LCNT' },
+  { key: 'source_url', label: 'Trang nguồn' },
 ]
 
 /** Column key → server filter key (server supports these directly). */
@@ -79,7 +74,7 @@ const SERVER_MAP = {
 
 const EMPTY_FILTERS = {
   q: '', name: '', ingredient: '', registration: '', manufacturer: '',
-  province: '', tender_no: '', buyer: '', winner: '', group_name: '', medicine_type: '',
+  province: [], tender_no: '', buyer: [], winner: '', group_name: [], medicine_type: [], country: [],
 }
 
 function filterStatic(items, f) {
@@ -116,13 +111,14 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [loadPct, setLoadPct] = useState(null)
-  const [metricsSample, setMetricsSample] = useState([])
+  const [metricsSample, setMetricsSample] = useState(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricActiveId, setMetricActiveId] = useState(null)
   const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc thầu MSC', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
+  useEffect(() => () => { reqSeq.current += 1 }, [])
   const meta = useSectionMeta('msc', localMode, staticFallback, refreshKey)
 
   useEffect(() => {
@@ -179,18 +175,6 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         if (stale()) return
         setData(res)
         setPage(p)
-        setMetricsLoading(true)
-        fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP }).then((all) => {
-          if (stale()) return
-          // Fixed totals từ đầu năm hiện tại
-          const y0 = `${METRICS_YEAR}-01-01`
-          const scoped = (all || []).filter((r) => {
-            const d = String(r.published || r.close_date || '').slice(0, 10)
-            return !d || d >= y0
-          })
-          setMetricsSample(scoped.length ? scoped : all)
-        }).catch(() => { if (!stale()) setMetricsSample(res.items || []) })
-          .finally(() => { if (!stale()) setMetricsLoading(false) })
         return
       }
       setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
@@ -204,13 +188,29 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         setRefreshKey((k) => k + 1)
       }
     }
-  }, [kind, localMode, mergedFilters])
+  }, [kind, localMode, mergedFilters, embedded])
+
+  // Metrics fixed from full kind dataset — independent of table filters
+  useEffect(() => {
+    if (!prefsReady || embedded) return undefined
+    if (!(localMode || supabaseConfigured)) return undefined
+    let cancelled = false
+    setMetricsSample(null)
+    setMetricsLoading(true)
+    const metricsFn = localMode
+      ? (page, sz) => api.mscSearch({ kind, filters: {}, page, size: sz })
+      : (page, sz) => cloudMscSearch({ kind, filters: {}, page, size: sz })
+    fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: () => cancelled })
+      .then((all) => { if (!cancelled) setMetricsSample(all) })
+      .catch(() => { if (!cancelled) setMetricsSample([]) })
+      .finally(() => { if (!cancelled) setMetricsLoading(false) })
+    return () => { cancelled = true }
+  }, [prefsReady, kind, localMode, embedded])
 
   useEffect(() => {
     if (!prefsReady) return
     sel.clear()
     setColumnFilters({})
-    setMetricsSample([])
     setMetricActiveId(null)
     setMetricQuick(null)
     search(0, {})
@@ -223,17 +223,22 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     if (e.key === 'Enter' && !e.nativeEvent?.isComposing) runSearch()
   }
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
-  const detailActive = Object.entries(filters).filter(([k, v]) => k !== 'q' && String(v ?? '').trim()).length
+  const detailActive = Object.entries(filters).filter(([k, v]) => {
+    if (k === 'q') return false
+    return Array.isArray(v) ? v.length > 0 : String(v ?? '').trim() !== ''
+  }).length
 
   const fieldSuggest = useCallback((fieldKey) => async (q) => {
     const needle = String(q || '').trim()
-    if (needle.length < 1) return []
     try {
       let items = []
       if (localMode || supabaseConfigured) {
+        const filters = needle
+          ? { ...mergedFilters(), [fieldKey]: needle, q: '' }
+          : { ...mergedFilters(), q: '' }
         const res = localMode
-          ? await api.mscSearch({ kind, filters: { ...mergedFilters(), [fieldKey]: needle, q: '' }, page: 0, size: 30 })
-          : await cloudMscSearch({ kind, filters: { ...mergedFilters(), [fieldKey]: needle, q: '' }, page: 0, size: 30 })
+          ? await api.mscSearch({ kind, filters, page: 0, size: needle ? 40 : 80 })
+          : await cloudMscSearch({ kind, filters, page: 0, size: needle ? 40 : 80 })
         items = res?.items || []
       }
       const seen = new Set()
@@ -243,7 +248,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         if (!t || seen.has(t)) continue
         seen.add(t)
         out.push(t)
-        if (out.length >= 3) break
+        if (out.length >= (needle ? 8 : 12)) break
       }
       return out
     } catch { return [] }
@@ -256,7 +261,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   }, [data.items, cols, columnFilters, metricQuick, kind])
   const rowKey = useCallback((r, i) => String(r.source_id || r.tender_no || `${page}-${i}`), [page])
   const pageSizeNum = resolvePageSize(pageSize)
-  const metricsItems = metricsSample.length ? metricsSample : (rows.length ? rows : data.items)
+  const metricsItems = metricsSample ?? data.items
 
   const onMetricFilter = useCallback((patch, id) => {
     if (metricActiveId === id) {
@@ -312,6 +317,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           <SuggestField label="Nhà sản xuất" value={filters.manufacturer} onChange={(v) => setF('manufacturer', v)} onSearch={(v) => runSearch({ manufacturer: v })} suggest={fieldSuggest('manufacturer')} />
           <MultiSelectField label="Nhóm" value={filters.group_name} onChange={(v) => setF('group_name', v)} options={['1', '2', '3', '4', '5']} />
           <MultiSelectField label="Loại thuốc" value={filters.medicine_type} onChange={(v) => setF('medicine_type', v)} suggest={fieldSuggest('medicine_type')} />
+          <MultiSelectField label="Nước sản xuất" value={filters.country} onChange={(v) => setF('country', v)} suggest={fieldSuggest('country')} />
           <SuggestField label="Nhà thầu" value={filters.winner} onChange={(v) => setF('winner', v)} onSearch={(v) => runSearch({ winner: v })} suggest={fieldSuggest('winner')} />
         </>
       ) : (
@@ -362,8 +368,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
               </div>
             </div>
             {!embedded && (kind === 'prices'
-              ? <MscPriceMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading || loading} />
-              : <MscTenderMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading || loading} />)}
+              ? <MscPriceMetrics items={metricsItems} total={metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />
+              : <MscTenderMetrics items={metricsItems} total={metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />)}
           </div>
         </div>
 

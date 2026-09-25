@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { fold, fmtDateTime, getStaticStatus, getStatus, relativeTime, sectionMeta } from './api'
 import { cloudMeta, supabaseConfigured } from './supabaseCloud'
 import { exportXlsx } from './export'
@@ -165,9 +166,11 @@ export function HospitalGradeField({ value, onChange, multi = true }) {
 }
 
 /**
- * Multi-select dropdown with optional free-text add (Enter) and async suggest.
+ * Multi-select dropdown with checkboxes + async recommendations.
+ * Within one field: OR. Across fields (handled by search): AND.
  * value: string[]  |  onChange(next: string[])
  * options: string[] | { value, label }[]
+ * suggest: async (query) => string[] — called on open (even with empty q) for recommendations
  */
 export function MultiSelectField({
   label, hint, value = [], onChange, options = [], suggest, placeholder = 'Chọn hoặc gõ…', className = '',
@@ -176,6 +179,7 @@ export function MultiSelectField({
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const [extra, setExtra] = useState([])
+  const [suggesting, setSuggesting] = useState(false)
   const selected = asList(value)
 
   const normOpts = useMemo(() => {
@@ -198,14 +202,14 @@ export function MultiSelectField({
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
+  // Recommendations: fetch on open + while typing (empty q = top values)
   useEffect(() => {
     if (!suggest || !open) return undefined
-    const needle = q.trim()
-    if (needle.length < 1) return undefined
     let alive = true
     const t = setTimeout(async () => {
+      setSuggesting(true)
       try {
-        const list = await suggest(needle)
+        const list = await suggest(q.trim())
         if (!alive) return
         setExtra((prev) => {
           const set = new Set(prev)
@@ -216,7 +220,8 @@ export function MultiSelectField({
           return [...set]
         })
       } catch { /* ignore */ }
-    }, 200)
+      finally { if (alive) setSuggesting(false) }
+    }, q.trim() ? 200 : 40)
     return () => { alive = false; clearTimeout(t) }
   }, [q, suggest, open])
 
@@ -245,7 +250,7 @@ export function MultiSelectField({
       : `${selected.length} đã chọn`
 
   return (
-    <Field label={label} hint={hint} className={`multi-select-field ${className}`}>
+    <Field label={label} hint={hint || 'Chọn nhiều · OR trong ô'} className={`multi-select-field ${className}`}>
       <div className="multi-select" ref={wrapRef}>
         <button
           type="button"
@@ -296,7 +301,7 @@ export function MultiSelectField({
               })}
               {!filtered.length && (
                 <li className="multi-select-empty muted">
-                  {q.trim() ? (
+                  {suggesting ? 'Đang gợi ý…' : q.trim() ? (
                     <button type="button" className="btn ghost sm" onClick={addFromQuery}>
                       Thêm “{q.trim()}”
                     </button>
@@ -516,17 +521,35 @@ export function SuggestInput({
 }
 
 /** Modal shell for secondary filters (used in multi-view). */
+export const PaneOverlayContext = createContext(null)
+
 export function FilterModal({ open, title = 'Bộ lọc chi tiết', onClose, onApply, children }) {
+  const dialogRef = useRef(null)
   useEffect(() => {
     if (!open) return undefined
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+    const previous = document.activeElement
+    dialogRef.current?.focus()
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      if (previous?.isConnected) previous.focus()
+      document.body.style.overflow = prev
+    }
+  }, [open])
   if (!open) return null
-  return (
+  // Always portal to body — split-pane containment made overlays look transparent.
+  return createPortal(
     <div className="filter-modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
-      <div className="filter-modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="filter-modal" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={dialogRef}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.stopPropagation(); onClose?.() }
+          if (e.key !== 'Tab') return
+          const focusable = [...e.currentTarget.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')].filter((node) => node.getClientRects().length)
+          const first = focusable[0]
+          const last = focusable.at(-1)
+          if (e.shiftKey && (document.activeElement === first || document.activeElement === e.currentTarget)) { e.preventDefault(); last?.focus() }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() }
+        }}>
         <div className="filter-modal-head">
           <strong>{title}</strong>
           <button type="button" className="icon-btn" aria-label="Đóng" onClick={onClose}>{I.x}</button>
@@ -537,7 +560,8 @@ export function FilterModal({ open, title = 'Bộ lọc chi tiết', onClose, on
           <button type="button" className="btn" onClick={() => { onApply?.(); onClose?.() }}>{I.search} Áp dụng</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -819,9 +843,9 @@ export function Pagination({
 
 /** Resolve UI page-size choice → numeric size for API. */
 export const PAGE_SIZE_FULL_CHUNK = 500
-/** Soft cap for non-DAV metrics samples (year-scoped). */
+/** Soft cap for non-DAV metrics samples. */
 export const PAGE_SIZE_FULL_CAP = 8000
-/** DAV must load the full filtered set for metrics. */
+/** DAV metrics load ceiling (full catalog, capped for safety). */
 export const DAV_METRICS_CAP = 100_000
 export function resolvePageSize(choice) {
   if (choice === 'full' || choice === 0) return 100 // legacy full → safe default
@@ -897,7 +921,8 @@ export function Modal({ open, onClose, title, subtitle, children, footer, width 
     }
   }, [open, onClose])
   if (!open) return null
-  return (
+  // Portal to body so split-pane `contain` / isolation cannot make the dialog look transparent.
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
       <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: width }}>
         <div className="modal-head">
@@ -910,7 +935,8 @@ export function Modal({ open, onClose, title, subtitle, children, footer, width 
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -923,13 +949,10 @@ function isEmptyVal(v) {
  * fields: [{key,label,text?}] ordered; remaining non-underscore keys are appended.
  */
 export function DetailModal({ row, fields, title, subtitle, onClose, sourceUrl, renderValue }) {
+  // Only curated/compact fields — do not dump every DB key into the modal.
   const all = useMemo(() => {
     if (!row) return []
-    const known = new Set(fields.map((f) => f.key))
-    const rest = Object.keys(row)
-      .filter((k) => !known.has(k) && !k.startsWith('_'))
-      .map((k) => ({ key: k, label: k }))
-    return [...fields, ...rest]
+    return (fields || []).filter((f) => f && f.key)
   }, [row, fields])
   if (!row) return null
   const url = sourceUrl || row.source_url
@@ -1358,14 +1381,22 @@ export async function fetchAllPages(fetchPage, {
   size = PAGE_SIZE_FULL_CHUNK,
   cap = PAGE_SIZE_FULL_CAP,
   onProgress,
+  shouldCancel,
 } = {}) {
+  const checkCancelled = () => {
+    if (shouldCancel?.()) throw new DOMException('Đã hủy nạp dữ liệu', 'AbortError')
+  }
+  checkCancelled()
   const first = await fetchPage(0, size)
+  checkCancelled()
   const items = [...(first.items || [])]
   const total = Math.min(first.total || items.length, cap)
   onProgress?.(items.length && total ? Math.min(99, Math.round((items.length / total) * 100)) : 5)
   let page = 1
-  while (items.length < total && page < 500) {
+  while (items.length < total) {
+    checkCancelled()
     const more = await fetchPage(page, size)
+    checkCancelled()
     if (!more.items?.length) break
     items.push(...more.items)
     onProgress?.(Math.min(99, Math.round((items.length / Math.max(total, 1)) * 100)))
