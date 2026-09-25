@@ -6,14 +6,15 @@ import {
   ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, FilterModal, HospitalGradeField,
   Icons, IngredientText, LoadingOverlay, Pagination, SearchSuggestBar, SuggestField, TableToolbar, UpdatedNote,
   ViewModeSelect, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters,
-  useSectionMeta, useSelection, useLoadProgress, useTt20, } from './components'
+  useSectionMeta, useSelection, useLoadProgress, useTt20, MultiSelectField, } from './components'
 import { TagBadge, TagFilterDropdown, useTagFilterState } from './TagFilterDropdown'
 import { enrichRowTag } from './tagConfig'
 import { ingredientAllowedAtGrade } from './tt20'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
-import { DavMetrics } from './metrics'
+import { DavMetrics, applyMetricQuick } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
+const METRICS_CAP = 2000
 
 const ALL_COLS = [
   { key: 'tagId', label: 'Trạng thái', filter: 'select', nowrap: true, width: 52, align: 'center' },
@@ -82,6 +83,9 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const [suggesting, setSuggesting] = useState(false)
   const [prefsReady, setPrefsReady] = useState(false)
   const [loadPct, setLoadPct] = useState(null)
+  const [metricsSample, setMetricsSample] = useState([])
+  const [metricActiveId, setMetricActiveId] = useState(null)
+  const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc thuốc DAV', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
@@ -189,6 +193,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
           setData({ total: items.length, items, page: 0, size: items.length || size })
           setPage(0)
+          setMetricsSample(items.slice(0, METRICS_CAP))
         } else {
           const res = await searchFn(p, size)
           if (stale()) return
@@ -196,6 +201,13 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
           setData({ ...res, items })
           setPage(p)
+          // Background metrics sample (not page size)
+          fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP }).then((all) => {
+            if (stale()) return
+            setMetricsSample(all.map(enrichRowTag))
+          }).catch(() => {
+            if (!stale()) setMetricsSample(items)
+          })
         }
         return
       }
@@ -330,10 +342,39 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     search(0, undefined, override || null, tags)
   }, [search, commitDraft])
 
-  const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
+  const rows = useMemo(() => {
+    let list = applyColumnFilters(data.items, cols, columnFilters)
+    list = applyMetricQuick(list, metricQuick, 'dav')
+    return list
+  }, [data.items, cols, columnFilters, metricQuick])
   const rowKey = useCallback((r, i) => (r.id != null ? `id:${r.id}` : `${r.soDangKy}|${page}|${i}`), [page])
   const pageSizeNum = resolvePageSize(pageSize)
-  const metricsItems = rows.length ? rows : data.items
+  const metricsItems = metricsSample.length ? metricsSample : (rows.length ? rows : data.items)
+
+  const onMetricFilter = useCallback((patch, id) => {
+    if (metricActiveId === id) {
+      setMetricActiveId(null)
+      setMetricQuick(null)
+      return
+    }
+    setMetricActiveId(id)
+    if (patch?._tag) {
+      setDraftTags([patch._tag])
+      setMetricQuick(null)
+      search(0, undefined, null, [patch._tag])
+      return
+    }
+    if (patch?._quick) {
+      setMetricQuick(patch._quick)
+      return
+    }
+    const { _tag, _quick, ...rest } = patch || {}
+    if (Object.keys(rest).length) {
+      setFilters((f) => ({ ...f, ...rest }))
+      setMetricQuick(null)
+      runSearch(rest)
+    }
+  }, [metricActiveId, search, runSearch, setDraftTags])
 
   const fetchAll = useCallback(async () => {
     if (!localMode && !supabaseConfigured) return []
@@ -370,7 +411,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
       <SuggestField label="Dạng bào chế" value={filters.dangBaoChe} onChange={(v) => setF('dangBaoChe', v)} onSearch={(v) => runSearch({ dangBaoChe: v })} suggest={fieldSuggest('dangBaoChe')} />
       <SuggestField label="Công ty SX" value={filters.sanXuat} onChange={(v) => setF('sanXuat', v)} onSearch={(v) => runSearch({ sanXuat: v })} suggest={fieldSuggest('sanXuat')} />
       <SuggestField label="Công ty ĐK" value={filters.dangKy} onChange={(v) => setF('dangKy', v)} onSearch={(v) => runSearch({ dangKy: v })} suggest={fieldSuggest('dangKy')} />
-      <SuggestField label="Nước SX" value={filters.nuocSanXuat} onChange={(v) => setF('nuocSanXuat', v)} onSearch={(v) => runSearch({ nuocSanXuat: v })} suggest={fieldSuggest('nuocSanXuat')} />
+      <MultiSelectField label="Nước SX" value={filters.nuocSanXuat} onChange={(v) => setF('nuocSanXuat', v)} suggest={fieldSuggest('nuocSanXuat')} placeholder="Chọn nước…" />
       <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
       <CountSelect label="Số hoạt chất" value={filters.ingredientCount} otherValue={filters.ingredientCountOther}
         options={[1, 2, 3, 4, 5]} onChange={(v) => setF('ingredientCount', v)} onOther={(v) => setF('ingredientCountOther', v)} />
@@ -456,7 +497,12 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
             </div>
 
             {!embedded && (
-              <DavMetrics items={metricsItems} total={data.total} />
+              <DavMetrics
+                items={metricsItems}
+                total={data.total}
+                activeId={metricActiveId}
+                onFilter={onMetricFilter}
+              />
             )}
           </div>
         </div>
@@ -473,6 +519,9 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           activeColumnFilters={activeCF}
           onClearColumnFilters={() => { setColumnFilters({}); search(0, {}) }}
         >
+          <button type="button" className="btn ghost sm" onClick={() => runSearch()} title="Quét lại dữ liệu">
+            {Icons.refresh} Quét lại
+          </button>
           <ViewModeSelect value={viewMode} onChange={(v) => { setViewMode(v); if (v === 'custom') setColPicker(true) }} />
           {viewMode === 'custom' && (
             <button type="button" className="btn ghost sm" onClick={() => setColPicker((v) => !v)}>{Icons.columns} Cột</button>
@@ -501,6 +550,12 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           onRowDoubleClick={setDetail}
           loading={loading}
           emptyText="Không có dữ liệu phù hợp"
+          emptyAction={(
+            <button type="button" className="btn" onClick={() => runSearch()}>
+              {Icons.refresh} Tìm kiếm lại
+            </button>
+          )}
+          cardKeys={['tenThuoc', 'soDangKy', 'hoatChat', 'ngayHetHan', 'tagId']}
           minWidth={embedded ? 720 : 1100}
           trailing={{
             label: 'Tra cứu',

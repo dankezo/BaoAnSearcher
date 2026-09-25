@@ -19,6 +19,7 @@ const I = {
   chevR: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 6l6 6-6 6" /></svg>,
   clock: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>,
   columns: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 4v16" /></svg>,
+  refresh: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 11-2.6-6.3" /><path d="M21 3v6h-6" /></svg>,
 }
 export const Icons = I
 
@@ -37,14 +38,21 @@ export function LoadingOverlay({ show, percent = 0, message = 'Đang xử lý…
         {etaSec != null && etaSec > 0 && (
           <div className="loading-eta muted">Ước tính còn ~{etaSec}s</div>
         )}
-        {onCancel && pct >= 85 && (
+        {onCancel && (
           <button type="button" className="btn secondary sm" style={{ marginTop: 12 }} onClick={onCancel}>
-            Bỏ qua / thử lại
+            Hủy
           </button>
         )}
       </div>
     </div>
   )
+}
+
+/** Normalize filter value → string[] (supports array or "a|b|c"). */
+export function asList(v) {
+  if (Array.isArray(v)) return v.map((x) => String(x ?? '').trim()).filter(Boolean)
+  if (v == null || v === '') return []
+  return String(v).split(/[|,;]+/).map((s) => s.trim()).filter(Boolean)
 }
 
 const LOAD_AVG_KEY = 'baoan.loadAvgMs'
@@ -132,7 +140,18 @@ export function Field({ label, children, hint, className = '' }) {
   )
 }
 
-export function HospitalGradeField({ value, onChange }) {
+export function HospitalGradeField({ value, onChange, multi = true }) {
+  if (multi) {
+    return (
+      <MultiSelectField
+        label="Hạng bệnh viện"
+        hint="TT 20/2022 · chọn nhiều"
+        value={asList(value)}
+        onChange={onChange}
+        options={HOSPITAL_GRADES.map((g) => ({ value: g.id, label: g.label }))}
+      />
+    )
+  }
   return (
     <Field label="Hạng bệnh viện" hint="TT 20/2022">
       <select value={value || ''} onChange={(e) => onChange(e.target.value)}>
@@ -141,6 +160,153 @@ export function HospitalGradeField({ value, onChange }) {
           <option key={g.id} value={g.id}>{g.label}</option>
         ))}
       </select>
+    </Field>
+  )
+}
+
+/**
+ * Multi-select dropdown with optional free-text add (Enter) and async suggest.
+ * value: string[]  |  onChange(next: string[])
+ * options: string[] | { value, label }[]
+ */
+export function MultiSelectField({
+  label, hint, value = [], onChange, options = [], suggest, placeholder = 'Chọn hoặc gõ…', className = '',
+}) {
+  const wrapRef = useRef(null)
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const [extra, setExtra] = useState([])
+  const selected = asList(value)
+
+  const normOpts = useMemo(() => {
+    const base = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : o))
+    const seen = new Set(base.map((o) => o.value))
+    for (const e of extra) {
+      if (!seen.has(e)) { base.push({ value: e, label: e }); seen.add(e) }
+    }
+    for (const s of selected) {
+      if (!seen.has(s)) { base.push({ value: s, label: s }); seen.add(s) }
+    }
+    return base
+  }, [options, extra, selected])
+
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  useEffect(() => {
+    if (!suggest || !open) return undefined
+    const needle = q.trim()
+    if (needle.length < 1) return undefined
+    let alive = true
+    const t = setTimeout(async () => {
+      try {
+        const list = await suggest(needle)
+        if (!alive) return
+        setExtra((prev) => {
+          const set = new Set(prev)
+          for (const x of list || []) {
+            const s = String(x || '').trim()
+            if (s) set.add(s)
+          }
+          return [...set]
+        })
+      } catch { /* ignore */ }
+    }, 200)
+    return () => { alive = false; clearTimeout(t) }
+  }, [q, suggest, open])
+
+  const toggle = (v) => {
+    const next = selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]
+    onChange(next)
+  }
+
+  const addFromQuery = () => {
+    const t = q.trim()
+    if (!t) return
+    if (!selected.includes(t)) onChange([...selected, t])
+    setQ('')
+  }
+
+  const filtered = useMemo(() => {
+    const n = fold(q)
+    if (!n) return normOpts
+    return normOpts.filter((o) => fold(o.label).includes(n) || fold(o.value).includes(n))
+  }, [normOpts, q])
+
+  const summary = selected.length === 0
+    ? 'Tất cả'
+    : selected.length <= 2
+      ? selected.join(', ')
+      : `${selected.length} đã chọn`
+
+  return (
+    <Field label={label} hint={hint} className={`multi-select-field ${className}`}>
+      <div className="multi-select" ref={wrapRef}>
+        <button
+          type="button"
+          className={`multi-select-trigger${selected.length ? ' on' : ''}`}
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          <span className="multi-select-summary">{summary}</span>
+          {selected.length > 0 && (
+            <span
+              className="multi-select-clear"
+              role="button"
+              tabIndex={0}
+              title="Xóa chọn"
+              onClick={(e) => { e.stopPropagation(); onChange([]) }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onChange([]) } }}
+            >
+              {I.x}
+            </span>
+          )}
+        </button>
+        {open && (
+          <div className="multi-select-panel" role="listbox" aria-multiselectable="true">
+            <div className="multi-select-search">
+              <input
+                className="input sm"
+                value={q}
+                placeholder={placeholder}
+                autoFocus
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); addFromQuery() }
+                  if (e.key === 'Escape') setOpen(false)
+                }}
+              />
+            </div>
+            <ul className="multi-select-list">
+              {filtered.map((o) => {
+                const on = selected.includes(o.value)
+                return (
+                  <li key={o.value}>
+                    <label className={`multi-select-item${on ? ' on' : ''}`}>
+                      <input type="checkbox" checked={on} onChange={() => toggle(o.value)} />
+                      <span>{o.label}</span>
+                    </label>
+                  </li>
+                )
+              })}
+              {!filtered.length && (
+                <li className="multi-select-empty muted">
+                  {q.trim() ? (
+                    <button type="button" className="btn ghost sm" onClick={addFromQuery}>
+                      Thêm “{q.trim()}”
+                    </button>
+                  ) : 'Không có lựa chọn'}
+                </li>
+              )}
+            </ul>
+          </div>
+        )}
+      </div>
     </Field>
   )
 }
@@ -924,14 +1090,22 @@ export function DataTable({
   selectable = true, selected, onToggleRow, onToggleAll,
   columnFilters = {}, onColumnFilter, filtersVisible = true, onFilterEnter,
   onFilterSuggest,
-  onRowDoubleClick, emptyText = 'Không có dữ liệu', loading,
+  onRowDoubleClick, emptyText = 'Không có dữ liệu', emptyAction = null, loading,
   trailing, // { label, render(row) }
   minWidth,
+  cardKeys = null,
 }) {
   const keys = useMemo(() => rows.map((r, i) => rowKey(r, i)), [rows, rowKey])
   const allChecked = rows.length > 0 && keys.every((k) => selected?.has(k))
   const someChecked = !allChecked && keys.some((k) => selected?.has(k))
   const headRef = useRef(null)
+  const cardCols = useMemo(() => {
+    if (cardKeys?.length) {
+      const map = Object.fromEntries(columns.map((c) => [c.key, c]))
+      return cardKeys.map((k) => map[k]).filter(Boolean)
+    }
+    return columns.slice(0, 5)
+  }, [columns, cardKeys])
 
   useEffect(() => {
     if (headRef.current) headRef.current.indeterminate = someChecked
@@ -971,9 +1145,16 @@ export function DataTable({
     return out
   }, [onFilterSuggest, columns, rows])
 
+  const emptyBlock = (
+    <div className="empty-result">
+      <div className="empty-result-text">{emptyText}</div>
+      {emptyAction}
+    </div>
+  )
+
   return (
     <div className="table-wrap">
-      <table className={`data${filtersVisible ? ' with-filters' : ''}`} style={minWidth ? { minWidth } : undefined}>
+      <table className={`data desktop-table${filtersVisible ? ' with-filters' : ''}`} style={minWidth ? { minWidth } : undefined}>
         <thead>
           <tr className="labels">
             {selectable && (
@@ -1059,10 +1240,51 @@ export function DataTable({
             )
           })}
           {!rows.length && !loading && (
-            <tr className="empty"><td colSpan={columns.length + extraCols}>{emptyText}</td></tr>
+            <tr className="empty"><td colSpan={columns.length + extraCols}>{emptyBlock}</td></tr>
           )}
         </tbody>
       </table>
+
+      <div className="result-cards" aria-label="Kết quả dạng thẻ">
+        {rows.map((row, i) => {
+          const k = keys[i]
+          const titleCol = cardCols[0]
+          let title = '—'
+          if (titleCol) {
+            if (titleCol.text) title = titleCol.text(row)
+            else if (titleCol.render) title = titleCol.render(row[titleCol.key], row)
+            else title = row[titleCol.key] ?? '—'
+          }
+          return (
+            <button
+              key={k}
+              type="button"
+              className={`result-card${selected?.has(k) ? ' selected' : ''}`}
+              onClick={() => onRowDoubleClick?.(row)}
+            >
+              <div className="result-card-title">
+                {typeof title === 'string' || typeof title === 'number' ? title : (titleCol?.label || 'Chi tiết')}
+              </div>
+              <dl className="result-card-grid">
+                {cardCols.slice(1).map((c) => {
+                  let val
+                  if (c.text) val = c.text(row)
+                  else if (c.render) val = c.render(row[c.key], row)
+                  else val = row[c.key]
+                  return (
+                    <div key={c.key} className="result-card-row">
+                      <dt>{c.label}</dt>
+                      <dd>{val == null || val === '' ? '—' : val}</dd>
+                    </div>
+                  )
+                })}
+              </dl>
+              <div className="result-card-hint muted">Chạm để xem chi tiết</div>
+            </button>
+          )
+        })}
+        {!rows.length && !loading && emptyBlock}
+      </div>
     </div>
   )
 }

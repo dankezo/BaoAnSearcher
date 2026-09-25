@@ -64,24 +64,36 @@ function normalizePage(payload, page, size) {
   }
 }
 
+function filterParam(v) {
+  if (v == null || v === '') return null
+  if (Array.isArray(v)) {
+    const xs = v.map((x) => String(x ?? '').trim()).filter(Boolean)
+    return xs.length ? xs.join('|') : null
+  }
+  const s = String(v).trim()
+  return s || null
+}
+
 async function supabaseVss(filters, page, size) {
   const sb = getSupabase()
   const f = filters || {}
   let nam = null
-  if (f.nam != null && String(f.nam).trim() !== '') {
-    const n = parseInt(String(f.nam).trim(), 10)
+  const namRaw = filterParam(f.nam)
+  if (namRaw) {
+    const first = namRaw.split('|')[0]
+    const n = parseInt(first, 10)
     if (!Number.isNaN(n)) nam = n
   }
   const { data, error } = await sb.rpc('search_vss_bids', {
     p_q: foldParam(f.q),
-    p_hoatchat: foldParam(f.hoatchat) || (f.hoatchat ? String(f.hoatchat).trim() : null),
-    p_sodk: f.sodk ? String(f.sodk).trim() : null,
-    p_loai: f.loai ? String(f.loai).trim() : null,
-    p_nhomthau: f.nhomthau ? String(f.nhomthau).trim() : null,
-    p_loai_thau: f.loai_thau ? String(f.loai_thau).trim() : null,
-    p_duongdung: f.duongdung ? String(f.duongdung).trim() : null,
-    p_ma_tinh: f.ma_tinh ? String(f.ma_tinh).trim() : null,
-    p_nuocsx: f.nuocsx ? String(f.nuocsx).trim() : null,
+    p_hoatchat: foldParam(f.hoatchat) || filterParam(f.hoatchat),
+    p_sodk: filterParam(f.sodk),
+    p_loai: filterParam(f.loai),
+    p_nhomthau: filterParam(f.nhomthau),
+    p_loai_thau: filterParam(f.loai_thau),
+    p_duongdung: filterParam(f.duongdung),
+    p_ma_tinh: filterParam(f.ma_tinh),
+    p_nuocsx: filterParam(f.nuocsx),
     p_nam: nam,
     p_tu_ngay: f.tuNgay || null,
     p_den_ngay: f.denNgay || null,

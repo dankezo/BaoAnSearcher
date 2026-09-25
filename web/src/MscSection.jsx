@@ -3,13 +3,14 @@ import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, sortByDat
 import { cloudMeta, cloudMscSearch, supabaseConfigured } from './supabaseCloud'
 import { useAuth } from './auth'
 import {
-  DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, IngredientText, LoadingOverlay, Pagination,
+  DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, MultiSelectField, IngredientText, LoadingOverlay, Pagination,
   SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize,
   serverFilters, useSectionMeta, useSelection, useLoadProgress, } from './components'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
-import { MscPriceMetrics, MscTenderMetrics } from './metrics'
+import { MscPriceMetrics, MscTenderMetrics, applyMetricQuick } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
+const METRICS_CAP = 2000
 const money = (v) => (typeof v === 'number' ? v.toLocaleString('vi-VN') : v ?? '')
 
 const PRICE_COLS = [
@@ -114,6 +115,9 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [loadPct, setLoadPct] = useState(null)
+  const [metricsSample, setMetricsSample] = useState([])
+  const [metricActiveId, setMetricActiveId] = useState(null)
+  const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc thầu MSC', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
@@ -173,6 +177,9 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         if (stale()) return
         setData(res)
         setPage(p)
+        fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP }).then((all) => {
+          if (!stale()) setMetricsSample(all)
+        }).catch(() => { if (!stale()) setMetricsSample(res.items || []) })
         return
       }
       setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
@@ -192,6 +199,9 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     if (!prefsReady) return
     sel.clear()
     setColumnFilters({})
+    setMetricsSample([])
+    setMetricActiveId(null)
+    setMetricQuick(null)
     search(0, {})
   }, [prefsReady, kind, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -228,10 +238,32 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     } catch { return [] }
   }, [localMode, kind, mergedFilters])
 
-  const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
-  const rowKey = useCallback((r, i) => (r.source_id ? `${kind}:${r.source_id}` : `${kind}:${r.tender_no}|${page}|${i}`), [kind, page])
+  const rows = useMemo(() => {
+    let list = applyColumnFilters(data.items, cols, columnFilters)
+    list = applyMetricQuick(list, metricQuick, kind === 'tenders' ? 'msc_tenders' : 'msc_prices')
+    return list
+  }, [data.items, cols, columnFilters, metricQuick, kind])
+  const rowKey = useCallback((r, i) => String(r.source_id || r.tender_no || `${page}-${i}`), [page])
   const pageSizeNum = resolvePageSize(pageSize)
-  const metricsItems = rows.length ? rows : data.items
+  const metricsItems = metricsSample.length ? metricsSample : (rows.length ? rows : data.items)
+
+  const onMetricFilter = useCallback((patch, id) => {
+    if (metricActiveId === id) {
+      setMetricActiveId(null)
+      setMetricQuick(null)
+      return
+    }
+    setMetricActiveId(id)
+    if (patch?._quick) {
+      setMetricQuick(patch._quick)
+      return
+    }
+    const { _quick, ...rest } = patch || {}
+    if (!Object.keys(rest).length) return
+    setFilters((f) => ({ ...f, ...rest }))
+    setMetricQuick(null)
+    search(0, undefined, rest)
+  }, [metricActiveId, search])
 
   const fetchAll = useCallback(async () => {
     if (!localMode && !supabaseConfigured) return []
@@ -265,16 +297,16 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           <SuggestField label="Hoạt chất" value={filters.ingredient} onChange={(v) => setF('ingredient', v)} onSearch={(v) => runSearch({ ingredient: v })} suggest={fieldSuggest('ingredient')} />
           <SuggestField label="SĐK" value={filters.registration} onChange={(v) => setF('registration', v)} onSearch={(v) => runSearch({ registration: v })} suggest={fieldSuggest('registration')} />
           <SuggestField label="Nhà sản xuất" value={filters.manufacturer} onChange={(v) => setF('manufacturer', v)} onSearch={(v) => runSearch({ manufacturer: v })} suggest={fieldSuggest('manufacturer')} />
-          <Field label="Nhóm"><input value={filters.group_name} onChange={(e) => setF('group_name', e.target.value)} onKeyDown={onEnter} placeholder="1 … 5" /></Field>
-          <SuggestField label="Loại thuốc" value={filters.medicine_type} onChange={(v) => setF('medicine_type', v)} onSearch={(v) => runSearch({ medicine_type: v })} suggest={fieldSuggest('medicine_type')} />
+          <MultiSelectField label="Nhóm" value={filters.group_name} onChange={(v) => setF('group_name', v)} options={['1', '2', '3', '4', '5']} />
+          <MultiSelectField label="Loại thuốc" value={filters.medicine_type} onChange={(v) => setF('medicine_type', v)} suggest={fieldSuggest('medicine_type')} />
           <SuggestField label="Nhà thầu" value={filters.winner} onChange={(v) => setF('winner', v)} onSearch={(v) => runSearch({ winner: v })} suggest={fieldSuggest('winner')} />
         </>
       ) : (
         <SuggestField label="Tên gói" value={filters.name} onChange={(v) => setF('name', v)} onSearch={(v) => runSearch({ name: v })} suggest={fieldSuggest('name')} />
       )}
       <SuggestField label="TBMT" value={filters.tender_no} onChange={(v) => setF('tender_no', v)} onSearch={(v) => runSearch({ tender_no: v })} suggest={fieldSuggest('tender_no')} placeholder="IB…" />
-      <SuggestField label="Tỉnh / TP" value={filters.province} onChange={(v) => setF('province', v)} onSearch={(v) => runSearch({ province: v })} suggest={fieldSuggest('province')} />
-      <SuggestField label="Bệnh viện / CĐT" value={filters.buyer} onChange={(v) => setF('buyer', v)} onSearch={(v) => runSearch({ buyer: v })} suggest={fieldSuggest('buyer')} />
+      <MultiSelectField label="Tỉnh / TP" value={filters.province} onChange={(v) => setF('province', v)} suggest={fieldSuggest('province')} />
+      <MultiSelectField label="Bệnh viện / CĐT" value={filters.buyer} onChange={(v) => setF('buyer', v)} suggest={fieldSuggest('buyer')} />
     </div>
   )
 
@@ -317,8 +349,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
               </div>
             </div>
             {!embedded && (kind === 'prices'
-              ? <MscPriceMetrics items={metricsItems} />
-              : <MscTenderMetrics items={metricsItems} />)}
+              ? <MscPriceMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} />
+              : <MscTenderMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} />)}
           </div>
         </div>
 
@@ -333,7 +365,9 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           onToggleFilters={() => setFiltersRow((v) => !v)}
           activeColumnFilters={activeCF}
           onClearColumnFilters={() => { setColumnFilters({}); search(0, {}) }}
-        />
+        >
+          <button type="button" className="btn ghost sm" onClick={() => runSearch()}>{Icons.refresh} Quét lại</button>
+        </TableToolbar>
         <ErrorNote>{err}</ErrorNote>
 
         <DataTable
@@ -351,6 +385,15 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           onFilterSuggest={async (key, q) => fieldSuggest(key)(q)}
           onRowDoubleClick={setDetail}
           loading={loading}
+          emptyText="Không có dữ liệu phù hợp"
+          emptyAction={(
+            <button type="button" className="btn" onClick={() => runSearch()}>
+              {Icons.refresh} Tìm kiếm lại
+            </button>
+          )}
+          cardKeys={kind === 'prices'
+            ? ['name', 'registration', 'unit_price', 'province', 'winner']
+            : ['name', 'tender_no', 'buyer', 'bid_price', 'close_date']}
           minWidth={embedded ? 720 : (kind === 'prices' ? 1400 : 1100)}
           trailing={{
             label: 'Nguồn',

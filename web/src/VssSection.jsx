@@ -3,15 +3,16 @@ import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, matchesYe
 import { cloudMeta, cloudVssSearch, supabaseConfigured } from './supabaseCloud'
 import { useAuth } from './auth'
 import {
-  ColumnPicker, DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons,
+  ColumnPicker, DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons, MultiSelectField,
   IngredientText, LoadingOverlay, Pagination, SuggestField, TableToolbar, UpdatedNote, ViewModeSelect,
   applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters, useSectionMeta,
   useSelection, useLoadProgress, useTt20, } from './components'
 import { ingredientAllowedAtGrade } from './tt20'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
-import { VssMetrics } from './metrics'
+import { VssMetrics, applyMetricQuick } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
+const METRICS_CAP = 2000
 
 const toNum = (v) => {
   if (v == null || v === '') return ''
@@ -119,6 +120,9 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const [refreshKey, setRefreshKey] = useState(0)
   const [prefsReady, setPrefsReady] = useState(false)
   const [loadPct, setLoadPct] = useState(null)
+  const [metricsSample, setMetricsSample] = useState([])
+  const [metricActiveId, setMetricActiveId] = useState(null)
+  const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc BHYT VSS', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
@@ -195,11 +199,15 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           items = sortByDateDesc(items, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd'])
           setData({ total: items.length, items, page: 0, size: items.length || size })
           setPage(0)
+          setMetricsSample(items.slice(0, METRICS_CAP))
         } else {
           const res = await searchFn(p, size)
           if (stale()) return
           setData(res)
           setPage(p)
+          fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP }).then((all) => {
+            if (!stale()) setMetricsSample(all)
+          }).catch(() => { if (!stale()) setMetricsSample(res.items || []) })
         }
         return
       }
@@ -259,10 +267,32 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     } catch { return [] }
   }, [localMode, mergedFilters])
 
-  const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
+  const rows = useMemo(() => {
+    let list = applyColumnFilters(data.items, cols, columnFilters)
+    list = applyMetricQuick(list, metricQuick, 'vss')
+    return list
+  }, [data.items, cols, columnFilters, metricQuick])
   const rowKey = useCallback((r, i) => `${r.sodk}|${r.ma}|${r.ma_tinh}|${r.quyetdinh}|${r.stt ?? `${page}-${i}`}`, [page])
   const pageSizeNum = resolvePageSize(pageSize)
-  const metricsItems = rows.length ? rows : data.items
+  const metricsItems = metricsSample.length ? metricsSample : (rows.length ? rows : data.items)
+
+  const onMetricFilter = useCallback((patch, id) => {
+    if (metricActiveId === id) {
+      setMetricActiveId(null)
+      setMetricQuick(null)
+      return
+    }
+    setMetricActiveId(id)
+    if (patch?._quick) {
+      setMetricQuick(patch._quick)
+      return
+    }
+    const { _quick, ...rest } = patch || {}
+    if (!Object.keys(rest).length) return
+    setFilters((f) => ({ ...f, ...rest }))
+    setMetricQuick(null)
+    search(0, undefined, rest)
+  }, [metricActiveId, search])
 
   const fetchAll = useCallback(async () => {
     const searchFn = localMode
@@ -293,14 +323,12 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
   const primaryFilters = (
     <div className="filter-grid cols-5">
-      <Field label="Nhóm thầu">
-        <select value={filters.nhomthau} onChange={(e) => setF('nhomthau', e.target.value)}>
-          <option value="">Tất cả</option>
-          {['N1', 'N2', 'N3', 'N4', 'N5'].map((n) => (
-            <option key={n} value={n}>{n}</option>
-          ))}
-        </select>
-      </Field>
+      <MultiSelectField
+        label="Nhóm thầu"
+        value={filters.nhomthau}
+        onChange={(v) => setF('nhomthau', v)}
+        options={['N1', 'N2', 'N3', 'N4', 'N5']}
+      />
       <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
       <SuggestField label="Hoạt chất" value={filters.hoatchat} onChange={(v) => setF('hoatchat', v)} onSearch={(v) => runSearch({ hoatchat: v })} suggest={fieldSuggest('hoatchat')} />
       <SuggestField label="Số ĐK" value={filters.sodk} onChange={(v) => setF('sodk', v)} onSearch={(v) => runSearch({ sodk: v })} suggest={fieldSuggest('sodk')} />
@@ -312,12 +340,16 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     <div className="filter-grid tight cols-6">
       <Field label="HĐ từ ngày"><input type="date" value={filters.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
       <Field label="HĐ đến ngày"><input type="date" value={filters.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
-      <Field label="Năm" hint="hiệu lực HĐ">
-        <input value={filters.nam} onChange={(e) => setF('nam', e.target.value)} onKeyDown={onEnter} placeholder="2024 · 2025 · 2026" inputMode="numeric" />
-      </Field>
+      <MultiSelectField
+        label="Năm hiệu lực"
+        value={filters.nam}
+        onChange={(v) => setF('nam', v)}
+        options={['2024', '2025', '2026']}
+        placeholder="Chọn năm…"
+      />
       <SuggestField label="Đường dùng" value={filters.duongdung} onChange={(v) => setF('duongdung', v)} onSearch={(v) => runSearch({ duongdung: v })} suggest={fieldSuggest('duongdung')} />
-      <SuggestField label="Mã tỉnh" value={filters.ma_tinh} onChange={(v) => setF('ma_tinh', v)} onSearch={(v) => runSearch({ ma_tinh: v })} suggest={fieldSuggest('ma_tinh')} />
-      <SuggestField label="Nước SX" value={filters.nuocsx} onChange={(v) => setF('nuocsx', v)} onSearch={(v) => runSearch({ nuocsx: v })} suggest={fieldSuggest('nuocsx')} />
+      <MultiSelectField label="Mã tỉnh" value={filters.ma_tinh} onChange={(v) => setF('ma_tinh', v)} suggest={fieldSuggest('ma_tinh')} placeholder="Chọn tỉnh…" />
+      <MultiSelectField label="Nước SX" value={filters.nuocsx} onChange={(v) => setF('nuocsx', v)} suggest={fieldSuggest('nuocsx')} placeholder="Chọn nước…" />
     </div>
   )
 
@@ -390,7 +422,9 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
                 <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
               </div>
             </div>
-            {!embedded && <VssMetrics items={metricsItems} />}
+            {!embedded && (
+              <VssMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} />
+            )}
           </div>
         </div>
 
@@ -406,6 +440,9 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           activeColumnFilters={activeCF}
           onClearColumnFilters={() => { setColumnFilters({}); search(0, {}) }}
         >
+          <button type="button" className="btn ghost sm" onClick={() => runSearch()} title="Quét lại dữ liệu">
+            {Icons.refresh} Quét lại
+          </button>
           <ViewModeSelect value={viewMode} onChange={(v) => { setViewMode(v); if (v === 'custom') setColPicker(true) }} />
           {viewMode === 'custom' && (
             <button type="button" className="btn ghost sm" onClick={() => setColPicker((v) => !v)}>{Icons.columns} Cột</button>
@@ -432,6 +469,12 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           onRowDoubleClick={setDetail}
           loading={loading}
           emptyText="Không có dữ liệu — import Excel hoặc crawl VSS trong mục Quản trị"
+          emptyAction={(
+            <button type="button" className="btn" onClick={() => runSearch()}>
+              {Icons.refresh} Tìm kiếm lại
+            </button>
+          )}
+          cardKeys={['hoatchat', 'sodk', 'ten', 'thanhtien', 'ten_tinh']}
           minWidth={embedded ? 720 : 1300}
         />
         <Pagination
