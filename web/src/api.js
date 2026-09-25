@@ -76,6 +76,30 @@ export function containsWords(haystack, needle) {
   return n.split(/\s+/).every((w) => h.includes(w))
 }
 
+/** string | string[] | "a|b" → trimmed non-empty list */
+export function asFilterList(v) {
+  if (Array.isArray(v)) return v.map((x) => String(x ?? '').trim()).filter(Boolean)
+  if (v == null || v === '') return []
+  return String(v).split(/[|,;]+/).map((s) => s.trim()).filter(Boolean)
+}
+
+/** Match nhóm thầu / group_name tokens (N3, 3, Nhóm 3) without false-matching N13. */
+export function matchesGroupToken(raw, needles) {
+  const list = asFilterList(needles)
+  if (!list.length) return true
+  const g = String(raw ?? '').trim()
+  if (!g) return false
+  const gf = fold(g)
+  const m = gf.match(/(?:^|[^\d])(?:n|nhom|nhóm)?\s*([1-5])(?:[^\d]|$)/i) || gf.match(/^([1-5])$/)
+  const bucket = m ? m[1] : null
+  return list.some((n) => {
+    const s = String(n).trim()
+    const nm = s.match(/^(?:n|nhom|nhóm)\s*([1-5])$/i) || s.match(/^([1-5])$/)
+    if (nm) return bucket === nm[1]
+    return gf === fold(s) || gf.startsWith(fold(s))
+  })
+}
+
 /** Extract 20xx year from a date-ish string or nam field. */
 export function extractYear(row, keys = ['nam', 'congbo', 'tungay', 'tungay_hd', 'denngay_hd', 'ngayCap', 'ngayHetHan', 'published', 'created_date']) {
   if (row?.nam != null && String(row.nam).trim() !== '') {
@@ -95,9 +119,7 @@ export function extractYear(row, keys = ['nam', 'congbo', 'tungay', 'tungay_hd',
  * "Năm X" matches contracts effective in calendar year X (overlap tungay_hd…denngay_hd) or announced in X.
  * Does not use created_date alone.
  */
-export function matchesYear(row, nam) {
-  const y = String(nam ?? '').trim()
-  if (!y || !/^20\d{2}$/.test(y)) return true
+function matchesOneYear(row, y) {
   if (String(row?.nam ?? '').trim() === y) return true
   const fields = [row?.tungay_hd, row?.denngay_hd, row?.congbo, row?.tungay, row?.denngay]
   if (fields.some((v) => String(v ?? '').includes(y))) return true
@@ -105,6 +127,12 @@ export function matchesYear(row, nam) {
   const end = String(row?.denngay_hd || row?.denngay || '').slice(0, 10)
   if (start.length >= 4 && end.length >= 4 && start <= `${y}-12-31` && end >= `${y}-01-01`) return true
   return false
+}
+
+export function matchesYear(row, nam) {
+  const years = asFilterList(nam).filter((y) => /^20\d{2}$/.test(y))
+  if (!years.length) return true
+  return years.some((y) => matchesOneYear(row, y))
 }
 
 /** Sort rows by the first non-empty date-like field, newest first. */
@@ -121,16 +149,20 @@ export function sortByDateDesc(items, keys) {
  * spec: [{ value, keys: ['field', ...] }] — each non-empty value must match at least one key.
  */
 export function applyClientFilters(items, spec) {
-  const active = spec.filter((s) => s && String(s.value ?? '').trim() !== '')
+  const active = spec.filter((s) => s && asFilterList(s.value).length > 0)
   if (!active.length) return items
   return items.filter((row) =>
-    active.every(({ value, keys, exact }) =>
-      keys.some((k) => {
-        const v = row[k]
-        if (v == null) return false
-        return exact ? fold(v).trim() === fold(value).trim() : containsWords(v, value)
-      }),
-    ),
+    active.every(({ value, keys, exact, group }) => {
+      const needles = asFilterList(value)
+      return needles.some((needle) =>
+        keys.some((k) => {
+          const v = row[k]
+          if (v == null) return false
+          if (group || k === 'nhomthau' || k === 'group_name') return matchesGroupToken(v, needle)
+          return exact ? fold(v).trim() === fold(needle).trim() : containsWords(v, needle)
+        }),
+      )
+    }),
   )
 }
 

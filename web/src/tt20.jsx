@@ -203,20 +203,35 @@ export function IngredientLink({ text, group }) {
 }
 
 /** Render an ingredient cell, linking any tokens found in the TT20 catalog. */
-export function IngredientText({ text }) {
+export function IngredientText({ text, truncateAt = 120 }) {
   const { index } = useTt20()
   const segs = useMemo(() => tokenizeIngredients(text), [text])
+  const [open, setOpen] = useState(false)
   if (!text) return null
-  if (!index) return <>{text}</>
-  return (
+  const raw = String(text)
+  const needsCut = raw.length > truncateAt
+  const shown = !needsCut || open ? raw : `${raw.slice(0, truncateAt).trimEnd()}…`
+  const body = !index ? (
+    <>{shown}</>
+  ) : (
     <>
-      {segs.map((s, i) => {
+      {(needsCut && !open ? tokenizeIngredients(shown) : segs).map((s, i) => {
         if (s.sep) return <span key={i}>{s.text}</span>
         const group = matchToken(index, s.text)
         if (!group) return <span key={i}>{s.text}</span>
         return <IngredientLink key={i} text={s.text} group={group} />
       })}
     </>
+  )
+  if (!needsCut) return body
+  return (
+    <span className={`truncate-text${open ? ' open' : ''}`}>
+      {body}
+      {' '}
+      <button type="button" className="truncate-more" onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}>
+        {open ? 'thu gọn' : 'xem thêm'}
+      </button>
+    </span>
   )
 }
 

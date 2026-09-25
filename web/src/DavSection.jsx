@@ -6,7 +6,8 @@ import {
   ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, FilterModal, HospitalGradeField,
   Icons, IngredientText, LoadingOverlay, Pagination, SearchSuggestBar, SuggestField, TableToolbar, UpdatedNote,
   ViewModeSelect, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters,
-  useSectionMeta, useSelection, useLoadProgress, useTt20, MultiSelectField, } from './components'
+  useSectionMeta, useSelection, useLoadProgress, useTt20, MultiSelectField, DAV_METRICS_CAP,
+} from './components'
 import { TagBadge, TagFilterDropdown, useTagFilterState } from './TagFilterDropdown'
 import { enrichRowTag } from './tagConfig'
 import { ingredientAllowedAtGrade } from './tt20'
@@ -14,26 +15,26 @@ import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
 import { DavMetrics, applyMetricQuick } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
-const METRICS_CAP = 2000
+const METRICS_CAP = DAV_METRICS_CAP
 
 const ALL_COLS = [
   { key: 'tagId', label: 'Trạng thái', filter: 'select', nowrap: true, width: 52, align: 'center' },
   { key: 'soDangKy', label: 'Số đăng ký', mono: true, nowrap: true },
   { key: 'ngayCap', label: 'Ngày cấp', text: (r) => fmtDate(r.ngayCap), nowrap: true },
-  { key: 'tenThuoc', label: 'Tên thuốc', width: 180 },
+  { key: 'tenThuoc', label: 'Tên thuốc', width: 180, truncateAt: 80 },
   { key: 'hoatChat', label: 'Hoạt chất', width: 220 },
-  { key: 'hamLuong', label: 'Hàm lượng', width: 120 },
-  { key: 'dangBaoChe', label: 'Dạng bào chế' },
-  { key: 'dongGoi', label: 'Quy cách đóng gói' },
+  { key: 'hamLuong', label: 'Hàm lượng', width: 120, truncateAt: 72 },
+  { key: 'dangBaoChe', label: 'Dạng bào chế', truncateAt: 64 },
+  { key: 'dongGoi', label: 'Quy cách đóng gói', truncateAt: 72 },
   { key: 'hanDung', label: 'Hạn dùng', align: 'right' },
   { key: 'soQuyetDinh', label: 'Số quyết định', mono: true },
   { key: 'ngayHetHan', label: 'Ngày hết hạn', text: (r) => fmtDate(r.ngayHetHan), nowrap: true },
-  { key: 'ctySanXuat', label: 'Công ty sản xuất', width: 200 },
-  { key: 'diaChiSanXuat', label: 'Địa chỉ SX' },
+  { key: 'ctySanXuat', label: 'Công ty sản xuất', width: 200, truncateAt: 80 },
+  { key: 'diaChiSanXuat', label: 'Địa chỉ SX', truncateAt: 80 },
   { key: 'nuocSanXuat', label: 'Nước SX', filter: 'select' },
-  { key: 'ctyDangKy', label: 'Công ty đăng ký', width: 180 },
+  { key: 'ctyDangKy', label: 'Công ty đăng ký', width: 180, truncateAt: 80 },
   { key: 'nuocDangKy', label: 'Nước ĐK', filter: 'select' },
-  { key: 'tieuChuan', label: 'Tiêu chuẩn' },
+  { key: 'tieuChuan', label: 'Tiêu chuẩn', truncateAt: 64 },
   { key: 'kyCapNam', label: 'Kỳ cấp (năm)', align: 'right', filter: 'select' },
 ]
 
@@ -84,6 +85,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const [prefsReady, setPrefsReady] = useState(false)
   const [loadPct, setLoadPct] = useState(null)
   const [metricsSample, setMetricsSample] = useState([])
+  const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricActiveId, setMetricActiveId] = useState(null)
   const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc thuốc DAV', loadPct)
@@ -201,12 +203,15 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
           setData({ ...res, items })
           setPage(p)
-          // Background metrics sample (not page size)
+          // Background metrics — DAV lấy đủ (không cắt 2000)
+          setMetricsLoading(true)
           fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP }).then((all) => {
             if (stale()) return
             setMetricsSample(all.map(enrichRowTag))
           }).catch(() => {
             if (!stale()) setMetricsSample(items)
+          }).finally(() => {
+            if (!stale()) setMetricsLoading(false)
           })
         }
         return
@@ -366,6 +371,8 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     }
     if (patch?._quick) {
       setMetricQuick(patch._quick)
+      setMetricsLoading(true)
+      window.setTimeout(() => setMetricsLoading(false), 180)
       return
     }
     const { _tag, _quick, ...rest } = patch || {}
@@ -502,6 +509,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
                 total={data.total}
                 activeId={metricActiveId}
                 onFilter={onMetricFilter}
+                loading={metricsLoading || loading}
               />
             )}
           </div>

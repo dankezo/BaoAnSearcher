@@ -11,6 +11,73 @@ function words(q) {
   return fold(q || '').trim().split(/\s+/).filter(Boolean)
 }
 
+/** string | string[] | "a|b" → trimmed non-empty list */
+function asList(v) {
+  if (Array.isArray(v)) return v.map((x) => String(x ?? '').trim()).filter(Boolean)
+  if (v == null || v === '') return []
+  return String(v).split(/[|,;]+/).map((s) => s.trim()).filter(Boolean)
+}
+
+/** Expand N3 / 3 / Nhóm 3 → variants so multi-select does not false-match. */
+function expandGroupTokens(v) {
+  const out = []
+  for (const raw of asList(v)) {
+    const s = String(raw).trim()
+    if (!s) continue
+    out.push(s)
+    const m = s.match(/^(?:n|nhom|nhóm)\s*([1-5])$/i) || s.match(/^([1-5])$/)
+    if (m) {
+      const n = m[1]
+      out.push(`N${n}`, `n${n}`, n, `Nhóm ${n}`, `nhom ${n}`, `NHOM ${n}`)
+    }
+  }
+  return [...new Set(out)]
+}
+
+function likeAny(where, args, col, v) {
+  const vals = col === 'nhomthau' || col === 'group_name' ? expandGroupTokens(v) : asList(v)
+  if (!vals.length) return
+  // Prefer prefix/exact-ish for group codes (avoid LIKE '%3%' matching N13 / N30)
+  if (col === 'nhomthau' || col === 'group_name') {
+    const parts = []
+    for (const x of vals) {
+      if (/^[1-5]$/.test(x)) {
+        // bare digit: exact only (LIKE '3%' would false-match)
+        parts.push(`${col} = ?`)
+        args.push(x)
+      } else {
+        parts.push(`${col} = ? OR ${col} LIKE ?`)
+        args.push(x, `${x}%`)
+      }
+    }
+    where.push(`(${parts.join(' OR ')})`)
+    return
+  }
+  if (vals.length === 1) {
+    where.push(`${col} LIKE ?`)
+    args.push(`%${vals[0]}%`)
+    return
+  }
+  where.push(`(${vals.map(() => `${col} LIKE ?`).join(' OR ')})`)
+  for (const x of vals) args.push(`%${x}%`)
+}
+
+function eqAny(where, args, col, v, parseIntVal = false) {
+  const vals = asList(v)
+  if (!vals.length) return
+  const parsed = parseIntVal
+    ? vals.map((x) => parseInt(x, 10)).filter((n) => !Number.isNaN(n))
+    : vals
+  if (!parsed.length) return
+  if (parsed.length === 1) {
+    where.push(`${col} = ?`)
+    args.push(parsed[0])
+    return
+  }
+  where.push(`${col} IN (${parsed.map(() => '?').join(',')})`)
+  args.push(...parsed)
+}
+
 async function searchVss(db, filters, page, size) {
   const f = filters || {}
   const where = ['1=1']
@@ -20,26 +87,15 @@ async function searchVss(db, filters, page, size) {
     where.push('search LIKE ?')
     args.push(`%${w}%`)
   }
-  const like = (col, v) => {
-    if (v == null || String(v).trim() === '') return
-    where.push(`${col} LIKE ?`)
-    args.push(`%${String(v).trim()}%`)
-  }
-  like('hoatchat', f.hoatchat)
-  like('sodk', f.sodk)
-  like('loai', f.loai)
-  like('nhomthau', f.nhomthau)
-  like('loai_thau', f.loai_thau)
-  like('duongdung', f.duongdung)
-  like('ma_tinh', f.ma_tinh)
-  like('nuocsx', f.nuocsx)
-  if (f.nam != null && String(f.nam).trim() !== '') {
-    const n = parseInt(String(f.nam).trim(), 10)
-    if (!Number.isNaN(n)) {
-      where.push('nam = ?')
-      args.push(n)
-    }
-  }
+  likeAny(where, args, 'hoatchat', f.hoatchat)
+  likeAny(where, args, 'sodk', f.sodk)
+  likeAny(where, args, 'loai', f.loai)
+  likeAny(where, args, 'nhomthau', f.nhomthau)
+  likeAny(where, args, 'loai_thau', f.loai_thau)
+  likeAny(where, args, 'duongdung', f.duongdung)
+  likeAny(where, args, 'ma_tinh', f.ma_tinh)
+  likeAny(where, args, 'nuocsx', f.nuocsx)
+  eqAny(where, args, 'nam', f.nam, true)
   if (f.tuNgay) {
     where.push('(tungay_hd IS NULL OR tungay_hd >= ?)')
     args.push(String(f.tuNgay))
@@ -71,29 +127,23 @@ async function searchDav(db, filters, page, size) {
     where.push('search LIKE ?')
     args.push(`%${w}%`)
   }
-  const like = (col, v) => {
-    if (!v || !String(v).trim()) return
-    where.push(`${col} LIKE ?`)
-    args.push(`%${String(v).trim()}%`)
-  }
-  like('ten_thuoc', f.tenThuoc)
-  like('so_dang_ky', f.soDangKy)
-  like('hoat_chat', f.hoatChat)
-  like('dang_bao_che', f.dangBaoChe)
-  like('cty_san_xuat', f.sanXuat)
-  like('cty_dang_ky', f.dangKy)
-  like('nuoc_san_xuat', f.nuocSanXuat)
+  likeAny(where, args, 'ten_thuoc', f.tenThuoc)
+  likeAny(where, args, 'so_dang_ky', f.soDangKy)
+  likeAny(where, args, 'hoat_chat', f.hoatChat)
+  likeAny(where, args, 'dang_bao_che', f.dangBaoChe)
+  likeAny(where, args, 'cty_san_xuat', f.sanXuat)
+  likeAny(where, args, 'cty_dang_ky', f.dangKy)
+  likeAny(where, args, 'nuoc_san_xuat', f.nuocSanXuat)
   const rawTags = f.tags ?? f.selectedTags
   if (rawTags != null) {
-    const tags = (Array.isArray(rawTags) ? rawTags : String(rawTags).split(','))
-      .map((t) => String(t).trim())
-      .filter(Boolean)
+    const tags = asList(rawTags)
     if (tags.length === 0) {
       return { total: 0, page, size, items: [] }
     }
     where.push(`tag_id IN (${tags.map(() => '?').join(',')})`)
     args.push(...tags)
   }
+
   const wsql = where.join(' AND ')
   const countRs = await db.execute({
     sql: `SELECT COUNT(*) AS c FROM dav_drugs WHERE ${wsql}`,
@@ -117,6 +167,20 @@ async function searchMsc(db, kind, filters, page, size) {
     where.push('search LIKE ?')
     args.push(`%${w}%`)
   }
+  const cols = [
+    ['name', f.name],
+    ['ingredient', f.ingredient],
+    ['registration', f.registration],
+    ['manufacturer', f.manufacturer],
+    ['province', f.province],
+    ['tender_no', f.tender_no],
+    ['buyer', f.buyer],
+    ['winner', f.winner],
+    ['group_name', f.group_name],
+    ['medicine_type', f.medicine_type],
+  ]
+  for (const [col, v] of cols) likeAny(where, args, col, v)
+
   const wsql = where.join(' AND ')
   const countRs = await db.execute({
     sql: `SELECT COUNT(*) AS c FROM ${table} WHERE ${wsql}`,
@@ -150,13 +214,9 @@ export default async function handler(req, res) {
     const db = getTurso()
     let payload
     if (kind === 'dav') payload = await searchDav(db, body.filters, page, size)
-    else if (kind === 'msc' || kind === 'msc_prices' || kind === 'prices') {
-      payload = await searchMsc(db, 'prices', body.filters, page, size)
-    } else if (kind === 'msc_tenders' || kind === 'tenders') {
-      payload = await searchMsc(db, 'tenders', body.filters, page, size)
-    } else {
-      payload = await searchVss(db, body.filters, page, size)
-    }
+    else if (kind === 'msc_prices' || kind === 'msc_tenders' || kind === 'prices' || kind === 'tenders') {
+      payload = await searchMsc(db, kind, body.filters, page, size)
+    } else payload = await searchVss(db, body.filters, page, size)
     payload = { ...payload, items: mapTursoItems(payload.items) }
     return json(res, 200, payload)
   } catch (e) {

@@ -9,10 +9,10 @@ import {
   useSelection, useLoadProgress, useTt20, } from './components'
 import { ingredientAllowedAtGrade } from './tt20'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
-import { VssMetrics, applyMetricQuick } from './metrics'
+import { VssMetrics, applyMetricQuick, VSS_METRICS_YEARS } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
-const METRICS_CAP = 2000
+const METRICS_CAP = 80_000
 
 const toNum = (v) => {
   if (v == null || v === '') return ''
@@ -27,28 +27,28 @@ const fmtNum = (v) => {
 const ALL_COLS = [
   { key: 'hoatchat', label: 'Tên hoạt chất', width: 200, render: (v) => <IngredientText text={v} /> },
   { key: 'sodk', label: 'Số ĐK', mono: true, nowrap: true },
-  { key: 'ten', label: 'Tên thuốc', width: 160 },
+  { key: 'ten', label: 'Tên thuốc', width: 160, truncateAt: 72 },
   { key: 'duongdung', label: 'Đường dùng', filter: 'select' },
-  { key: 'hamluong', label: 'Hàm lượng' },
+  { key: 'hamluong', label: 'Hàm lượng', truncateAt: 64 },
   { key: 'donvitinh', label: 'ĐVT', filter: 'select' },
   { key: 'soluong', label: 'Số lượng', align: 'right', mono: true, text: (r) => toNum(r.soluong), render: (v) => fmtNum(v) },
   { key: 'gia', label: 'Giá', align: 'right', mono: true, text: (r) => toNum(r.gia), render: (v) => fmtNum(v) },
   { key: 'thanhtien', label: 'Thành tiền', align: 'right', mono: true, text: (r) => toNum(r.thanhtien), render: (v) => fmtNum(v) },
   { key: 'nhomthau', label: 'Nhóm thầu', filter: 'select', align: 'center' },
-  { key: 'nhasx', label: 'Nhà SX', width: 170 },
+  { key: 'nhasx', label: 'Nhà SX', width: 170, truncateAt: 72 },
   { key: 'nuocsx', label: 'Nước SX', filter: 'select' },
   { key: 'ma_tinh', label: 'Mã tỉnh', mono: true, filter: 'select' },
   { key: 'ma_cskcb', label: 'Mã CSKCB', mono: true },
   { key: 'tungay_hd', label: 'Từ ngày HĐ', nowrap: true, text: (r) => fmtDate(r.tungay_hd), render: (v) => fmtDate(v) },
   { key: 'denngay_hd', label: 'Đến ngày HĐ', nowrap: true, text: (r) => fmtDate(r.denngay_hd), render: (v) => fmtDate(v) },
   { key: 'loai_thau', label: 'Loại thầu', filter: 'select' },
-  { key: 'dangbaoche', label: 'Dạng bào chế' },
-  { key: 'donggoi', label: 'Đóng gói' },
-  { key: 'tennhathau', label: 'Nhà thầu', width: 170 },
+  { key: 'dangbaoche', label: 'Dạng bào chế', truncateAt: 64 },
+  { key: 'donggoi', label: 'Đóng gói', truncateAt: 72 },
+  { key: 'tennhathau', label: 'Nhà thầu', width: 170, truncateAt: 72 },
   { key: 'ten_tinh', label: 'Tỉnh', filter: 'select' },
-  { key: 'ten_cskcb', label: 'CSKCB' },
+  { key: 'ten_cskcb', label: 'CSKCB', truncateAt: 80 },
   { key: 'quyetdinh', label: 'Quyết định', mono: true },
-  { key: 'goithau', label: 'Gói thầu' },
+  { key: 'goithau', label: 'Gói thầu', truncateAt: 80 },
   { key: 'congbo', label: 'Công bố', nowrap: true, text: (r) => fmtDate(r.congbo), render: (v) => fmtDate(v) },
 ]
 
@@ -73,8 +73,8 @@ const SERVER_MAP = {
 }
 
 const EMPTY_FILTERS = {
-  q: '', loai_thau: '', loai: 'Tân dược', nhomthau: '', hoatchat: '', sodk: '',
-  tuNgay: '', denNgay: '', nam: '', duongdung: '', ma_tinh: '', nuocsx: '', hangBenhVien: '',
+  q: '', loai_thau: '', loai: 'Tân dược', nhomthau: [], hoatchat: '', sodk: '',
+  tuNgay: '', denNgay: '', nam: VSS_METRICS_YEARS.map(String), duongdung: '', ma_tinh: [], nuocsx: [], hangBenhVien: '',
 }
 
 function filterStatic(items, f, tt20Index) {
@@ -121,6 +121,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const [prefsReady, setPrefsReady] = useState(false)
   const [loadPct, setLoadPct] = useState(null)
   const [metricsSample, setMetricsSample] = useState([])
+  const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricActiveId, setMetricActiveId] = useState(null)
   const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc BHYT VSS', loadPct)
@@ -180,6 +181,12 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     setErr('')
     setInfoNote('')
     const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
+    // Metrics luôn nạp 2025–2026 (hoặc năm user đã chọn)
+    const namList = Array.isArray(active.nam) ? active.nam.filter(Boolean) : (active.nam ? [active.nam] : [])
+    const metricsActive = {
+      ...active,
+      nam: namList.length ? namList : VSS_METRICS_YEARS.map(String),
+    }
     try {
       const useRemote = localMode || supabaseConfigured
       if (useRemote) {
@@ -187,6 +194,9 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         const searchFn = localMode
           ? (page, sz) => api.vssSearch({ filters: active, page, size: sz })
           : (page, sz) => cloudVssSearch({ filters: active, page, size: sz })
+        const metricsFn = localMode
+          ? (page, sz) => api.vssSearch({ filters: metricsActive, page, size: sz })
+          : (page, sz) => cloudVssSearch({ filters: metricsActive, page, size: sz })
 
         if (needGrade) {
           const allRaw = await fetchAllPages(searchFn, {
@@ -205,9 +215,11 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           if (stale()) return
           setData(res)
           setPage(p)
-          fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP }).then((all) => {
+          setMetricsLoading(true)
+          fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP }).then((all) => {
             if (!stale()) setMetricsSample(all)
           }).catch(() => { if (!stale()) setMetricsSample(res.items || []) })
+            .finally(() => { if (!stale()) setMetricsLoading(false) })
         }
         return
       }
@@ -237,7 +249,11 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   }
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
   const detailActive = ['duongdung', 'ma_tinh', 'nuocsx', 'hangBenhVien', 'loai_thau', 'nhomthau', 'hoatchat', 'sodk', 'tuNgay', 'denNgay', 'nam']
-    .filter((k) => String(filters[k] ?? '').trim()).length
+    .filter((k) => {
+      const v = filters[k]
+      if (Array.isArray(v)) return v.length > 0
+      return String(v ?? '').trim() !== ''
+    }).length
 
   const fieldSuggest = useCallback((fieldKey) => async (q) => {
     const needle = String(q || '').trim()
@@ -285,6 +301,8 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     setMetricActiveId(id)
     if (patch?._quick) {
       setMetricQuick(patch._quick)
+      setMetricsLoading(true)
+      window.setTimeout(() => setMetricsLoading(false), 180)
       return
     }
     const { _quick, ...rest } = patch || {}
@@ -356,24 +374,28 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   /** In multi-view: everything except keyword goes into the modal. */
   const modalFilters = (
     <div className="filter-grid">
-      <Field label="Nhóm thầu">
-        <select value={filters.nhomthau} onChange={(e) => setF('nhomthau', e.target.value)}>
-          <option value="">Tất cả</option>
-          {['N1', 'N2', 'N3', 'N4', 'N5'].map((n) => (
-            <option key={n} value={n}>{n}</option>
-          ))}
-        </select>
-      </Field>
+      <MultiSelectField
+        label="Nhóm thầu"
+        value={filters.nhomthau}
+        onChange={(v) => setF('nhomthau', v)}
+        options={['N1', 'N2', 'N3', 'N4', 'N5']}
+      />
       <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
       <SuggestField label="Hoạt chất" value={filters.hoatchat} onChange={(v) => setF('hoatchat', v)} onSearch={(v) => runSearch({ hoatchat: v })} suggest={fieldSuggest('hoatchat')} />
       <SuggestField label="Số ĐK" value={filters.sodk} onChange={(v) => setF('sodk', v)} onSearch={(v) => runSearch({ sodk: v })} suggest={fieldSuggest('sodk')} />
       <SuggestField label="Loại thầu" value={filters.loai_thau} onChange={(v) => setF('loai_thau', v)} onSearch={(v) => runSearch({ loai_thau: v })} suggest={fieldSuggest('loai_thau')} placeholder="vd: thau_tinh" />
       <Field label="HĐ từ ngày"><input type="date" value={filters.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
       <Field label="HĐ đến ngày"><input type="date" value={filters.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
-      <Field label="Năm" hint="hiệu lực HĐ"><input value={filters.nam} onChange={(e) => setF('nam', e.target.value)} onKeyDown={onEnter} placeholder="2024 · 2025 · 2026" inputMode="numeric" /></Field>
+      <MultiSelectField
+        label="Năm hiệu lực"
+        value={filters.nam}
+        onChange={(v) => setF('nam', v)}
+        options={['2024', '2025', '2026']}
+        placeholder="Chọn năm…"
+      />
       <SuggestField label="Đường dùng" value={filters.duongdung} onChange={(v) => setF('duongdung', v)} onSearch={(v) => runSearch({ duongdung: v })} suggest={fieldSuggest('duongdung')} />
-      <SuggestField label="Mã tỉnh" value={filters.ma_tinh} onChange={(v) => setF('ma_tinh', v)} onSearch={(v) => runSearch({ ma_tinh: v })} suggest={fieldSuggest('ma_tinh')} />
-      <SuggestField label="Nước SX" value={filters.nuocsx} onChange={(v) => setF('nuocsx', v)} onSearch={(v) => runSearch({ nuocsx: v })} suggest={fieldSuggest('nuocsx')} />
+      <MultiSelectField label="Mã tỉnh" value={filters.ma_tinh} onChange={(v) => setF('ma_tinh', v)} suggest={fieldSuggest('ma_tinh')} placeholder="Chọn tỉnh…" />
+      <MultiSelectField label="Nước SX" value={filters.nuocsx} onChange={(v) => setF('nuocsx', v)} suggest={fieldSuggest('nuocsx')} placeholder="Chọn nước…" />
     </div>
   )
 
@@ -423,7 +445,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
               </div>
             </div>
             {!embedded && (
-              <VssMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} />
+              <VssMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading || loading} />
             )}
           </div>
         </div>
