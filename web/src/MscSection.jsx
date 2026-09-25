@@ -180,13 +180,6 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         if (stale()) return
         setData(res)
         setPage(p)
-        if (embedded) return
-        setMetricsLoading(true)
-        fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP, shouldCancel: stale }).then((all) => {
-          if (stale()) return
-          setMetricsSample(all)
-        }).catch(() => { if (!stale()) setMetricsSample(res.items || []) })
-          .finally(() => { if (!stale()) setMetricsLoading(false) })
         return
       }
       setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
@@ -202,11 +195,27 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     }
   }, [kind, localMode, mergedFilters, embedded])
 
+  // Metrics fixed from full kind dataset — independent of table filters
+  useEffect(() => {
+    if (!prefsReady || embedded) return undefined
+    if (!(localMode || supabaseConfigured)) return undefined
+    let cancelled = false
+    setMetricsSample(null)
+    setMetricsLoading(true)
+    const metricsFn = localMode
+      ? (page, sz) => api.mscSearch({ kind, filters: {}, page, size: sz })
+      : (page, sz) => cloudMscSearch({ kind, filters: {}, page, size: sz })
+    fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: () => cancelled })
+      .then((all) => { if (!cancelled) setMetricsSample(all) })
+      .catch(() => { if (!cancelled) setMetricsSample([]) })
+      .finally(() => { if (!cancelled) setMetricsLoading(false) })
+    return () => { cancelled = true }
+  }, [prefsReady, kind, localMode, embedded])
+
   useEffect(() => {
     if (!prefsReady) return
     sel.clear()
     setColumnFilters({})
-    setMetricsSample(null)
     setMetricActiveId(null)
     setMetricQuick(null)
     search(0, {})
@@ -358,8 +367,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
               </div>
             </div>
             {!embedded && (kind === 'prices'
-              ? <MscPriceMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading || loading} />
-              : <MscTenderMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading || loading} />)}
+              ? <MscPriceMetrics items={metricsItems} total={metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />
+              : <MscTenderMetrics items={metricsItems} total={metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />)}
           </div>
         </div>
 

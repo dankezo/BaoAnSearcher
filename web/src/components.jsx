@@ -520,18 +520,23 @@ export function SuggestInput({
 export const PaneOverlayContext = createContext(null)
 
 export function FilterModal({ open, title = 'Bộ lọc chi tiết', onClose, onApply, children }) {
-  const host = useContext(PaneOverlayContext)
   const dialogRef = useRef(null)
   useEffect(() => {
     if (!open) return undefined
     const previous = document.activeElement
     dialogRef.current?.focus()
-    return () => { if (previous?.isConnected) previous.focus() }
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      if (previous?.isConnected) previous.focus()
+      document.body.style.overflow = prev
+    }
   }, [open])
   if (!open) return null
+  // Always portal to body — split-pane containment made overlays look transparent.
   return createPortal(
     <div className="filter-modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
-      <div className="filter-modal" role="dialog" aria-modal={host ? undefined : true} aria-label={title} tabIndex={-1} ref={dialogRef}
+      <div className="filter-modal" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={dialogRef}
         onKeyDown={(e) => {
           if (e.key === 'Escape') { e.stopPropagation(); onClose?.() }
           if (e.key !== 'Tab') return
@@ -551,7 +556,8 @@ export function FilterModal({ open, title = 'Bộ lọc chi tiết', onClose, on
           <button type="button" className="btn" onClick={() => { onApply?.(); onClose?.() }}>{I.search} Áp dụng</button>
         </div>
       </div>
-    </div>, host || document.body
+    </div>,
+    document.body,
   )
 }
 
@@ -833,10 +839,10 @@ export function Pagination({
 
 /** Resolve UI page-size choice → numeric size for API. */
 export const PAGE_SIZE_FULL_CHUNK = 500
-/** Soft cap for non-DAV metrics samples (year-scoped). */
+/** Soft cap for non-DAV metrics samples. */
 export const PAGE_SIZE_FULL_CAP = 8000
-/** DAV must load the full filtered set for metrics. */
-export const DAV_METRICS_CAP = Infinity
+/** DAV metrics load ceiling (full catalog, capped for safety). */
+export const DAV_METRICS_CAP = 100_000
 export function resolvePageSize(choice) {
   if (choice === 'full' || choice === 0) return 100 // legacy full → safe default
   const n = Number(choice)
@@ -911,7 +917,8 @@ export function Modal({ open, onClose, title, subtitle, children, footer, width 
     }
   }, [open, onClose])
   if (!open) return null
-  return (
+  // Portal to body so split-pane `contain` / isolation cannot make the dialog look transparent.
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
       <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: width }}>
         <div className="modal-head">
@@ -924,7 +931,8 @@ export function Modal({ open, onClose, title, subtitle, children, footer, width 
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

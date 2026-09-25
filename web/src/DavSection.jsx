@@ -196,7 +196,6 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
           setData({ total: items.length, items, page: 0, size: items.length || size })
           setPage(0)
-          setMetricsSample(items.slice(0, METRICS_CAP))
         } else {
           const res = await searchFn(p, size)
           if (stale()) return
@@ -204,17 +203,6 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
           items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
           setData({ ...res, items })
           setPage(p)
-          if (embedded) return
-          // Background metrics — DAV lấy đủ (không cắt 2000)
-          setMetricsLoading(true)
-          fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP, shouldCancel: stale }).then((all) => {
-            if (stale()) return
-            setMetricsSample(all.map(enrichRowTag))
-          }).catch(() => {
-            if (!stale()) setMetricsSample(items)
-          }).finally(() => {
-            if (!stale()) setMetricsLoading(false)
-          })
         }
         return
       }
@@ -230,6 +218,25 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
       }
     }
   }, [localMode, mergedFilters, tt20Index, embedded])
+
+  // Metrics: fixed full catalog, load once — không theo filter bảng
+  useEffect(() => {
+    if (!prefsReady || embedded) return undefined
+    if (!(localMode || supabaseConfigured)) return undefined
+    let cancelled = false
+    setMetricsLoading(true)
+    const metricsFn = localMode
+      ? (page, sz) => api.davSearch({ filters: {}, page, size: sz })
+      : (page, sz) => cloudDavSearch({ filters: {}, page, size: sz })
+    fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: () => cancelled })
+      .then((all) => {
+        if (cancelled) return
+        setMetricsSample(all.map(enrichRowTag))
+      })
+      .catch(() => { if (!cancelled) setMetricsSample([]) })
+      .finally(() => { if (!cancelled) setMetricsLoading(false) })
+    return () => { cancelled = true }
+  }, [prefsReady, localMode, embedded])
 
   // Initial load + pageSize only — status ticks never auto-search
   useEffect(() => {
@@ -508,10 +515,10 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
             {!embedded && (
               <DavMetrics
                 items={metricsItems}
-                total={data.total}
+                total={metricsSample?.length ?? data.total}
                 activeId={metricActiveId}
                 onFilter={onMetricFilter}
-                loading={metricsLoading || loading}
+                loading={metricsLoading}
               />
             )}
           </div>

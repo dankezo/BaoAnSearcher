@@ -282,20 +282,15 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
 }
 .compound-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-}
-@media (min-width: 1600px) {
-  .compound-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
 }
 .compound-card {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 8px;
-  min-height: 148px;
+  gap: 6px;
+  min-height: 0;
   padding: 10px 12px;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -422,6 +417,11 @@ code { font-family: var(--mono); font-size: .85em; background: var(--surface-3);
   }
   .compound-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 560px) {
+  .compound-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 @media (max-width: 640px) {
@@ -1160,9 +1160,23 @@ table.data a.sdk { font-family: var(--mono); font-size: .92em; font-weight: 500;
 .modal {
   width: 100%; max-height: min(88vh, 900px);
   display: flex; flex-direction: column;
-  background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-3);
+  background: #fff; background: var(--surface, #fff);
+  opacity: 1;
+  border-radius: var(--r-lg); box-shadow: var(--shadow-3);
   border: 1px solid var(--line);
   animation: pop .18s var(--ease) both;
+}
+.modal-backdrop {
+  z-index: 200;
+  background: rgba(15, 23, 42, .55);
+  backdrop-filter: blur(3px);
+}
+.rank-modal .modal,
+.rank-panel,
+.modal.rank-panel {
+  background: #fff;
+  background: var(--surface, #fff);
+  opacity: 1;
 }
 .modal-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px 12px; border-bottom: 1px solid var(--line); }
 .modal-head h3 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
@@ -1353,9 +1367,9 @@ table.data a.sdk { font-family: var(--mono); font-size: .92em; font-weight: 500;
 
 /* Filter modal (multi-view) */
 .filter-modal-backdrop {
-  position: fixed; inset: 0; z-index: 80;
-  background: rgba(18, 24, 32, .42);
-  backdrop-filter: blur(4px);
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(15, 23, 42, .55);
+  backdrop-filter: blur(3px);
   display: grid; place-items: center;
   padding: 20px;
   animation: fade .14s var(--ease);
@@ -1364,7 +1378,9 @@ table.data a.sdk { font-family: var(--mono); font-size: .92em; font-weight: 500;
   width: min(720px, 100%);
   max-height: min(82vh, 820px);
   display: flex; flex-direction: column;
-  background: var(--surface);
+  background: #fff;
+  background: var(--surface, #fff);
+  opacity: 1;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-3);
@@ -1961,7 +1977,8 @@ tr.bid-open.selected > td {
 /* The available panel width, rather than screen width, drives the dashboard. */
 .section { animation: none; min-width: 0; }
 .filters { container: dashboard / inline-size; padding: 12px; }
-.filters-split { grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: stretch; }
+/* Metrics always full-width under filters — 4 cards one row (no 2-col stack). */
+.filters-split { grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
 .filters-left { gap: 10px; grid-template-columns: minmax(0, 1fr); }
 .filters-left > * { min-width: 0; }
 .filters-left .search-hero { grid-template-columns: minmax(0, 1fr); }
@@ -1977,10 +1994,10 @@ tr.bid-open.selected > td {
 .filters-left .filter-grid > *, .filter-modal-body .filter-grid > * { min-width: 0; width: auto; }
 .filters-left .field, .filters-left input, .filters-left select { min-width: 0; max-width: 100%; }
 .filters-left .filter-actions { flex-wrap: wrap; gap: 8px; }
-.compound-panel, .filters-stats.compound-panel { display: grid !important; gap: 8px; align-content: start; }
-.compound-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.compound-panel, .filters-stats.compound-panel { display: grid !important; gap: 6px; align-content: start; width: 100%; }
+.compound-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .compound-card, .compound-card.scope-fixed {
-  min-width: 0; min-height: 0; padding: 12px; gap: 9px;
+  min-width: 0; min-height: 0; padding: 10px 12px; gap: 6px;
   border: 1px solid var(--line); background: var(--surface);
   justify-content: flex-start; overflow-wrap: anywhere;
 }
@@ -1988,33 +2005,28 @@ tr.bid-open.selected > td {
 .compound-title { font-size: 11px; letter-spacing: .02em; }
 .compound-head-right { min-width: 0; }
 .compound-sub { white-space: normal; }
-.compound-value { font-size: clamp(18px, 1.4vw, 24px); line-height: 1.2; }
-.compound-pills { gap: 5px; }
+.compound-value { font-size: clamp(16px, 1.2vw, 22px); line-height: 1.15; }
+.compound-pills { gap: 4px; }
 .compound-pill { max-width: 100%; white-space: normal; text-align: left; }
 .compound-card .compound-bar { margin-top: auto; }
-.compound-card .donut-wrap { gap: 10px; min-width: 0; }
-.compound-card .donut-svg { width: 72px; height: 72px; flex: 0 0 72px; }
+.compound-card .donut-wrap { gap: 8px; min-width: 0; }
+.compound-card .donut-svg { width: 64px; height: 64px; flex: 0 0 64px; }
 .compound-card .donut-legend { min-width: 0; flex: 1; }
 .compound-card .donut-legend li { min-width: 0; gap: 5px; }
 .compound-card .donut-label { min-width: 0; }
-@container dashboard (min-width: 850px) {
-  .compound-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
 @container dashboard (min-width: 1200px) {
-  .filters-split:not(.no-stats) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .compound-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .filters-left { align-content: stretch; }
   .filters-left .filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; }
-  .compound-panel { align-content: stretch; grid-template-rows: auto 1fr; }
 }
 @container dashboard (min-width: 1800px) {
-  .compound-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .filters-left .filter-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@container dashboard (max-width: 720px) {
+  .compound-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @container dashboard (max-width: 420px) {
   .compound-grid { grid-template-columns: minmax(0, 1fr); }
 }
-.split-pane { contain: layout paint; isolation: isolate; }
+.split-pane { contain: layout; isolation: isolate; }
 .split-pane > .filter-modal-backdrop { position: absolute; padding: 12px; }
 .split-pane .filter-modal { width: 100%; max-height: 100%; min-height: 0; }
 .split-pane .filter-modal-body { min-height: 0; overscroll-behavior: contain; }

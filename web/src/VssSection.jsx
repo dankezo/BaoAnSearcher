@@ -9,10 +9,10 @@ import {
   useSelection, useLoadProgress, useTt20, } from './components'
 import { ingredientAllowedAtGrade } from './tt20'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
-import { VssMetrics, applyMetricQuick, VSS_METRICS_YEARS } from './metrics'
+import { VssMetrics, applyMetricQuick } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
-const METRICS_CAP = Infinity
+const METRICS_CAP = 80_000
 
 const toNum = (v) => {
   if (v == null || v === '') return ''
@@ -74,7 +74,7 @@ const SERVER_MAP = {
 
 const EMPTY_FILTERS = {
   q: '', loai_thau: '', loai: 'Tân dược', nhomthau: [], hoatchat: '', sodk: '',
-  tuNgay: '', denNgay: '', nam: VSS_METRICS_YEARS.map(String), duongdung: '', ma_tinh: [], nuocsx: [], hangBenhVien: '',
+  tuNgay: '', denNgay: '', nam: '', duongdung: '', ma_tinh: [], nuocsx: [], hangBenhVien: '',
 }
 
 function filterStatic(items, f, tt20Index) {
@@ -183,10 +183,6 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     setErr('')
     setInfoNote('')
     const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
-    const metricsActive = {
-      ...active,
-      nam: VSS_METRICS_YEARS.map(String),
-    }
     try {
       const useRemote = localMode || supabaseConfigured
       if (useRemote) {
@@ -194,13 +190,6 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         const searchFn = localMode
           ? (page, sz) => api.vssSearch({ filters: active, page, size: sz })
           : (page, sz) => cloudVssSearch({ filters: active, page, size: sz })
-        const metricsFn = async (page, size) => {
-          const result = localMode
-            ? await api.vssSearch({ filters: metricsActive, page, size })
-            : await cloudVssSearch({ filters: metricsActive, page, size })
-          if (!stale()) setMetricsTotal(result.total)
-          return result
-        }
 
         if (needGrade) {
           const allRaw = await fetchAllPages(searchFn, {
@@ -213,25 +202,11 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           items = sortByDateDesc(items, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd'])
           setData({ total: items.length, items, page: 0, size: items.length || size })
           setPage(0)
-          setMetricsLoading(!embedded)
-          if (!embedded) fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: stale }).then((all) => {
-            if (stale()) return
-            const scoped = all.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, active.hangBenhVien))
-            setMetricsSample(scoped)
-            setMetricsTotal(scoped.length)
-          }).catch(() => { if (!stale()) setMetricsSample([]) })
-            .finally(() => { if (!stale()) setMetricsLoading(false) })
         } else {
           const res = await searchFn(p, size)
           if (stale()) return
           setData(res)
           setPage(p)
-          if (embedded) return
-          setMetricsLoading(true)
-          fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: stale }).then((all) => {
-            if (!stale()) setMetricsSample(all)
-          }).catch(() => { if (!stale()) setMetricsSample(res.items || []) })
-            .finally(() => { if (!stale()) setMetricsLoading(false) })
         }
         return
       }
@@ -247,6 +222,27 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
       }
     }
   }, [localMode, mergedFilters, tt20Index, embedded])
+
+  // Metrics: full Tân dược load once — không theo filter / năm
+  useEffect(() => {
+    if (!prefsReady || embedded) return undefined
+    if (!(localMode || supabaseConfigured)) return undefined
+    let cancelled = false
+    setMetricsLoading(true)
+    const base = { loai: 'Tân dược' }
+    const metricsFn = async (page, size) => {
+      const result = localMode
+        ? await api.vssSearch({ filters: base, page, size })
+        : await cloudVssSearch({ filters: base, page, size })
+      if (!cancelled) setMetricsTotal(result.total)
+      return result
+    }
+    fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: () => cancelled })
+      .then((all) => { if (!cancelled) setMetricsSample(all) })
+      .catch(() => { if (!cancelled) setMetricsSample([]) })
+      .finally(() => { if (!cancelled) setMetricsLoading(false) })
+    return () => { cancelled = true }
+  }, [prefsReady, localMode, embedded])
 
   useEffect(() => {
     if (!prefsReady) return
@@ -424,7 +420,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
               </div>
             </div>
             {!embedded && (
-              <VssMetrics items={metricsItems} total={metricsTotal ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading || loading} />
+              <VssMetrics items={metricsItems} total={metricsTotal ?? metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />
             )}
           </div>
         </div>
