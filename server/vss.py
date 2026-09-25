@@ -776,6 +776,27 @@ def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
             vals = [v for v in text.replace(";", "|").split("|") if v] if text else []
         if not vals:
             continue
+        # Expand N3 / 3 / nhom 3 so multi-select does not false-match via bare digits
+        if field == "nhomthau":
+            expanded = []
+            for v in vals:
+                expanded.append(v)
+                m = re.match(r"^(?:n|nhom|nhóm)\s*([1-5])$", v, re.I) or re.match(r"^([1-5])$", v)
+                if m:
+                    n = m.group(1)
+                    expanded.extend([f"n{n}", n, f"nhom {n}", f"nhóm {n}"])
+            vals = list(dict.fromkeys(expanded))
+            parts = []
+            for v in vals:
+                # bare digit: exact only (LIKE '3%' would false-match N30 etc.)
+                if re.match(r"^[1-5]$", v):
+                    parts.append(f"(fold(coalesce({key},'')) = ?)")
+                    args.append(v)
+                else:
+                    parts.append(f"(fold(coalesce({key},'')) = ? OR fold(coalesce({key},'')) LIKE ?)")
+                    args.extend([v, f"{v}%"])
+            clauses.append("(" + " OR ".join(parts) + ")")
+            continue
         if len(vals) == 1:
             clauses.append(f"fold(coalesce({key},'')) LIKE ?")
             args.append(f"%{vals[0]}%")

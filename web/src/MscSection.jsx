@@ -7,24 +7,25 @@ import {
   SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize,
   serverFilters, useSectionMeta, useSelection, useLoadProgress, } from './components'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
-import { MscPriceMetrics, MscTenderMetrics, applyMetricQuick } from './metrics'
+import { MscPriceMetrics, MscTenderMetrics, applyMetricQuick, mscStatusDisplay, METRICS_YEAR } from './metrics'
+import { StatusBadge, resolveBidStatusFromRow } from './bidStatus'
 
 const PAGE_SIZE_DEFAULT = 100
-const METRICS_CAP = 2000
+const METRICS_CAP = 80_000
 const money = (v) => (typeof v === 'number' ? v.toLocaleString('vi-VN') : v ?? '')
 
 const PRICE_COLS = [
-  { key: 'name', label: 'Tên thuốc', width: 160 },
+  { key: 'name', label: 'Tên thuốc', width: 160, truncateAt: 72 },
   { key: 'ingredient', label: 'Hoạt chất', width: 200, render: (v) => <IngredientText text={v} /> },
-  { key: 'strength', label: 'Hàm lượng', width: 130 },
+  { key: 'strength', label: 'Hàm lượng', width: 130, truncateAt: 64 },
   { key: 'registration', label: 'SĐK', mono: true, nowrap: true },
   { key: 'unit_price', label: 'Đơn giá', align: 'right', mono: true, text: (r) => money(r.unit_price) },
   { key: 'quantity', label: 'SL', align: 'right', mono: true, text: (r) => money(r.quantity) },
   { key: 'unit', label: 'ĐVT', filter: 'select' },
   { key: 'group_name', label: 'Nhóm', filter: 'select', align: 'center' },
-  { key: 'manufacturer', label: 'NSX', width: 170 },
+  { key: 'manufacturer', label: 'NSX', width: 170, truncateAt: 72 },
   { key: 'country', label: 'Nước', filter: 'select' },
-  { key: 'buyer', label: 'Bệnh viện / CĐT', width: 170 },
+  { key: 'buyer', label: 'Bệnh viện / CĐT', width: 170, truncateAt: 72 },
   { key: 'province', label: 'Tỉnh', filter: 'select' },
   { key: 'tender_no', label: 'TBMT', mono: true, nowrap: true },
   { key: 'published', label: 'Ngày KQLCNT', nowrap: true, text: (r) => fmtDate(r.published), render: (v) => fmtDate(v) },
@@ -32,12 +33,12 @@ const PRICE_COLS = [
 
 const TENDER_COLS = [
   { key: 'tender_no', label: 'Mã TBMT', mono: true, nowrap: true },
-  { key: 'name', label: 'Tên gói', width: 260 },
-  { key: 'buyer', label: 'Chủ đầu tư', width: 200 },
+  { key: 'name', label: 'Tên gói', width: 260, truncateAt: 96 },
+  { key: 'buyer', label: 'Chủ đầu tư', width: 200, truncateAt: 80 },
   { key: 'province', label: 'Tỉnh', filter: 'select' },
   { key: 'published', label: 'Ngày đăng', nowrap: true, text: (r) => fmtDateTime(r.published), render: (v) => fmtDateTime(v) },
   { key: 'close_date', label: 'Đóng thầu', nowrap: true, text: (r) => fmtDateTime(r.close_date), render: (v) => fmtDateTime(v) },
-  { key: 'status_label', label: 'Trạng thái', filter: 'select', text: (r) => r.status_label || r.status_code || '', render: (v, r) => v || r.status_code || '' },
+  { key: 'status_label', label: 'Trạng thái', filter: 'select', text: (r) => mscStatusDisplay(r), render: (_v, r) => <StatusBadge row={r} /> },
   { key: 'bid_price', label: 'Giá gói', align: 'right', mono: true, text: (r) => money(r.bid_price) },
   { key: 'bid_form', label: 'Hình thức', filter: 'select' },
 ]
@@ -116,6 +117,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const [refreshKey, setRefreshKey] = useState(0)
   const [loadPct, setLoadPct] = useState(null)
   const [metricsSample, setMetricsSample] = useState([])
+  const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricActiveId, setMetricActiveId] = useState(null)
   const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc thầu MSC', loadPct)
@@ -177,9 +179,18 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         if (stale()) return
         setData(res)
         setPage(p)
+        setMetricsLoading(true)
         fetchAllPages(searchFn, { size: 500, cap: METRICS_CAP }).then((all) => {
-          if (!stale()) setMetricsSample(all)
+          if (stale()) return
+          // Fixed totals từ đầu năm hiện tại
+          const y0 = `${METRICS_YEAR}-01-01`
+          const scoped = (all || []).filter((r) => {
+            const d = String(r.published || r.close_date || '').slice(0, 10)
+            return !d || d >= y0
+          })
+          setMetricsSample(scoped.length ? scoped : all)
         }).catch(() => { if (!stale()) setMetricsSample(res.items || []) })
+          .finally(() => { if (!stale()) setMetricsLoading(false) })
         return
       }
       setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
@@ -256,6 +267,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     setMetricActiveId(id)
     if (patch?._quick) {
       setMetricQuick(patch._quick)
+      setMetricsLoading(true)
+      window.setTimeout(() => setMetricsLoading(false), 180)
       return
     }
     const { _quick, ...rest } = patch || {}
@@ -349,8 +362,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
               </div>
             </div>
             {!embedded && (kind === 'prices'
-              ? <MscPriceMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} />
-              : <MscTenderMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} />)}
+              ? <MscPriceMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading || loading} />
+              : <MscTenderMetrics items={metricsItems} total={data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading || loading} />)}
           </div>
         </div>
 
@@ -384,6 +397,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           onFilterEnter={() => search(0)}
           onFilterSuggest={async (key, q) => fieldSuggest(key)(q)}
           onRowDoubleClick={setDetail}
+          rowClassName={kind === 'tenders' ? ((r) => resolveBidStatusFromRow(r).rowClass || '') : undefined}
           loading={loading}
           emptyText="Không có dữ liệu phù hợp"
           emptyAction={(
@@ -426,6 +440,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         onClose={() => setDetail(null)}
         renderValue={(f, row, val) => {
           if (f.key === 'ingredient') return <IngredientText text={row.ingredient} />
+          if (f.key === 'status_label' || f.key === 'status_code') return <StatusBadge row={row} />
           if (f.key === 'source_url' && row.source_url) return <a href={row.source_url} target="_blank" rel="noopener noreferrer" className="link-break">{row.source_url}</a>
           return val
         }}

@@ -819,7 +819,10 @@ export function Pagination({
 
 /** Resolve UI page-size choice → numeric size for API. */
 export const PAGE_SIZE_FULL_CHUNK = 500
-export const PAGE_SIZE_FULL_CAP = 5000
+/** Soft cap for non-DAV metrics samples (year-scoped). */
+export const PAGE_SIZE_FULL_CAP = 8000
+/** DAV must load the full filtered set for metrics. */
+export const DAV_METRICS_CAP = 100_000
 export function resolvePageSize(choice) {
   if (choice === 'full' || choice === 0) return 100 // legacy full → safe default
   const n = Number(choice)
@@ -1005,6 +1008,37 @@ export function cellText(row, col) {
   if (v == null) return ''
   if (typeof v === 'object') return JSON.stringify(v)
   return String(v)
+}
+
+/** Truncate long cell text with “… xem thêm” expand/collapse. */
+export function TruncateText({ text, limit = 96, className = '' }) {
+  const [open, setOpen] = useState(false)
+  const raw = text == null ? '' : String(text)
+  if (raw.length <= limit) return <span className={className}>{raw}</span>
+  return (
+    <span className={`truncate-text${open ? ' open' : ''} ${className}`.trim()}>
+      {open ? raw : `${raw.slice(0, limit).trimEnd()}…`}
+      {' '}
+      <button
+        type="button"
+        className="truncate-more"
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
+      >
+        {open ? 'thu gọn' : 'xem thêm'}
+      </button>
+    </span>
+  )
+}
+
+function maybeTruncateNode(content, col) {
+  if (col?.truncate === false) return content
+  if (typeof content === 'string' || typeof content === 'number') {
+    const s = String(content ?? '')
+    if (s.length > (col?.truncateAt || 96)) {
+      return <TruncateText text={s} limit={col?.truncateAt || 96} />
+    }
+  }
+  return content
 }
 
 /** Client-side refine of loaded rows by per-column filters. */
@@ -1216,7 +1250,7 @@ export function DataTable({
             return (
               <tr
                 key={k}
-                className={isSel ? 'selected' : ''}
+                className={[isSel ? 'selected' : '', typeof rowClassName === 'function' ? rowClassName(row) : ''].filter(Boolean).join(' ')}
                 onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(row) : undefined}
                 title={onRowDoubleClick ? 'Nhấp đôi để xem chi tiết' : undefined}
               >
@@ -1232,6 +1266,7 @@ export function DataTable({
                   if (c.render) content = c.render(v, row)
                   else if (typeof v === 'number') content = v.toLocaleString('vi-VN')
                   else content = v ?? ''
+                  content = maybeTruncateNode(content, c)
                   const cls = [c.align ? `al-${c.align}` : '', c.mono ? 'mono' : '', c.nowrap ? 'nowrap' : ''].filter(Boolean).join(' ')
                   return <td key={c.key} className={cls || undefined}>{content}</td>
                 })}

@@ -18,9 +18,41 @@ function asList(v) {
   return String(v).split(/[|,;]+/).map((s) => s.trim()).filter(Boolean)
 }
 
+/** Expand N3 / 3 / Nhóm 3 → variants so multi-select does not false-match. */
+function expandGroupTokens(v) {
+  const out = []
+  for (const raw of asList(v)) {
+    const s = String(raw).trim()
+    if (!s) continue
+    out.push(s)
+    const m = s.match(/^(?:n|nhom|nhóm)\s*([1-5])$/i) || s.match(/^([1-5])$/)
+    if (m) {
+      const n = m[1]
+      out.push(`N${n}`, `n${n}`, n, `Nhóm ${n}`, `nhom ${n}`, `NHOM ${n}`)
+    }
+  }
+  return [...new Set(out)]
+}
+
 function likeAny(where, args, col, v) {
-  const vals = asList(v)
+  const vals = col === 'nhomthau' || col === 'group_name' ? expandGroupTokens(v) : asList(v)
   if (!vals.length) return
+  // Prefer prefix/exact-ish for group codes (avoid LIKE '%3%' matching N13 / N30)
+  if (col === 'nhomthau' || col === 'group_name') {
+    const parts = []
+    for (const x of vals) {
+      if (/^[1-5]$/.test(x)) {
+        // bare digit: exact only (LIKE '3%' would false-match)
+        parts.push(`${col} = ?`)
+        args.push(x)
+      } else {
+        parts.push(`${col} = ? OR ${col} LIKE ?`)
+        args.push(x, `${x}%`)
+      }
+    }
+    where.push(`(${parts.join(' OR ')})`)
+    return
+  }
   if (vals.length === 1) {
     where.push(`${col} LIKE ?`)
     args.push(`%${vals[0]}%`)
