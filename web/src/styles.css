@@ -1116,6 +1116,20 @@ table.data a.sdk { font-family: var(--mono); font-size: .92em; font-weight: 500;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
+.login-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+}
+.login-remember input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
 .login-error {
   padding: 10px 12px;
   border-radius: var(--r-sm);

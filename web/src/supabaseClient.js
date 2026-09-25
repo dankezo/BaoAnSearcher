@@ -17,11 +17,62 @@ const anon = (
 ).trim()
 
 export const ALLOWED_EMAIL_DOMAIN = 'baoanpharma.com'
+/** Absolute session cap when "Ghi nhớ đăng nhập" is on. */
+export const REMEMBER_DAYS = 30
+const REMEMBER_FLAG = 'baoan.auth.remember'
+const REMEMBER_UNTIL = 'baoan.auth.rememberUntil'
 
 export const supabaseConfigured = !!(url && anon)
 
 /** @type {import('@supabase/supabase-js').SupabaseClient | null} */
 let client = null
+
+function rememberEnabled() {
+  try {
+    return localStorage.getItem(REMEMBER_FLAG) !== '0'
+  } catch {
+    return true
+  }
+}
+
+function rememberStillValid() {
+  try {
+    const until = Number(localStorage.getItem(REMEMBER_UNTIL) || 0)
+    if (!until) return true
+    return Date.now() <= until
+  } catch {
+    return true
+  }
+}
+
+export function setRememberPreference(remember) {
+  try {
+    if (remember) {
+      localStorage.setItem(REMEMBER_FLAG, '1')
+      localStorage.setItem(
+        REMEMBER_UNTIL,
+        String(Date.now() + REMEMBER_DAYS * 24 * 60 * 60 * 1000),
+      )
+    } else {
+      localStorage.setItem(REMEMBER_FLAG, '0')
+      localStorage.removeItem(REMEMBER_UNTIL)
+    }
+  } catch { /* private mode */ }
+}
+
+export function getRememberPreference() {
+  return rememberEnabled()
+}
+
+function authStorage() {
+  if (typeof window === 'undefined') return undefined
+  return rememberEnabled() ? window.localStorage : window.sessionStorage
+}
+
+/** Drop cached client so next getSupabase() picks new storage / remember flag. */
+export function resetSupabaseClient() {
+  client = null
+}
 
 export function getSupabase() {
   if (!supabaseConfigured) return null
@@ -31,7 +82,8 @@ export function getSupabase() {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
-        storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+        storage: authStorage(),
+        storageKey: 'baoan.supabase.auth',
       },
     })
   }
@@ -42,4 +94,19 @@ export function isCompanyEmail(email) {
   const e = String(email || '').trim().toLowerCase()
   if (!e.includes('@')) return false
   return e.endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)
+}
+
+/** If remember-until expired, clear session keys. Returns false when expired. */
+export function enforceRememberWindow() {
+  if (!rememberEnabled()) return true
+  if (rememberStillValid()) return true
+  try {
+    localStorage.removeItem(REMEMBER_UNTIL)
+    localStorage.removeItem('baoan.supabase.auth')
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith('sb-') && k.includes('auth-token')) localStorage.removeItem(k)
+    }
+  } catch { /* ignore */ }
+  resetSupabaseClient()
+  return false
 }

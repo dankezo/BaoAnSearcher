@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useAuth } from './auth'
+import { getRememberPreference } from './supabaseClient'
 
 export default function LoginPage() {
-  const { signIn, authError, setAuthError, allowedDomain, supabaseConfigured } = useAuth()
+  const { signIn, authError, setAuthError, allowedDomain, supabaseConfigured, rememberDays } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [remember, setRemember] = useState(() => getRememberPreference())
   const [busy, setBusy] = useState(false)
   const [localErr, setLocalErr] = useState('')
 
@@ -25,7 +27,7 @@ export default function LoginPage() {
     }
     setBusy(true)
     try {
-      const r = await signIn(em, password)
+      const r = await signIn(em, password, { remember })
       if (r.ok) {
         const base = import.meta.env.BASE_URL || '/'
         const home = base.endsWith('/') ? base : `${base}/`
@@ -50,7 +52,7 @@ export default function LoginPage() {
 
         <h1 className="login-h1">Đăng nhập</h1>
         <p className="login-lead muted">
-          Chỉ nhân viên được Admin cấp tài khoản mới truy cập được hệ thống.
+          Dùng email Outlook công ty (ví dụ sales@{allowedDomain}, importer@{allowedDomain}). Chỉ tài khoản Admin đã cấp mới vào được.
         </p>
 
         <form className="login-form" onSubmit={onSubmit} noValidate>
@@ -59,7 +61,7 @@ export default function LoginPage() {
             <input
               type="email"
               autoComplete="username"
-              placeholder={`ten@${allowedDomain}`}
+              placeholder={`sales@${allowedDomain}`}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={busy}
@@ -78,6 +80,16 @@ export default function LoginPage() {
             />
           </label>
 
+          <label className="login-remember">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              disabled={busy}
+            />
+            <span>Ghi nhớ đăng nhập {rememberDays || 30} ngày</span>
+          </label>
+
           {err && (
             <div className="login-error" role="alert">{err}</div>
           )}
@@ -88,7 +100,7 @@ export default function LoginPage() {
         </form>
 
         <p className="login-foot muted small">
-          Không có nút đăng ký công khai. Liên hệ Admin nếu quên mật khẩu hoặc cần tài khoản mới.
+          Bỏ tick “Ghi nhớ” thì phiên chỉ giữ đến khi đóng trình duyệt. Liên hệ Admin nếu cần cấp tài khoản mới.
         </p>
       </div>
       <div className="login-aside" aria-hidden="true">

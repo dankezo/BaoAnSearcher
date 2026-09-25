@@ -1,5 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { ALLOWED_EMAIL_DOMAIN, getSupabase, isCompanyEmail, supabaseConfigured } from './supabaseClient'
+import {
+  ALLOWED_EMAIL_DOMAIN,
+  REMEMBER_DAYS,
+  enforceRememberWindow,
+  getSupabase,
+  isCompanyEmail,
+  resetSupabaseClient,
+  setRememberPreference,
+  supabaseConfigured,
+} from './supabaseClient'
 
 const AuthContext = createContext(null)
 
@@ -27,10 +36,16 @@ export function AuthProvider({ children }) {
   const [authError, setAuthError] = useState('')
 
   useEffect(() => {
+    if (!enforceRememberWindow()) {
+      setSession(null)
+      setLoading(false)
+      setAuthError(`Phiên đăng nhập đã hết hạn (${REMEMBER_DAYS} ngày). Vui lòng đăng nhập lại.`)
+      return undefined
+    }
     const sb = getSupabase()
     if (!sb) {
       setLoading(false)
-      return
+      return undefined
     }
     let alive = true
     sb.auth.getSession().then(({ data }) => {
@@ -66,8 +81,10 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  const signIn = useCallback(async (email, password) => {
+  const signIn = useCallback(async (email, password, { remember = true } = {}) => {
     setAuthError('')
+    setRememberPreference(!!remember)
+    resetSupabaseClient()
     const sb = getSupabase()
     if (!sb) {
       const m = 'Chưa cấu hình Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'
@@ -76,7 +93,7 @@ export function AuthProvider({ children }) {
     }
     const em = String(email || '').trim().toLowerCase()
     if (!isCompanyEmail(em)) {
-      const m = 'Tài khoản không thuộc quyền quản trị nội bộ'
+      const m = `Chỉ email @${ALLOWED_EMAIL_DOMAIN} được phép đăng nhập (ví dụ sales@, importer@).`
       setAuthError(m)
       return { ok: false, error: m }
     }
@@ -85,7 +102,6 @@ export function AuthProvider({ children }) {
       setAuthError(m)
       return { ok: false, error: m }
     }
-    // Supabase Auth can hang when Postgres is down (disk full) — fail fast for UX
     const timeoutMs = 20000
     let timer
     try {
@@ -107,6 +123,7 @@ export function AuthProvider({ children }) {
         setAuthError(m)
         return { ok: false, error: m }
       }
+      if (remember) setRememberPreference(true)
       setSession(data.session)
       return { ok: true }
     } catch (e) {
@@ -137,6 +154,7 @@ export function AuthProvider({ children }) {
     signOut,
     supabaseConfigured,
     allowedDomain: ALLOWED_EMAIL_DOMAIN,
+    rememberDays: REMEMBER_DAYS,
   }), [session, loading, authError, signIn, signOut])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
