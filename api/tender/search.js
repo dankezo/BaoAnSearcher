@@ -5,6 +5,7 @@
  */
 import { requireUser, json, readJson } from '../lib/auth.js'
 import { getTurso, fold } from '../lib/turso.js'
+import { mapTursoItems } from '../lib/mapRow.js'
 
 function words(q) {
   return fold(q || '').trim().split(/\s+/).filter(Boolean)
@@ -79,6 +80,20 @@ async function searchDav(db, filters, page, size) {
   like('so_dang_ky', f.soDangKy)
   like('hoat_chat', f.hoatChat)
   like('dang_bao_che', f.dangBaoChe)
+  like('cty_san_xuat', f.sanXuat)
+  like('cty_dang_ky', f.dangKy)
+  like('nuoc_san_xuat', f.nuocSanXuat)
+  const rawTags = f.tags ?? f.selectedTags
+  if (rawTags != null) {
+    const tags = (Array.isArray(rawTags) ? rawTags : String(rawTags).split(','))
+      .map((t) => String(t).trim())
+      .filter(Boolean)
+    if (tags.length === 0) {
+      return { total: 0, page, size, items: [] }
+    }
+    where.push(`tag_id IN (${tags.map(() => '?').join(',')})`)
+    args.push(...tags)
+  }
   const wsql = where.join(' AND ')
   const countRs = await db.execute({
     sql: `SELECT COUNT(*) AS c FROM dav_drugs WHERE ${wsql}`,
@@ -141,6 +156,7 @@ export default async function handler(req, res) {
     } else {
       payload = await searchVss(db, body.filters, page, size)
     }
+    payload = { ...payload, items: mapTursoItems(payload.items) }
     return json(res, 200, payload)
   } catch (e) {
     const status = e.status || 500

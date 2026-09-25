@@ -331,6 +331,7 @@ export function SearchSuggestBar({
   onPick,
   loading = false,
   submitLabel = 'Tìm kiếm',
+  showSubmit = true,
 }) {
   const wrapRef = useRef(null)
   const [hi, setHi] = useState(-1)
@@ -409,9 +410,11 @@ export function SearchSuggestBar({
             {I.x}
           </button>
         ) : null}
-        <button type="button" className="btn search-hero-btn" onClick={() => onSubmit?.()} disabled={loading}>
-          {I.search} {submitLabel}
-        </button>
+        {showSubmit ? (
+          <button type="button" className="btn search-hero-btn" onClick={() => onSubmit?.()} disabled={loading}>
+            {I.search} {submitLabel}
+          </button>
+        ) : null}
       </div>
       {show && (
         <ul className="search-suggest" role="listbox">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, matchesYear, sortByDateDesc } from './api'
 import { cloudMeta, cloudVssSearch, supabaseConfigured } from './supabaseCloud'
+import { useAuth } from './auth'
 import {
   ColumnPicker, DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons,
   IngredientText, LoadingOverlay, Pagination, SuggestField, TableToolbar, UpdatedNote, ViewModeSelect,
@@ -8,6 +9,7 @@ import {
   useSelection, useSimProgress, useTt20,
 } from './components'
 import { ingredientAllowedAtGrade } from './tt20'
+import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
 
 const PAGE_SIZE_DEFAULT = 100
 
@@ -94,6 +96,8 @@ function filterStatic(items, f, tt20Index) {
 }
 
 export default function VssSection({ localMode, embedded = false, filtersInModal = false }) {
+  const { user } = useAuth()
+  const userId = userKeyPart(user)
   const { index: tt20Index } = useTt20()
   const [colPicker, setColPicker] = useState(false)
   const [viewMode, setViewMode] = useState('compact')
@@ -113,10 +117,28 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const [detail, setDetail] = useState(null)
   const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [prefsReady, setPrefsReady] = useState(false)
   const sim = useSimProgress(loading, 'Đang lọc BHYT VSS')
   const sel = useSelection()
   const reqSeq = useRef(0)
   const meta = useSectionMeta('vss', localMode, staticFallback, refreshKey)
+
+  useEffect(() => {
+    const saved = loadUserJson(userId, 'vss', 'session', null)
+    if (saved && typeof saved === 'object') {
+      if (saved.filters) setFilters({ ...EMPTY_FILTERS, ...saved.filters })
+      if (saved.viewMode) setViewMode(saved.viewMode)
+      if (Array.isArray(saved.visible) && saved.visible.length) setVisible(saved.visible)
+      if (saved.pageSize != null) setPageSize(saved.pageSize)
+      if (saved.columnFilters) setColumnFilters(saved.columnFilters)
+    }
+    setPrefsReady(true)
+  }, [userId])
+
+  useEffect(() => {
+    if (!prefsReady) return
+    saveUserJson(userId, 'vss', 'session', { filters, viewMode, visible, pageSize, columnFilters })
+  }, [userId, prefsReady, filters, viewMode, visible, pageSize, columnFilters])
 
   useEffect(() => {
     if (viewMode === 'compact') setVisible(DEFAULT)
@@ -188,7 +210,10 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     }
   }, [localMode, mergedFilters, tt20Index])
 
-  useEffect(() => { search(0) }, [filters.hangBenhVien, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!prefsReady) return
+    search(0)
+  }, [prefsReady, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const setF = (k, v) => setFilters((f) => ({ ...f, [k]: v }))
   const setCF = (k, v) => setColumnFilters((f) => ({ ...f, [k]: v }))

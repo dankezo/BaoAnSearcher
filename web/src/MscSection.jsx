@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, sortByDateDesc } from './api'
 import { cloudMeta, cloudMscSearch, supabaseConfigured } from './supabaseCloud'
+import { useAuth } from './auth'
 import {
   DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, IngredientText, LoadingOverlay, Pagination,
   SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize,
   serverFilters, useSectionMeta, useSelection, useSimProgress,
 } from './components'
+import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
 
 const PAGE_SIZE_DEFAULT = 100
 const money = (v) => (typeof v === 'number' ? v.toLocaleString('vi-VN') : v ?? '')
@@ -93,11 +95,14 @@ function filterStatic(items, f) {
 }
 
 export default function MscSection({ localMode, embedded = false, filtersInModal = false }) {
+  const { user } = useAuth()
+  const userId = userKeyPart(user)
   const [kind, setKind] = useState('prices')
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(false)
   const [filterModalOpen, setFilterModalOpen] = useState(false)
+  const [prefsReady, setPrefsReady] = useState(false)
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
   const [page, setPage] = useState(0)
   const [data, setData] = useState({ total: 0, items: [] })
@@ -112,6 +117,22 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const sel = useSelection()
   const reqSeq = useRef(0)
   const meta = useSectionMeta('msc', localMode, staticFallback, refreshKey)
+
+  useEffect(() => {
+    const saved = loadUserJson(userId, 'msc', 'session', null)
+    if (saved && typeof saved === 'object') {
+      if (saved.kind === 'prices' || saved.kind === 'tenders') setKind(saved.kind)
+      if (saved.filters) setFilters({ ...EMPTY_FILTERS, ...saved.filters })
+      if (saved.pageSize != null) setPageSize(saved.pageSize)
+      if (saved.columnFilters) setColumnFilters(saved.columnFilters)
+    }
+    setPrefsReady(true)
+  }, [userId])
+
+  useEffect(() => {
+    if (!prefsReady) return
+    saveUserJson(userId, 'msc', 'session', { kind, filters, pageSize, columnFilters })
+  }, [userId, prefsReady, kind, filters, pageSize, columnFilters])
 
   const cols = kind === 'prices' ? PRICE_COLS : TENDER_COLS
   const staticName = kind === 'prices' ? 'msc_prices' : 'msc_tenders'
@@ -162,10 +183,11 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   }, [kind, localMode, mergedFilters, staticName])
 
   useEffect(() => {
+    if (!prefsReady) return
     sel.clear()
     setColumnFilters({})
     search(0, {})
-  }, [kind, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [prefsReady, kind, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const setF = (k, v) => setFilters((f) => ({ ...f, [k]: v }))
   const setCF = (k, v) => setColumnFilters((f) => ({ ...f, [k]: v }))

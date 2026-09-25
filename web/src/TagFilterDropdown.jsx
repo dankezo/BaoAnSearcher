@@ -6,15 +6,18 @@ import {
 
 /**
  * Multi-select status tag filter for SĐK commercial classification.
- * Stack-agnostic (Vite/React) equivalent of the Shadcn TagFilterDropdown spec.
+ * When deferApply=true, ticks only update draft; parent commits on "Tìm kiếm".
  */
 export function TagFilterDropdown({
   selectedTags,
   onChange,
   configs: configsProp,
+  userId,
+  deferApply = false,
 }) {
   const [open, setOpen] = useState(false)
-  const [configs, setConfigs] = useState(() => configsProp || loadTagConfigs())
+  const [configs, setConfigs] = useState(() => configsProp || loadTagConfigs(userId))
+  const [draft, setDraft] = useState(() => selectedTags || [])
   const [editingId, setEditingId] = useState(null)
   const [draftLabel, setDraftLabel] = useState('')
   const [hoverId, setHoverId] = useState(null)
@@ -23,6 +26,10 @@ export function TagFilterDropdown({
   useEffect(() => {
     if (configsProp) setConfigs(configsProp)
   }, [configsProp])
+
+  useEffect(() => {
+    setDraft(selectedTags || [])
+  }, [selectedTags])
 
   useEffect(() => {
     if (!open) return undefined
@@ -38,23 +45,36 @@ export function TagFilterDropdown({
     }
   }, [open])
 
-  const selected = selectedTags || []
+  const selected = deferApply ? draft : (selectedTags || [])
   const activeConfigs = useMemo(
     () => configs.filter((c) => selected.includes(c.id)),
     [configs, selected],
   )
 
+  const commit = (ids) => {
+    onChange(ids)
+    persistSelectedTags(ids, userId)
+  }
+
   const toggle = (id) => {
     const next = selected.includes(id)
       ? selected.filter((x) => x !== id)
       : [...selected, id]
-    onChange(next)
-    persistSelectedTags(next)
+    if (deferApply) {
+      setDraft(next)
+      onChange(next)
+    } else {
+      commit(next)
+    }
   }
 
   const setQuick = (ids) => {
-    onChange(ids)
-    persistSelectedTags(ids)
+    if (deferApply) {
+      setDraft(ids)
+      onChange(ids)
+    } else {
+      commit(ids)
+    }
   }
 
   const startRename = (t) => {
@@ -65,7 +85,7 @@ export function TagFilterDropdown({
   const commitRename = () => {
     if (!editingId) return
     const label = draftLabel.trim() || configs.find((c) => c.id === editingId)?.label
-    saveTagLabel(editingId, label)
+    saveTagLabel(editingId, label, userId)
     setConfigs((prev) => prev.map((c) => (c.id === editingId ? { ...c, label } : c)))
     setEditingId(null)
   }
@@ -93,7 +113,10 @@ export function TagFilterDropdown({
 
       {open && (
         <div className="tag-filter-panel" role="dialog" aria-label="Lọc phân loại dữ liệu">
-          <div className="tag-filter-head">Lọc phân loại dữ liệu</div>
+          <div className="tag-filter-head">
+            Lọc phân loại dữ liệu
+            {deferApply && <span className="tag-filter-hint">Tick xong bấm Tìm kiếm</span>}
+          </div>
           <ul className="tag-filter-list">
             {configs.map((t) => {
               const checked = selected.includes(t.id)
@@ -182,15 +205,40 @@ export function TagBadge({ tagId, configs, detailed = false }) {
   )
 }
 
-export function useTagFilterState() {
-  const [selectedTags, setSelectedTags] = useState(() => defaultSelectedTags())
-  const [configs, setConfigs] = useState(() => loadTagConfigs())
+export function useTagFilterState(userId) {
+  const [selectedTags, setSelectedTags] = useState(() => defaultSelectedTags(userId))
+  const [draftTags, setDraftTags] = useState(() => defaultSelectedTags(userId))
+  const [configs, setConfigs] = useState(() => loadTagConfigs(userId))
+
+  useEffect(() => {
+    const tags = defaultSelectedTags(userId)
+    setSelectedTags(tags)
+    setDraftTags(tags)
+    setConfigs(loadTagConfigs(userId))
+  }, [userId])
+
   const setTags = (ids) => {
     setSelectedTags(ids)
-    persistSelectedTags(ids)
+    setDraftTags(ids)
+    persistSelectedTags(ids, userId)
   }
-  const refreshConfigs = () => setConfigs(loadTagConfigs())
-  return { selectedTags, setSelectedTags: setTags, configs, refreshConfigs }
+
+  const commitDraft = () => {
+    setSelectedTags(draftTags)
+    persistSelectedTags(draftTags, userId)
+    return draftTags
+  }
+
+  const refreshConfigs = () => setConfigs(loadTagConfigs(userId))
+  return {
+    selectedTags,
+    draftTags,
+    setDraftTags,
+    setSelectedTags: setTags,
+    commitDraft,
+    configs,
+    refreshConfigs,
+  }
 }
 
 export { DEFAULT_TAG_CONFIGS, defaultSelectedTags }

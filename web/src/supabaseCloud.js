@@ -3,6 +3,7 @@
  * Falls back to Supabase RPC if Turso API is unavailable (503).
  */
 import { getSupabase, supabaseConfigured } from './supabaseClient'
+import { mapTursoItems } from './tursoMap'
 
 export { supabaseConfigured, getSupabase }
 
@@ -54,6 +55,15 @@ async function tenderFetch(path, body) {
   return payload
 }
 
+function normalizePage(payload, page, size) {
+  return {
+    total: payload?.total ?? 0,
+    page: payload?.page ?? page,
+    size: payload?.size ?? size,
+    items: mapTursoItems(payload?.items || []),
+  }
+}
+
 async function supabaseVss(filters, page, size) {
   const sb = getSupabase()
   const f = filters || {}
@@ -98,12 +108,7 @@ export async function cloudVssSearch({ filters = {}, page = 0, size = 100 } = {}
       page,
       size,
     })
-    return {
-      total: payload?.total ?? 0,
-      page: payload?.page ?? page,
-      size: payload?.size ?? size,
-      items: payload?.items || [],
-    }
+    return normalizePage(payload, page, size)
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
     // Turso API missing / not deployed yet → legacy Supabase
@@ -120,12 +125,7 @@ export async function cloudDavSearch({ filters = {}, page = 0, size = 100 } = {}
       page,
       size,
     })
-    return {
-      total: payload?.total ?? 0,
-      page: payload?.page ?? page,
-      size: payload?.size ?? size,
-      items: payload?.items || [],
-    }
+    return normalizePage(payload, page, size)
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
     const sb = getSupabase()
@@ -145,7 +145,7 @@ export async function cloudDavSearch({ filters = {}, page = 0, size = 100 } = {}
       total: payload?.total ?? 0,
       page: payload?.page ?? page,
       size: payload?.size ?? size,
-      items: payload?.items || [],
+      items: mapTursoItems(payload?.items || []),
     }
   }
 }
@@ -159,12 +159,7 @@ export async function cloudMscSearch({ kind = 'prices', filters = {}, page = 0, 
       page,
       size,
     })
-    return {
-      total: payload?.total ?? 0,
-      page: payload?.page ?? page,
-      size: payload?.size ?? size,
-      items: payload?.items || [],
-    }
+    return normalizePage(payload, page, size)
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
     const sb = getSupabase()
@@ -181,7 +176,7 @@ export async function cloudMscSearch({ kind = 'prices', filters = {}, page = 0, 
       total: payload?.total ?? 0,
       page: payload?.page ?? page,
       size: payload?.size ?? size,
-      items: payload?.items || [],
+      items: mapTursoItems(payload?.items || []),
     }
   }
 }

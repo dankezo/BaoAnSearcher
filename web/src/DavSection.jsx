@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, applyClientFilters, containsWords, fmtDate, openDavLookup, sortByDateDesc, DAV_LOOKUP } from './api'
+import { api, fmtDate, openDavLookup, sortByDateDesc, DAV_LOOKUP } from './api'
 import { cloudDavSearch, cloudMeta, supabaseConfigured } from './supabaseCloud'
+import { useAuth } from './auth'
 import {
   ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, FilterModal, HospitalGradeField,
   Icons, IngredientText, LoadingOverlay, Pagination, SearchSuggestBar, SuggestField, TableToolbar, UpdatedNote,
@@ -8,8 +9,9 @@ import {
   useSectionMeta, useSelection, useSimProgress, useTt20,
 } from './components'
 import { TagBadge, TagFilterDropdown, useTagFilterState } from './TagFilterDropdown'
-import { enrichRowTag } from './tagConfig'
+import { enrichRowTag, TAG_XANH, TAG_VANG, TAG_CAM, TAG_XAM } from './tagConfig'
 import { ingredientAllowedAtGrade } from './tt20'
+import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
 
 const PAGE_SIZE_DEFAULT = 100
 
@@ -54,33 +56,21 @@ const EMPTY_FILTERS = {
   tags: null,
 }
 
-function filterStatic(items, f, tt20Index) {
-  let out = items.map(enrichRowTag)
-  const q = (f.q || '').trim()
-  if (q) out = out.filter((r) => containsWords(`${r.tenThuoc} ${r.soDangKy} ${r.hoatChat} ${r.hamLuong}`, q))
-  out = applyClientFilters(out, [
-    { value: f.tenThuoc, keys: ['tenThuoc'] },
-    { value: f.soDangKy, keys: ['soDangKy', 'soDangKyCu'] },
-    { value: f.hoatChat, keys: ['hoatChat'] },
-    { value: f.dangBaoChe, keys: ['dangBaoChe'] },
-    { value: f.sanXuat, keys: ['ctySanXuat'] },
-    { value: f.dangKy, keys: ['ctyDangKy'] },
-    { value: f.nuocSanXuat, keys: ['nuocSanXuat'] },
-  ])
-  const n = f.ingredientCount === 'other' ? Number(f.ingredientCountOther) : Number(f.ingredientCount)
-  if (f.ingredientCount && Number.isFinite(n) && n > 0) out = out.filter((r) => r.ingredientCount === n)
-  if (f.hangBenhVien) {
-    out = out.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, f.hangBenhVien))
-  }
-  const tags = f.tags
-  if (Array.isArray(tags)) {
-    if (tags.length === 0) return []
-    out = out.filter((r) => tags.includes(r.tagId))
-  }
-  return sortByDateDesc(out, ['ngayGiaHan', 'ngayCap', 'ngayHetHan'])
+const TAG_STAT_ORDER = [
+  { id: TAG_XANH, label: 'Xanh · sẵn sàng' },
+  { id: TAG_VANG, label: 'Vàng · xác minh' },
+  { id: TAG_CAM, label: 'Cam · DM93' },
+  { id: TAG_XAM, label: 'Xám · lịch sử' },
+]
+
+function fmtNum(n) {
+  if (n == null || Number.isNaN(Number(n))) return '—'
+  return Number(n).toLocaleString('vi-VN')
 }
 
 export default function DavSection({ localMode, embedded = false, filtersInModal = false }) {
+  const { user } = useAuth()
+  const userId = userKeyPart(user)
   const { index: tt20Index } = useTt20()
   const [colPicker, setColPicker] = useState(false)
   const [viewMode, setViewMode] = useState('compact')
@@ -98,17 +88,21 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const [err, setErr] = useState('')
   const [detail, setDetail] = useState(null)
   const [staticFallback, setStaticFallback] = useState(null)
+  const [davStats, setDavStats] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [suggests, setSuggests] = useState([])
   const [suggestOpen, setSuggestOpen] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
+  const [prefsReady, setPrefsReady] = useState(false)
   const sim = useSimProgress(loading, 'Đang lọc thuốc DAV')
   const sel = useSelection()
   const reqSeq = useRef(0)
   const suggestSeq = useRef(0)
   const suggestTimer = useRef(null)
   const meta = useSectionMeta('dav', localMode, staticFallback, refreshKey)
-  const { selectedTags, setSelectedTags, configs, refreshConfigs } = useTagFilterState()
+  const {
+    selectedTags, draftTags, setDraftTags, commitDraft, configs, refreshConfigs,
+  } = useTagFilterState(userId)
   const filtersRef = useRef(filters)
   const columnFiltersRef = useRef(columnFilters)
   const selectedTagsRef = useRef(selectedTags)
@@ -117,6 +111,31 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   columnFiltersRef.current = columnFilters
   selectedTagsRef.current = selectedTags
   pageSizeRef.current = pageSize
+
+  // Restore per-user session filters (isolated by user id)
+  useEffect(() => {
+    const saved = loadUserJson(userId, 'dav', 'session', null)
+    if (saved && typeof saved === 'object') {
+      if (saved.filters) setFilters({ ...EMPTY_FILTERS, ...saved.filters, tags: null })
+      if (saved.viewMode) setViewMode(saved.viewMode)
+      if (Array.isArray(saved.visible) && saved.visible.length) setVisible(saved.visible)
+      if (saved.pageSize != null) setPageSize(saved.pageSize)
+      if (saved.columnFilters) setColumnFilters(saved.columnFilters)
+    }
+    setPrefsReady(true)
+  }, [userId])
+
+  // Persist per-user session
+  useEffect(() => {
+    if (!prefsReady) return
+    saveUserJson(userId, 'dav', 'session', {
+      filters: { ...filters, tags: null },
+      viewMode,
+      visible,
+      pageSize,
+      columnFilters,
+    })
+  }, [userId, prefsReady, filters, viewMode, visible, pageSize, columnFilters])
 
   useEffect(() => {
     if (viewMode === 'compact') setVisible(COMPACT)
@@ -151,21 +170,21 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   }), [visible, configs])
 
   const mergedFilters = useCallback(
-    (cf) => ({
+    (cf, tagsOverride) => ({
       ...filtersRef.current,
       ...serverFilters(cf ?? columnFiltersRef.current, SERVER_MAP),
-      tags: selectedTagsRef.current,
+      tags: tagsOverride ?? selectedTagsRef.current,
     }),
     [],
   )
 
-  const search = useCallback(async (p = 0, cf, override = null) => {
+  const search = useCallback(async (p = 0, cf, override = null, tagsOverride = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
     const size = resolvePageSize(pageSizeRef.current)
     setLoading(true)
     setErr('')
-    const active = { ...mergedFilters(cf), ...(override || {}) }
+    const active = { ...mergedFilters(cf, tagsOverride), ...(override || {}) }
     try {
       if (localMode || supabaseConfigured) {
         const needGrade = !!active.hangBenhVien
@@ -196,7 +215,10 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
         }
         if (!localMode) {
           const m = await cloudMeta('dav')
-          if (m) setStaticFallback({ updated: m.updated, count: m.count })
+          if (m) {
+            setStaticFallback({ updated: m.updated, count: m.count })
+            if (m.stats) setDavStats(m.stats)
+          }
         }
         setPage(p)
         return
@@ -213,7 +235,11 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     }
   }, [localMode, mergedFilters, tt20Index])
 
-  useEffect(() => { search(0) }, [selectedTags, filters.hangBenhVien, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Initial load + pageSize only — status ticks never auto-search
+  useEffect(() => {
+    if (!prefsReady) return
+    search(0)
+  }, [prefsReady, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toSuggest = useCallback((items) => (
     (items || []).slice(0, 4).map((r, i) => ({
@@ -260,7 +286,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
       }
     }, 260)
     return () => clearTimeout(suggestTimer.current)
-  }, [filters.q, filters, localMode, mergedFilters, selectedTags, toSuggest, tt20Index])
+  }, [filters.q, localMode, mergedFilters, toSuggest])
 
   const setF = (key, val) => setFilters((f) => ({ ...f, [key]: val }))
   const setCF = (key, val) => setColumnFilters((f) => ({ ...f, [key]: val }))
@@ -308,12 +334,13 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     } catch {
       return []
     }
-  }, [localMode, mergedFilters, tt20Index])
+  }, [localMode, mergedFilters])
 
   const runSearch = useCallback((override) => {
     setSuggestOpen(false)
-    search(0, undefined, override || null)
-  }, [search])
+    const tags = commitDraft()
+    search(0, undefined, override || null, tags)
+  }, [search, commitDraft])
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.id != null ? `id:${r.id}` : `${r.soDangKy}|${page}|${i}`), [page])
@@ -365,6 +392,10 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     </div>
   )
 
+  const byTag = davStats?.byTag || {}
+  const totalDb = davStats?.total ?? meta.count
+  const hieuLuc = davStats?.hieuLuc
+
   return (
     <div className={`section${embedded ? ' embedded' : ''}`}>
       {!embedded && (
@@ -380,59 +411,99 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
 
       <div className="panel">
         <div className="filters">
-          <div className="filters-inner">
-            <SearchSuggestBar
-              value={filters.q}
-              onChange={(v) => setF('q', v)}
-              onSubmit={() => runSearch()}
-              suggestions={suggests}
-              open={suggestOpen}
-              onOpenChange={setSuggestOpen}
-              loading={loading || suggesting}
-              onPick={(s) => {
-                const row = s.row
-                const q = row?.tenThuoc || s.title || filters.q
-                setFilters((f) => ({ ...f, q }))
-                setSuggestOpen(false)
-                if (row) setDetail(row)
-                runSearch({ q })
-              }}
-            />
-            <div className="filter-actions filter-actions-center">
-              <TagFilterDropdown
-                selectedTags={selectedTags}
-                onChange={(ids) => { setSelectedTags(ids); refreshConfigs() }}
-                configs={configs}
+          <div className="filters-split">
+            <div className="filters-left">
+              <SearchSuggestBar
+                value={filters.q}
+                onChange={(v) => setF('q', v)}
+                onSubmit={() => runSearch()}
+                suggestions={suggests}
+                open={suggestOpen}
+                onOpenChange={setSuggestOpen}
+                loading={loading || suggesting}
+                hint="Gõ gợi ý · tick trạng thái rồi bấm Tìm kiếm"
+                onPick={(s) => {
+                  const row = s.row
+                  const q = row?.tenThuoc || s.title || filters.q
+                  setFilters((f) => ({ ...f, q }))
+                  setSuggestOpen(false)
+                  if (row) setDetail(row)
+                  runSearch({ q })
+                }}
               />
-              {filtersInModal ? (
-                <button
-                  type="button"
-                  className={`btn ghost${advancedActive ? ' on' : ''}`}
-                  onClick={() => setFilterModalOpen(true)}
+              <div className="filter-actions">
+                <TagFilterDropdown
+                  selectedTags={draftTags}
+                  onChange={setDraftTags}
+                  configs={configs}
+                  userId={userId}
+                  deferApply
+                />
+                {filtersInModal ? (
+                  <button
+                    type="button"
+                    className={`btn ghost${advancedActive ? ' on' : ''}`}
+                    onClick={() => setFilterModalOpen(true)}
+                  >
+                    {Icons.filter} Bộ lọc chi tiết
+                    {advancedActive > 0 && <span className="pill">{advancedActive}</span>}
+                  </button>
+                ) : null}
+                <button type="button" className="btn secondary" onClick={() => {
+                  setFilters(EMPTY_FILTERS)
+                  setColumnFilters({})
+                  setSuggests([])
+                  setDraftTags(configs.map((c) => c.id))
+                }}
                 >
-                  {Icons.filter} Bộ lọc chi tiết
-                  {advancedActive > 0 && <span className="pill">{advancedActive}</span>}
+                  Xóa lọc
                 </button>
-              ) : null}
-              <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
-              <button type="button" className="btn secondary" onClick={() => {
-                setFilters(EMPTY_FILTERS)
-                setColumnFilters({})
-                setSuggests([])
-              }}
-              >
-                Xóa lọc
-              </button>
-              {localMode && !embedded && (
-                <button type="button" className="btn ghost" onClick={() => api.davValidity().then(() => runSearch()).catch((e) => setErr(e.message))}>
-                  Rebuild tập hiệu lực
-                </button>
+                {localMode && !embedded && (
+                  <button type="button" className="btn ghost" onClick={() => api.davValidity().then(() => runSearch()).catch((e) => setErr(e.message))}>
+                    Rebuild tập hiệu lực
+                  </button>
+                )}
+              </div>
+              {!filtersInModal && detailFields}
+              {draftTags.length === 0 && (
+                <div className="tag-empty-hint">Chọn ít nhất một phân loại tag, rồi bấm Tìm kiếm.</div>
               )}
             </div>
-            {!filtersInModal && detailFields}
-            {selectedTags.length === 0 && (
-              <div className="tag-empty-hint">Vui lòng chọn ít nhất một phân loại tag để hiển thị kết quả.</div>
-            )}
+
+            <aside className="filters-stats" aria-label="Thống kê DAV">
+              <div className="stats-card">
+                <div className="stats-kicker">Kho DAV</div>
+                <div className="stats-value">{fmtNum(totalDb)}</div>
+                <div className="stats-sub">SĐK đã đồng bộ Turso</div>
+              </div>
+              <div className="stats-card">
+                <div className="stats-kicker">Còn hiệu lực</div>
+                <div className="stats-value accent">{fmtNum(hieuLuc)}</div>
+                <div className="stats-sub">
+                  {hieuLuc != null && totalDb
+                    ? `${Math.round((hieuLuc / totalDb) * 100)}% toàn kho`
+                    : '—'}
+                </div>
+              </div>
+              <div className="stats-card">
+                <div className="stats-kicker">Kết quả lọc</div>
+                <div className="stats-value">{fmtNum(data.total)}</div>
+                <div className="stats-sub">{selectedTags.length} tag đang áp dụng</div>
+              </div>
+              <div className="stats-tags">
+                {TAG_STAT_ORDER.map((t) => {
+                  const cfg = configs.find((c) => c.id === t.id)
+                  const n = byTag[t.id]
+                  return (
+                    <div key={t.id} className="stats-tag-row">
+                      <span className="tag-dot" style={{ background: cfg?.colorHex || '#94a3b8' }} />
+                      <span className="stats-tag-label">{t.label}</span>
+                      <span className="stats-tag-n">{fmtNum(n)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </aside>
           </div>
         </div>
 
