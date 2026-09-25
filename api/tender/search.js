@@ -102,7 +102,7 @@ async function searchDav(db, filters, page, size) {
   const total = Number(countRs.rows[0]?.c || 0)
   const offset = Math.max(0, page) * size
   const dataRs = await db.execute({
-    sql: `SELECT * FROM dav_drugs WHERE ${wsql} ORDER BY ngay_gia_han DESC, id LIMIT ? OFFSET ?`,
+    sql: `SELECT * FROM dav_drugs WHERE ${wsql} ORDER BY ngay_cap DESC, ngay_gia_han DESC, id LIMIT ? OFFSET ?`,
     args: [...args, size, offset],
   })
   return { total, page, size, items: dataRs.rows }
@@ -145,7 +145,8 @@ export default async function handler(req, res) {
     const body = await readJson(req)
     const kind = String(body.kind || 'vss').toLowerCase()
     const page = Math.max(0, parseInt(body.page, 10) || 0)
-    const size = Math.min(200, Math.max(1, parseInt(body.size, 10) || 100))
+    // Full mode may request large pages; hard-cap keeps Turso responses bounded.
+    const size = Math.min(2000, Math.max(1, parseInt(body.size, 10) || 100))
     const db = getTurso()
     let payload
     if (kind === 'dav') payload = await searchDav(db, body.filters, page, size)

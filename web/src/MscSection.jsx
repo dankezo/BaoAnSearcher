@@ -5,9 +5,10 @@ import { useAuth } from './auth'
 import {
   DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, IngredientText, LoadingOverlay, Pagination,
   SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize,
-  serverFilters, useSectionMeta, useSelection, useSimProgress,
+  serverFilters, useSectionMeta, useSelection, useSimProgress, isFullPageSize, PAGE_SIZE_FULL_CAP,
 } from './components'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
+import { MscPriceMetrics, MscTenderMetrics } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
 const money = (v) => (typeof v === 'number' ? v.toLocaleString('vi-VN') : v ?? '')
@@ -113,6 +114,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const [detail, setDetail] = useState(null)
   const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [fullNote, setFullNote] = useState('')
   const sim = useSimProgress(loading, 'Đang lọc thầu MSC')
   const sel = useSelection()
   const reqSeq = useRef(0)
@@ -134,8 +136,16 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     saveUserJson(userId, 'msc', 'session', { kind, filters, pageSize, columnFilters })
   }, [userId, prefsReady, kind, filters, pageSize, columnFilters])
 
+  useEffect(() => {
+    if (localMode || !supabaseConfigured) return undefined
+    let alive = true
+    cloudMeta('msc').then((m) => {
+      if (alive && m) setStaticFallback({ updated: m.updated, count: m.count })
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [localMode])
+
   const cols = kind === 'prices' ? PRICE_COLS : TENDER_COLS
-  const staticName = kind === 'prices' ? 'msc_prices' : 'msc_tenders'
 
   const filtersRef = useRef(filters)
   const columnFiltersRef = useRef(columnFilters)
@@ -152,22 +162,31 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const search = useCallback(async (p = 0, cf, override = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
+    const full = isFullPageSize(pageSizeRef.current)
     const size = resolvePageSize(pageSizeRef.current)
     setLoading(true)
     setErr('')
+    setFullNote('')
     const active = { ...mergedFilters(cf), ...(override || {}) }
     try {
       if (localMode || supabaseConfigured) {
-        const res = localMode
-          ? await api.mscSearch({ kind, filters: active, page: p, size })
-          : await cloudMscSearch({ kind, filters: active, page: p, size })
-        if (stale()) return
-        setData(res)
-        if (!localMode) {
-          const m = await cloudMeta('msc')
-          if (m) setStaticFallback({ updated: m.updated, count: m.count })
+        const searchFn = localMode
+          ? (page, sz) => api.mscSearch({ kind, filters: active, page, size: sz })
+          : (page, sz) => cloudMscSearch({ kind, filters: active, page, size: sz })
+        if (full) {
+          const all = await fetchAllPages(searchFn, { size, cap: PAGE_SIZE_FULL_CAP })
+          if (stale()) return
+          if (all.length >= PAGE_SIZE_FULL_CAP) {
+            setFullNote(`Đã tải tối đa ${PAGE_SIZE_FULL_CAP.toLocaleString('vi-VN')} dòng — thu hẹp lọc nếu cần xem thêm.`)
+          }
+          setData({ total: all.length, items: all, page: 0, size: all.length || size })
+          setPage(0)
+        } else {
+          const res = await searchFn(p, size)
+          if (stale()) return
+          setData(res)
+          setPage(p)
         }
-        setPage(p)
         return
       }
       setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
@@ -180,7 +199,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         setRefreshKey((k) => k + 1)
       }
     }
-  }, [kind, localMode, mergedFilters, staticName])
+  }, [kind, localMode, mergedFilters])
 
   useEffect(() => {
     if (!prefsReady) return
@@ -220,11 +239,13 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
       }
       return out
     } catch { return [] }
-  }, [localMode, kind, mergedFilters, staticName])
+  }, [localMode, kind, mergedFilters])
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.source_id ? `${kind}:${r.source_id}` : `${kind}:${r.tender_no}|${page}|${i}`), [kind, page])
-  const pageSizeNum = resolvePageSize(pageSize)
+  const fullMode = isFullPageSize(pageSize)
+  const pageSizeNum = fullMode ? Math.max(data.items?.length || 0, 1) : resolvePageSize(pageSize)
+  const metricsItems = rows.length ? rows : data.items
 
   const fetchAll = useCallback(async () => {
     if (!localMode && !supabaseConfigured) return []
@@ -232,7 +253,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
       ? (p, size) => api.mscSearch({ kind, filters: mergedFilters(), page: p, size })
       : (p, size) => cloudMscSearch({ kind, filters: mergedFilters(), page: p, size })
     return fetchAllPages(searchFn, { onProgress: setExportPct })
-  }, [localMode, kind, mergedFilters, staticName])
+  }, [localMode, kind, mergedFilters])
 
   const doExport = async () => {
     setExporting(true)
@@ -286,27 +307,32 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
 
       <div className="panel">
         <div className="filters">
-          <div className="filters-inner">
-            <div className="filter-top">
-              <div className="segmented" role="tablist" aria-label="Loại dữ liệu">
-                <button type="button" role="tab" aria-selected={kind === 'prices'} className={kind === 'prices' ? 'on' : ''} onClick={() => setKind('prices')}>Đơn giá</button>
-                <button type="button" role="tab" aria-selected={kind === 'tenders'} className={kind === 'tenders' ? 'on' : ''} onClick={() => setKind('tenders')}>Gói thầu</button>
+          <div className={`filters-split${embedded ? ' no-stats' : ''}`}>
+            <div className="filters-left">
+              <div className="filter-top">
+                <div className="segmented" role="tablist" aria-label="Loại dữ liệu">
+                  <button type="button" role="tab" aria-selected={kind === 'prices'} className={kind === 'prices' ? 'on' : ''} onClick={() => setKind('prices')}>Đơn giá</button>
+                  <button type="button" role="tab" aria-selected={kind === 'tenders'} className={kind === 'tenders' ? 'on' : ''} onClick={() => setKind('tenders')}>Gói thầu</button>
+                </div>
+              </div>
+              <div className="filter-keyword">
+                <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tìm trong mọi trường" />
+              </div>
+              {!filtersInModal && secondaryGrid}
+              <div className="filter-actions">
+                {filtersInModal && (
+                  <button type="button" className={`btn ghost${detailActive ? ' on' : ''}`} onClick={() => setFilterModalOpen(true)}>
+                    {Icons.filter} Bộ lọc chi tiết
+                    {detailActive > 0 && <span className="pill">{detailActive}</span>}
+                  </button>
+                )}
+                <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
+                <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
               </div>
             </div>
-            <div className="filter-keyword">
-              <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tìm trong mọi trường" />
-            </div>
-            {!filtersInModal && secondaryGrid}
-            <div className="filter-actions filter-actions-center">
-              {filtersInModal && (
-                <button type="button" className={`btn ghost${detailActive ? ' on' : ''}`} onClick={() => setFilterModalOpen(true)}>
-                  {Icons.filter} Bộ lọc chi tiết
-                  {detailActive > 0 && <span className="pill">{detailActive}</span>}
-                </button>
-              )}
-              <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
-              <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
-            </div>
+            {!embedded && (kind === 'prices'
+              ? <MscPriceMetrics items={metricsItems} />
+              : <MscTenderMetrics items={metricsItems} />)}
           </div>
         </div>
 
@@ -322,13 +348,14 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           activeColumnFilters={activeCF}
           onClearColumnFilters={() => { setColumnFilters({}); search(0, {}) }}
         />
+        {fullNote && <div className="info-note">{fullNote}</div>}
         <ErrorNote>{err}</ErrorNote>
 
         <DataTable
           columns={cols}
           rows={rows}
           rowKey={rowKey}
-          startIndex={page * pageSizeNum}
+          startIndex={fullMode ? 0 : page * pageSizeNum}
           selected={sel.selected}
           onToggleRow={sel.toggle}
           onToggleAll={sel.setMany}

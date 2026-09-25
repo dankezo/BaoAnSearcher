@@ -47,14 +47,16 @@ export function LoadingOverlay({ show, percent = 0, message = 'Đang xử lý…
 export function useSimProgress(active, baseMsg = 'Đang tải') {
   const [pct, setPct] = useState(0)
   useEffect(() => {
-    if (!active) { setPct(0); return }
+    if (!active) { setPct(0); return undefined }
     setPct(8)
     const t = setInterval(() => {
       setPct((p) => {
-        if (p >= 94) return 88 + Math.random() * 6 // pulse thay vì kẹt cứng 92
-        return p + Math.random() * 7
+        // Monotonic asymptote — never bounce backward (avoids 98%→96%).
+        if (p >= 92) return p
+        const step = 1.2 + Math.random() * 2.2
+        return Math.min(92, p + step)
       })
-    }, 400)
+    }, 380)
     return () => clearInterval(t)
   }, [active])
   return { percent: pct, message: `${baseMsg}…` }
@@ -548,12 +550,18 @@ export function Pagination({ page, size, total, onPage, shown, extra, pageSize, 
   )
 }
 
-/** Resolve UI page-size choice → numeric size for API (Full = large cap). */
-export const PAGE_SIZE_FULL = 5000
+/** Resolve UI page-size choice → numeric size for API.
+ * Full = chunk size for paging-all (client loads every page until done).
+ */
+export const PAGE_SIZE_FULL_CHUNK = 1000
+export const PAGE_SIZE_FULL_CAP = 20000
 export function resolvePageSize(choice) {
-  if (choice === 'full' || choice === 0) return PAGE_SIZE_FULL
+  if (choice === 'full' || choice === 0) return PAGE_SIZE_FULL_CHUNK
   const n = Number(choice)
-  return Number.isFinite(n) && n > 0 ? n : 200
+  return Number.isFinite(n) && n > 0 ? n : 100
+}
+export function isFullPageSize(choice) {
+  return choice === 'full' || choice === 0
 }
 
 /* ------------------------------------------------------------------ */
@@ -990,17 +998,23 @@ export async function exportSelectionOrAll({ columns, selected, fetchAll, filena
 }
 
 /** Page through a server search until total/cap reached. */
-export async function fetchAllPages(fetchPage, { size = 200, cap = 5000, onProgress } = {}) {
+export async function fetchAllPages(fetchPage, {
+  size = PAGE_SIZE_FULL_CHUNK,
+  cap = PAGE_SIZE_FULL_CAP,
+  onProgress,
+} = {}) {
   const first = await fetchPage(0, size)
   const items = [...(first.items || [])]
   const total = Math.min(first.total || items.length, cap)
+  onProgress?.(items.length && total ? Math.min(99, Math.round((items.length / total) * 100)) : 5)
   let page = 1
-  while (items.length < total && page < 200) {
-    onProgress?.(Math.round((items.length / total) * 100))
+  while (items.length < total && page < 500) {
     const more = await fetchPage(page, size)
     if (!more.items?.length) break
     items.push(...more.items)
+    onProgress?.(Math.min(99, Math.round((items.length / Math.max(total, 1)) * 100)))
     page++
+    if (more.items.length < size) break
   }
   onProgress?.(100)
   return items.slice(0, cap)

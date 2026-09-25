@@ -6,12 +6,13 @@ import {
   ColumnPicker, CountSelect, DataTable, DetailModal, ErrorNote, FilterModal, HospitalGradeField,
   Icons, IngredientText, LoadingOverlay, Pagination, SearchSuggestBar, SuggestField, TableToolbar, UpdatedNote,
   ViewModeSelect, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters,
-  useSectionMeta, useSelection, useSimProgress, useTt20,
+  useSectionMeta, useSelection, useSimProgress, useTt20, isFullPageSize, PAGE_SIZE_FULL_CAP,
 } from './components'
 import { TagBadge, TagFilterDropdown, useTagFilterState } from './TagFilterDropdown'
-import { enrichRowTag, TAG_XANH, TAG_VANG, TAG_CAM, TAG_XAM } from './tagConfig'
+import { enrichRowTag } from './tagConfig'
 import { ingredientAllowedAtGrade } from './tt20'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
+import { DavMetrics } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
 
@@ -56,18 +57,6 @@ const EMPTY_FILTERS = {
   tags: null,
 }
 
-const TAG_STAT_ORDER = [
-  { id: TAG_XANH, label: 'Xanh · sẵn sàng' },
-  { id: TAG_VANG, label: 'Vàng · xác minh' },
-  { id: TAG_CAM, label: 'Cam · DM93' },
-  { id: TAG_XAM, label: 'Xám · lịch sử' },
-]
-
-function fmtNum(n) {
-  if (n == null || Number.isNaN(Number(n))) return '—'
-  return Number(n).toLocaleString('vi-VN')
-}
-
 export default function DavSection({ localMode, embedded = false, filtersInModal = false }) {
   const { user } = useAuth()
   const userId = userKeyPart(user)
@@ -88,8 +77,8 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const [err, setErr] = useState('')
   const [detail, setDetail] = useState(null)
   const [staticFallback, setStaticFallback] = useState(null)
-  const [davStats, setDavStats] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [fullNote, setFullNote] = useState('')
   const [suggests, setSuggests] = useState([])
   const [suggestOpen, setSuggestOpen] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
@@ -181,46 +170,43 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const search = useCallback(async (p = 0, cf, override = null, tagsOverride = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
+    const full = isFullPageSize(pageSizeRef.current)
     const size = resolvePageSize(pageSizeRef.current)
     setLoading(true)
     setErr('')
+    setFullNote('')
     const active = { ...mergedFilters(cf, tagsOverride), ...(override || {}) }
     try {
       if (localMode || supabaseConfigured) {
         const needGrade = !!active.hangBenhVien
-        const res = localMode
-          ? await api.davSearch({
-              filters: active,
-              page: needGrade ? 0 : p,
-              size: needGrade ? Math.max(size, 400) : size,
-            })
-          : await cloudDavSearch({
-              filters: active,
-              page: needGrade ? 0 : p,
-              size: needGrade ? Math.max(size, 400) : size,
-            })
-        if (stale()) return
-        let items = (res.items || []).map(enrichRowTag)
-        if (active.hangBenhVien) {
-          items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, active.hangBenhVien))
-          items = sortByDateDesc(items, ['ngayGiaHan', 'ngayCap', 'ngayHetHan'])
-          setData({
-            total: items.length,
-            items: items.slice(p * size, p * size + size),
-            page: p,
-            size,
+        const searchFn = localMode
+          ? (page, sz) => api.davSearch({ filters: active, page, size: sz })
+          : (page, sz) => cloudDavSearch({ filters: active, page, size: sz })
+
+        if (full || needGrade) {
+          const allRaw = await fetchAllPages(searchFn, {
+            size: Math.max(size, 400),
+            cap: PAGE_SIZE_FULL_CAP,
           })
-        } else {
-          setData({ ...res, items })
-        }
-        if (!localMode) {
-          const m = await cloudMeta('dav')
-          if (m) {
-            setStaticFallback({ updated: m.updated, count: m.count })
-            if (m.stats) setDavStats(m.stats)
+          if (stale()) return
+          let items = allRaw.map(enrichRowTag)
+          if (needGrade) {
+            items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, active.hangBenhVien))
           }
+          items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
+          if (full && allRaw.length >= PAGE_SIZE_FULL_CAP) {
+            setFullNote(`Đã tải tối đa ${PAGE_SIZE_FULL_CAP.toLocaleString('vi-VN')} dòng — thu hẹp lọc nếu cần xem thêm.`)
+          }
+          setData({ total: items.length, items, page: 0, size: items.length || size })
+          setPage(0)
+        } else {
+          const res = await searchFn(p, size)
+          if (stale()) return
+          let items = (res.items || []).map(enrichRowTag)
+          items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
+          setData({ ...res, items })
+          setPage(p)
         }
-        setPage(p)
         return
       }
       setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
@@ -240,6 +226,17 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     if (!prefsReady) return
     search(0)
   }, [prefsReady, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Meta once (not on every search — avoids tab-switch lag)
+  useEffect(() => {
+    if (localMode || !supabaseConfigured) return undefined
+    let alive = true
+    cloudMeta('dav').then((m) => {
+      if (!alive || !m) return
+      setStaticFallback({ updated: m.updated, count: m.count })
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [localMode])
 
   const toSuggest = useCallback((items) => (
     (items || []).slice(0, 4).map((r, i) => ({
@@ -344,7 +341,9 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => (r.id != null ? `id:${r.id}` : `${r.soDangKy}|${page}|${i}`), [page])
-  const pageSizeNum = resolvePageSize(pageSize)
+  const fullMode = isFullPageSize(pageSize)
+  const pageSizeNum = fullMode ? Math.max(data.items?.length || 0, 1) : resolvePageSize(pageSize)
+  const metricsItems = rows.length ? rows : data.items
 
   const fetchAll = useCallback(async () => {
     if (!localMode && !supabaseConfigured) return []
@@ -392,10 +391,6 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     </div>
   )
 
-  const byTag = davStats?.byTag || {}
-  const totalDb = davStats?.total ?? meta.count
-  const hieuLuc = davStats?.hieuLuc
-
   return (
     <div className={`section${embedded ? ' embedded' : ''}`}>
       {!embedded && (
@@ -411,7 +406,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
 
       <div className="panel">
         <div className="filters">
-          <div className="filters-split">
+          <div className={`filters-split${embedded ? ' no-stats' : ''}`}>
             <div className="filters-left">
               <SearchSuggestBar
                 value={filters.q}
@@ -470,40 +465,9 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
               )}
             </div>
 
-            <aside className="filters-stats" aria-label="Thống kê DAV">
-              <div className="stats-card">
-                <div className="stats-kicker">Kho DAV</div>
-                <div className="stats-value">{fmtNum(totalDb)}</div>
-                <div className="stats-sub">SĐK đã đồng bộ Turso</div>
-              </div>
-              <div className="stats-card">
-                <div className="stats-kicker">Còn hiệu lực</div>
-                <div className="stats-value accent">{fmtNum(hieuLuc)}</div>
-                <div className="stats-sub">
-                  {hieuLuc != null && totalDb
-                    ? `${Math.round((hieuLuc / totalDb) * 100)}% toàn kho`
-                    : '—'}
-                </div>
-              </div>
-              <div className="stats-card">
-                <div className="stats-kicker">Kết quả lọc</div>
-                <div className="stats-value">{fmtNum(data.total)}</div>
-                <div className="stats-sub">{selectedTags.length} tag đang áp dụng</div>
-              </div>
-              <div className="stats-tags">
-                {TAG_STAT_ORDER.map((t) => {
-                  const cfg = configs.find((c) => c.id === t.id)
-                  const n = byTag[t.id]
-                  return (
-                    <div key={t.id} className="stats-tag-row">
-                      <span className="tag-dot" style={{ background: cfg?.colorHex || '#94a3b8' }} />
-                      <span className="stats-tag-label">{t.label}</span>
-                      <span className="stats-tag-n">{fmtNum(n)}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </aside>
+            {!embedded && (
+              <DavMetrics items={metricsItems} total={data.total} />
+            )}
           </div>
         </div>
 
@@ -526,13 +490,14 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
         </TableToolbar>
 
         <ColumnPicker allColumns={ALL_COLS} visible={visible} onChange={setVisible} open={colPicker} onClose={() => setColPicker(false)} />
+        {fullNote && <div className="info-note">{fullNote}</div>}
         <ErrorNote>{err}</ErrorNote>
 
         <DataTable
           columns={cols}
           rows={rows}
           rowKey={rowKey}
-          startIndex={page * pageSizeNum}
+          startIndex={fullMode ? 0 : page * pageSizeNum}
           selected={sel.selected}
           onToggleRow={sel.toggle}
           onToggleAll={sel.setMany}

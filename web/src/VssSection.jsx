@@ -6,10 +6,11 @@ import {
   ColumnPicker, DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons,
   IngredientText, LoadingOverlay, Pagination, SuggestField, TableToolbar, UpdatedNote, ViewModeSelect,
   applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters, useSectionMeta,
-  useSelection, useSimProgress, useTt20,
+  useSelection, useSimProgress, useTt20, isFullPageSize, PAGE_SIZE_FULL_CAP,
 } from './components'
 import { ingredientAllowedAtGrade } from './tt20'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
+import { VssMetrics } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
 
@@ -118,6 +119,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [prefsReady, setPrefsReady] = useState(false)
+  const [fullNote, setFullNote] = useState('')
   const sim = useSimProgress(loading, 'Đang lọc BHYT VSS')
   const sel = useSelection()
   const reqSeq = useRef(0)
@@ -141,6 +143,15 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   }, [userId, prefsReady, filters, viewMode, visible, pageSize, columnFilters])
 
   useEffect(() => {
+    if (localMode || !supabaseConfigured) return undefined
+    let alive = true
+    cloudMeta('vss').then((m) => {
+      if (alive && m) setStaticFallback({ updated: m.updated, count: m.count })
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [localMode])
+
+  useEffect(() => {
     if (viewMode === 'compact') setVisible(DEFAULT)
     else if (viewMode === 'full') setVisible(ALL_COLS.map((c) => c.key))
   }, [viewMode])
@@ -162,40 +173,43 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const search = useCallback(async (p = 0, cf, override = null) => {
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
+    const full = isFullPageSize(pageSizeRef.current)
     const size = resolvePageSize(pageSizeRef.current)
     setLoading(true)
     setErr('')
     setInfoNote('')
+    setFullNote('')
     const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
     try {
       const useRemote = localMode || supabaseConfigured
       if (useRemote) {
         const needGrade = !!active.hangBenhVien
-        const res = localMode
-          ? await api.vssSearch({
-              filters: active,
-              page: needGrade ? 0 : p,
-              size: needGrade ? Math.max(size, 400) : size,
-            })
-          : await cloudVssSearch({
-              filters: active,
-              page: needGrade ? 0 : p,
-              size: needGrade ? Math.max(size, 400) : size,
-            })
-        if (stale()) return
-        let items = res.items || []
-        if (active.hangBenhVien) {
-          items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, active.hangBenhVien))
+        const searchFn = localMode
+          ? (page, sz) => api.vssSearch({ filters: active, page, size: sz })
+          : (page, sz) => cloudVssSearch({ filters: active, page, size: sz })
+
+        if (full || needGrade) {
+          const allRaw = await fetchAllPages(searchFn, {
+            size: Math.max(size, 400),
+            cap: PAGE_SIZE_FULL_CAP,
+          })
+          if (stale()) return
+          let items = allRaw
+          if (needGrade) {
+            items = items.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, active.hangBenhVien))
+          }
           items = sortByDateDesc(items, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd'])
-          setData({ total: items.length, items: items.slice(p * size, p * size + size) })
+          if (full && allRaw.length >= PAGE_SIZE_FULL_CAP) {
+            setFullNote(`Đã tải tối đa ${PAGE_SIZE_FULL_CAP.toLocaleString('vi-VN')} dòng — thu hẹp lọc nếu cần xem thêm.`)
+          }
+          setData({ total: items.length, items, page: 0, size: items.length || size })
+          setPage(0)
         } else {
+          const res = await searchFn(p, size)
+          if (stale()) return
           setData(res)
+          setPage(p)
         }
-        if (!localMode) {
-          const m = await cloudMeta('vss')
-          if (m) setStaticFallback({ updated: m.updated, count: m.count })
-        }
-        setPage(p)
         return
       }
       setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
@@ -251,11 +265,13 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
       }
       return out
     } catch { return [] }
-  }, [localMode, mergedFilters, tt20Index])
+  }, [localMode, mergedFilters])
 
   const rows = useMemo(() => applyColumnFilters(data.items, cols, columnFilters), [data.items, cols, columnFilters])
   const rowKey = useCallback((r, i) => `${r.sodk}|${r.ma}|${r.ma_tinh}|${r.quyetdinh}|${r.stt ?? `${page}-${i}`}`, [page])
-  const pageSizeNum = resolvePageSize(pageSize)
+  const fullMode = isFullPageSize(pageSize)
+  const pageSizeNum = fullMode ? Math.max(data.items?.length || 0, 1) : resolvePageSize(pageSize)
+  const metricsItems = rows.length ? rows : data.items
 
   const fetchAll = useCallback(async () => {
     const searchFn = localMode
@@ -353,34 +369,37 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
       <div className="panel">
         <div className="filters">
-          <div className="filters-inner">
-            {filtersInModal ? (
-              <div className="filter-keyword">
-                <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" />
-              </div>
-            ) : (
-              <>
+          <div className={`filters-split${embedded ? ' no-stats' : ''}`}>
+            <div className="filters-left">
+              {filtersInModal ? (
                 <div className="filter-keyword">
                   <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" />
                 </div>
-                {primaryFilters}
-                {detailFilters}
-              </>
-            )}
-            <div className="filter-actions filter-actions-center">
-              {filtersInModal && (
-                <button
-                  type="button"
-                  className={`btn ghost${detailActive ? ' on' : ''}`}
-                  onClick={() => setFilterModalOpen(true)}
-                >
-                  {Icons.filter} Bộ lọc chi tiết
-                  {detailActive > 0 && <span className="pill">{detailActive}</span>}
-                </button>
+              ) : (
+                <>
+                  <div className="filter-keyword">
+                    <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" />
+                  </div>
+                  {primaryFilters}
+                  {detailFilters}
+                </>
               )}
-              <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
-              <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
+              <div className="filter-actions">
+                {filtersInModal && (
+                  <button
+                    type="button"
+                    className={`btn ghost${detailActive ? ' on' : ''}`}
+                    onClick={() => setFilterModalOpen(true)}
+                  >
+                    {Icons.filter} Bộ lọc chi tiết
+                    {detailActive > 0 && <span className="pill">{detailActive}</span>}
+                  </button>
+                )}
+                <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
+                <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
+              </div>
             </div>
+            {!embedded && <VssMetrics items={metricsItems} tt20Index={tt20Index} />}
           </div>
         </div>
 
@@ -404,13 +423,14 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
         <ColumnPicker allColumns={ALL_COLS} visible={visible} onChange={setVisible} open={colPicker} onClose={() => setColPicker(false)} />
         {infoNote && <div className="info-note">{infoNote}</div>}
+        {fullNote && <div className="info-note">{fullNote}</div>}
         <ErrorNote>{err}</ErrorNote>
 
         <DataTable
           columns={cols}
           rows={rows}
           rowKey={rowKey}
-          startIndex={page * pageSizeNum}
+          startIndex={fullMode ? 0 : page * pageSizeNum}
           selected={sel.selected}
           onToggleRow={sel.toggle}
           onToggleAll={sel.setMany}

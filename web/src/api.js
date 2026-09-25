@@ -234,6 +234,8 @@ export function fmtDateTime(v) {
   const s = String(v)
   const m = s.match(/(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/)
   if (!m) return s
+  const y = parseInt(m[1], 10)
+  if (y < 2000 || y > 2035) return ''
   return m[4] ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : `${m[3]}/${m[2]}/${m[1]}`
 }
 
@@ -241,7 +243,11 @@ export function fmtDate(v) {
   if (!v) return ''
   const s = String(v)
   const m = s.match(/(\d{4})-(\d{2})-(\d{2})/)
-  if (m) return `${m[3]}/${m[2]}/${m[1]}`
+  if (m) {
+    const y = parseInt(m[1], 10)
+    if (y < 2000 || y > 2035) return ''
+    return `${m[3]}/${m[2]}/${m[1]}`
+  }
   return s
 }
 

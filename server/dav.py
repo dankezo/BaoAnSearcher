@@ -474,9 +474,9 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
                 continue
         results.append(flat)
 
-    # Newest first (gia hạn / ngày cấp)
+    # Newest issuance first (ngày cấp)
     results.sort(
-        key=lambda f: str(f.get("ngayGiaHan") or f.get("ngayCap") or f.get("ngayHetHan") or ""),
+        key=lambda f: str(f.get("ngayCap") or f.get("ngayGiaHan") or f.get("ngayHetHan") or ""),
         reverse=True,
     )
 

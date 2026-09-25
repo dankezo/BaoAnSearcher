@@ -94,8 +94,19 @@ export default function App() {
   const [checked, setChecked] = useState(false)
   const [leftApp, setLeftApp] = useState('dav')
   const [rightApp, setRightApp] = useState('vss')
+  const [visited, setVisited] = useState(() => {
+    const h = window.location.hash.replace('#', '')
+    const id = TABS.some((t) => t.id === h) ? h : 'dav'
+    return { [id]: true }
+  })
 
   const multi = tab === 'multi'
+
+  useEffect(() => {
+    if (tab && tab !== 'multi') {
+      setVisited((v) => (v[tab] ? v : { ...v, [tab]: true }))
+    }
+  }, [tab])
 
   useEffect(() => {
     api.health()
@@ -187,10 +198,26 @@ export default function App() {
           </div>
         </header>
         <main className={`page${multi ? ' page-split' : ''}`}>
-          {checked && !multi && tab === 'dav' && <DavSection localMode={localMode} />}
-          {checked && !multi && tab === 'msc' && <MscSection localMode={localMode} />}
-          {checked && !multi && tab === 'vss' && <VssSection localMode={localMode} />}
-          {checked && !multi && tab === 'admin' && <AdminSection localMode={localMode} />}
+          {checked && !multi && visited.dav && (
+            <div className="tab-pane" hidden={tab !== 'dav'} aria-hidden={tab !== 'dav'}>
+              <DavSection localMode={localMode} />
+            </div>
+          )}
+          {checked && !multi && visited.msc && (
+            <div className="tab-pane" hidden={tab !== 'msc'} aria-hidden={tab !== 'msc'}>
+              <MscSection localMode={localMode} />
+            </div>
+          )}
+          {checked && !multi && visited.vss && (
+            <div className="tab-pane" hidden={tab !== 'vss'} aria-hidden={tab !== 'vss'}>
+              <VssSection localMode={localMode} />
+            </div>
+          )}
+          {checked && !multi && visited.admin && (
+            <div className="tab-pane" hidden={tab !== 'admin'} aria-hidden={tab !== 'admin'}>
+              <AdminSection localMode={localMode} />
+            </div>
+          )}
           {checked && multi && (
             <div className="split-view">
               <SplitPane

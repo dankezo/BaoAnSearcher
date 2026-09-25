@@ -358,7 +358,7 @@ begin
       and (p_so_dang_ky is null or p_so_dang_ky = '' or coalesce(d.so_dang_ky,'') ilike '%' || p_so_dang_ky || '%')
       and (p_hoat_chat is null or p_hoat_chat = '' or coalesce(d.hoat_chat,'') ilike '%' || p_hoat_chat || '%')
       and (p_dang_bao_che is null or p_dang_bao_che = '' or coalesce(d.dang_bao_che,'') ilike '%' || p_dang_bao_che || '%')
-    order by coalesce(d.ngay_gia_han, d.ngay_cap, d.ngay_het_han, '') desc, d.id
+    order by coalesce(d.ngay_cap, d.ngay_gia_han, d.ngay_het_han, '') desc, d.id
     offset v_page * v_size
     limit v_size
   ) x;
