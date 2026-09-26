@@ -96,18 +96,22 @@ function useFlashKey(dep) {
   return flash
 }
 
-/** Current calendar year (display only). Metrics use full loaded sample — not year-filtered. */
+/** Current calendar year — MSC/VSS metrics window starts Jan 1 of this year. */
 export const METRICS_YEAR = new Date().getFullYear()
-/** Kept for callers; empty = all years (fixed total load). */
-export const VSS_METRICS_YEARS = []
+/** VSS metrics year window (inclusive). DAV uses full catalog (no year filter). */
+export const VSS_METRICS_YEARS = [METRICS_YEAR]
 
-function sampleNote(items, total) {
+function sampleNote(items, total, opts = {}) {
+  if (opts.years?.length === 1) return `từ đầu năm ${opts.years[0]}`
+  if (opts.years?.length) return `từ ${opts.years.join('–')}`
+  if (opts.yearFrom) return `từ đầu năm ${opts.yearFrom}`
   const n = items?.length || 0
   const t = Number(total)
   const partial = Number.isFinite(t) && t > n ? `đã nạp ${fmtInt(n)}/${fmtInt(t)}` : ''
   return partial || 'Toàn bộ dữ liệu đã nạp'
 }
 
+/** Date in [Jan 1 yearFrom, now]. Missing dates excluded when yearFrom is set. */
 function inYearFrom(raw, yearFrom) {
   if (!yearFrom) return true
   const t = parseDateMs(raw)
@@ -125,6 +129,16 @@ function inYears(row, years, dateKeys = []) {
     if (t != null && set.has(new Date(t).getFullYear())) return true
   }
   return false
+}
+
+/** MSC metrics sample: published/decision from Jan 1 METRICS_YEAR through now. */
+export function scopeMscMetricsRows(items) {
+  return (items || []).filter((r) => inYearFrom(r.published || r.close_date || r.decision_date, METRICS_YEAR))
+}
+
+/** VSS metrics sample: nam / contract dates in VSS_METRICS_YEARS. */
+export function scopeVssMetricsRows(items) {
+  return (items || []).filter((r) => inYears(r, VSS_METRICS_YEARS, ['tungay_hd', 'tungay', 'congbo', 'denngay_hd']))
 }
 
 function formKey(text) {
@@ -288,6 +302,7 @@ export function CompoundMetricsGrid({ title, cards, flash, activeId, onFilter, l
 
 /* ---- DAV ---- */
 export function computeDavCompound(items, total) {
+  // DAV: full catalog — no year filter
   const rows = items || []
   const note = sampleNote(rows, total)
 
@@ -407,10 +422,13 @@ export function computeDavCompound(items, total) {
   ]
 }
 
-export function DavMetrics({ items, total, activeId, onFilter, loading }) {
-  const cards = useMemo(() => computeDavCompound(items, total), [items, total])
-  const flash = useFlashKey(`${items?.length}|${total}|${cards[0]?.mainValue}`)
-  const note = sampleNote(items, total)
+export function DavMetrics({ items, total, cards: cardsProp, activeId, onFilter, loading }) {
+  const cards = useMemo(
+    () => (cardsProp?.length ? cardsProp : computeDavCompound(items, total)),
+    [cardsProp, items, total],
+  )
+  const flash = useFlashKey(`${cardsProp ? 'api' : items?.length}|${total}|${cards[0]?.mainValue}`)
+  const note = cardsProp?.length ? (cards[0]?.subtitle || 'Toàn bộ dữ liệu đã nạp') : sampleNote(items, total)
   return (
     <CompoundMetricsGrid
       title={`DAV · ${note}`}
@@ -455,8 +473,8 @@ export function mscStatusDisplay(r) {
 }
 
 export function computeMscTenderCompound(items, total) {
-  const rows = items || []
-  const note = sampleNote(rows, total)
+  const rows = scopeMscMetricsRows(items)
+  const note = sampleNote(rows, total, { yearFrom: METRICS_YEAR })
   const now = Date.now()
   let openN = 0
   let reviewN = 0
@@ -568,12 +586,18 @@ export function computeMscTenderCompound(items, total) {
   ]
 }
 
-export function MscTenderMetrics({ items, total, activeId, onFilter, loading }) {
-  const cards = useMemo(() => computeMscTenderCompound(items, total), [items, total])
-  const flash = useFlashKey(`${items?.length}|${cards[0]?.mainValue}`)
+export function MscTenderMetrics({ items, total, cards: cardsProp, activeId, onFilter, loading }) {
+  const cards = useMemo(
+    () => (cardsProp?.length ? cardsProp : computeMscTenderCompound(items, total)),
+    [cardsProp, items, total],
+  )
+  const flash = useFlashKey(`${cardsProp ? 'api' : items?.length}|${cards[0]?.mainValue}`)
+  const note = cardsProp?.length
+    ? (cards[0]?.subtitle || `từ đầu năm ${METRICS_YEAR}`)
+    : sampleNote(scopeMscMetricsRows(items), total, { yearFrom: METRICS_YEAR })
   return (
     <CompoundMetricsGrid
-      title={`Gói thầu · ${sampleNote(items, total)}`}
+      title={`Gói thầu · ${note}`}
       flash={flash}
       cards={cards}
       activeId={activeId}
@@ -677,6 +701,7 @@ export function RankExploreModal({
   onClose,
   title,
   rows,
+  rankedRows,
   nameKey,
   valueFn,
   dateKey,
@@ -684,8 +709,10 @@ export function RankExploreModal({
 }) {
   const [query, setQuery] = useState('')
   const ranked = useMemo(
-    () => buildProvinceYoYTable(rows, { nameKey, valueFn, dateKey }),
-    [rows, nameKey, valueFn, dateKey],
+    () => (rankedRows?.length
+      ? rankedRows
+      : buildProvinceYoYTable(rows, { nameKey, valueFn, dateKey })),
+    [rankedRows, rows, nameKey, valueFn, dateKey],
   )
   const visible = useMemo(() => {
     const q = ingredientKey(query)
@@ -779,8 +806,8 @@ function mscLineValue(r) {
 }
 
 export function computeMscPriceCompound(items, total, { onExploreProvinces } = {}) {
-  const rows = items || []
-  const note = sampleNote(rows, total)
+  const rows = scopeMscMetricsRows(items)
+  const note = sampleNote(rows, total, { yearFrom: METRICS_YEAR })
 
   const byIngPrices = new Map()
   for (const r of rows) {
@@ -880,7 +907,7 @@ export function computeMscPriceCompound(items, total, { onExploreProvinces } = {
       mainValue: topProv ? (topProv[0].length > 18 ? `${topProv[0].slice(0, 16)}…` : topProv[0]) : '—',
       unit: topProv ? fmtMoney(topProv[1]) : '',
       subtitle: note,
-      titleTip: 'Tỉnh có tổng thành tiền (SL × ĐG) cao nhất trên toàn bộ dữ liệu đã nạp',
+      titleTip: `Tỉnh có tổng thành tiền (SL × ĐG) cao nhất từ đầu năm ${METRICS_YEAR}`,
       subMetrics: [
         { id: 'prov_n', label: 'Số tỉnh', count: fmtInt(byProv.size), tone: 'neutral', info: true },
         { id: 'prov_total', label: 'Tổng DT', count: fmtMoney(value), tone: 'ok', info: true },
@@ -893,7 +920,7 @@ export function computeMscPriceCompound(items, total, { onExploreProvinces } = {
       mainValue: topGrowth?.growth == null ? '—' : fmtPct(topGrowth.growth),
       unit: topGrowth ? (topGrowth.name.length > 14 ? `${topGrowth.name.slice(0, 12)}…` : topGrowth.name) : '',
       subtitle: note,
-      titleTip: '12 tháng gần nhất so cùng kỳ năm trước — xếp hạng đủ tất cả tỉnh',
+      titleTip: `Mẫu từ đầu năm ${METRICS_YEAR} — 12 tháng gần nhất so cùng kỳ năm trước`,
       explore: (
         <RankExploreButton
           label={topGrowth?.name || 'Chưa có tỉnh'}
@@ -905,14 +932,31 @@ export function computeMscPriceCompound(items, total, { onExploreProvinces } = {
   ]
 }
 
-export function MscPriceMetrics({ items, total, activeId, onFilter, loading }) {
+export function MscPriceMetrics({ items, total, cards: cardsProp, provincesYoy, activeId, onFilter, loading }) {
   const [explore, setExplore] = useState(false)
-  const cards = useMemo(
-    () => computeMscPriceCompound(items, total, { onExploreProvinces: () => setExplore(true) }),
-    [items, total],
-  )
-  const flash = useFlashKey(`${items?.length}|${cards[0]?.mainValue}`)
-  const note = sampleNote(items, total)
+  const scoped = useMemo(() => scopeMscMetricsRows(items), [items])
+  const cards = useMemo(() => {
+    const base = cardsProp?.length
+      ? cardsProp
+      : computeMscPriceCompound(items, total, { onExploreProvinces: () => setExplore(true) })
+    if (!cardsProp?.length) return base
+    return base.map((c) => (c.explore
+      ? {
+        ...c,
+        explore: (
+          <RankExploreButton
+            label={c.unit || c.mainValue || 'Chưa có tỉnh'}
+            topHint={provincesYoy?.length ? `${provincesYoy.length} tỉnh` : null}
+            onOpen={() => setExplore(true)}
+          />
+        ),
+      }
+      : c))
+  }, [cardsProp, items, total, provincesYoy])
+  const flash = useFlashKey(`${cardsProp ? 'api' : scoped.length}|${cards[0]?.mainValue}`)
+  const note = cardsProp?.length
+    ? (cards[0]?.subtitle || `từ đầu năm ${METRICS_YEAR}`)
+    : sampleNote(scoped, total, { yearFrom: METRICS_YEAR })
   return (
     <>
       <CompoundMetricsGrid
@@ -926,8 +970,9 @@ export function MscPriceMetrics({ items, total, activeId, onFilter, loading }) {
       <RankExploreModal
         open={explore}
         onClose={() => setExplore(false)}
-        title="Xếp hạng tỉnh theo tăng trưởng doanh thu YoY"
-        rows={items}
+        title={`Xếp hạng tỉnh YoY · từ đầu năm ${METRICS_YEAR}`}
+        rows={scoped}
+        rankedRows={provincesYoy}
         nameKey="province"
         valueFn={mscLineValue}
         dateKey="published"
@@ -1178,8 +1223,8 @@ function vssRunRateCard(rows, total, note) {
 }
 
 export function computeVssCompound(items, total, { onExploreProvinces } = {}) {
-  const rows = items || []
-  const note = sampleNote(rows, total)
+  const rows = scopeVssMetricsRows(items)
+  const note = sampleNote(rows, total, { years: VSS_METRICS_YEARS })
 
   const payG = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
   let payAll = 0
@@ -1260,7 +1305,7 @@ export function computeVssCompound(items, total, { onExploreProvinces } = {}) {
       mainValue: top ? (top.name.length > 18 ? `${top.name.slice(0, 16)}…` : top.name) : '—',
       unit: top ? fmtMoney(top.value) : '',
       subtitle: note,
-      titleTip: 'Tỉnh có tổng thành tiền cao nhất — mở bảng để xem đủ xếp hạng tất cả tỉnh',
+      titleTip: `Tỉnh có tổng thành tiền cao nhất từ đầu năm ${METRICS_YEAR} — mở bảng xếp hạng`,
       subMetrics: [
         { id: 'prov_n', label: 'Số tỉnh', count: fmtInt(provinceRows.length), tone: 'neutral', info: true },
         { id: 'prov_share', label: 'Tỷ trọng', count: top ? `${top.share.toFixed(1)}%` : '—', tone: 'ok', info: true },
@@ -1300,13 +1345,19 @@ export function buildProvinceTable(rows) {
   }))
 }
 
-function ProvinceExploreModal({ open, onClose, rows, total, loading, onPick }) {
+function ProvinceExploreModal({ open, onClose, rows, rankedRows, total, loading, onPick }) {
   const [query, setQuery] = useState('')
-  const ranked = useMemo(() => buildProvinceTable(rows), [rows])
+  const ranked = useMemo(
+    () => (rankedRows?.length ? rankedRows : buildProvinceTable(rows)),
+    [rankedRows, rows],
+  )
   const shown = ranked.filter((p) => ingredientKey(`${p.name} ${p.code}`).includes(ingredientKey(query)))
   const visible = query.trim() ? shown : ranked
+  const rowCount = rankedRows?.length
+    ? ranked.reduce((s, p) => s + (p.count || 0), 0)
+    : (rows?.length || 0)
   return <Modal open={open} onClose={onClose} title="Giá trị trúng thầu theo tỉnh"
-    subtitle="Toàn bộ tỉnh có trong dữ liệu đã nạp · sắp xếp theo doanh thu"
+    subtitle={`Mẫu từ đầu năm ${METRICS_YEAR} · sắp xếp theo doanh thu`}
     width={1120}
     footer={(
       <>
@@ -1319,20 +1370,20 @@ function ProvinceExploreModal({ open, onClose, rows, total, loading, onPick }) {
     <div className="province-summary">
       <div><span>Tổng giá trị</span><strong>{fmtVnd(ranked.reduce((sum, p) => sum + p.value, 0))}</strong></div>
       <div><span>Tỉnh / nhóm</span><strong>{fmtInt(ranked.length)}</strong></div>
-      <div><span>Dòng trúng thầu</span><strong>{fmtInt(rows?.length || 0)}</strong></div>
+      <div><span>Dòng trúng thầu</span><strong>{fmtInt(rowCount)}</strong></div>
     </div>
     <div className="province-toolbar">
       <input aria-label="Tìm tỉnh hoặc mã tỉnh" placeholder="Tìm tỉnh hoặc mã tỉnh…" value={query} onChange={(e) => setQuery(e.target.value)} />
       <span>{visible.length} / {ranked.length} tỉnh</span>
     </div>
-    {(loading || Number(total) > (rows?.length || 0)) && <p className="province-note">{loading ? 'Đang nạp dữ liệu, các giá trị sẽ tiếp tục cập nhật.' : 'Thống kê trên dữ liệu đã nạp; chưa đủ toàn bộ kết quả.'}</p>}
+    {(loading || (!rankedRows?.length && Number(total) > (rows?.length || 0))) && <p className="province-note">{loading ? 'Đang nạp dữ liệu, các giá trị sẽ tiếp tục cập nhật.' : 'Thống kê trên dữ liệu đã nạp; chưa đủ toàn bộ kết quả.'}</p>}
     <div className="rank-table-wrap province-table-wrap">
       <table className="rank-table province-table">
         <thead><tr><th>#</th><th>Tỉnh / TP</th><th>Giá trị trúng thầu</th><th>Tỷ trọng</th><th>CSKCB</th><th>Số dòng</th>{[1, 2, 3, 4, 5].map((n) => <th key={n}>Nhóm {n}</th>)}<th>Tra cứu</th></tr></thead>
         <tbody>{visible.map((p) => <tr key={p.key}>
           <td>{ranked.indexOf(p) + 1}</td><td><strong>{p.name}</strong>{p.code && <small>Mã {p.code}</small>}</td>
           <td className="mono">{fmtVnd(p.value)}</td><td>{p.share.toFixed(1)}%</td><td>{fmtInt(p.facilities)}</td><td>{fmtInt(p.count)}</td>
-          {p.groups.map((v, i) => <td key={i} className="mono">{fmtMoney(v)}</td>)}
+          {(p.groups || [0, 0, 0, 0, 0]).map((v, i) => <td key={i} className="mono">{fmtMoney(v)}</td>)}
           <td>{(p.code || p.name !== 'Chưa xác định tỉnh') && <button className="btn secondary tiny" onClick={() => onPick(p)}>Lọc tỉnh</button>}</td>
         </tr>)}</tbody>
       </table>
@@ -1342,14 +1393,29 @@ function ProvinceExploreModal({ open, onClose, rows, total, loading, onPick }) {
   </Modal>
 }
 
-export function VssMetrics({ items, total, activeId, onFilter, loading }) {
+export function VssMetrics({ items, total, cards: cardsProp, provinces, activeId, onFilter, loading }) {
   const [explore, setExplore] = useState(false)
-  const cards = useMemo(
-    () => computeVssCompound(items, total, { onExploreProvinces: () => setExplore(true) }),
-    [items, total],
-  )
-  const flash = useFlashKey(`${items?.length}|${cards[0]?.mainValue}`)
-  const note = sampleNote(items, total)
+  const scoped = useMemo(() => scopeVssMetricsRows(items), [items])
+  const cards = useMemo(() => {
+    const base = cardsProp?.length
+      ? cardsProp
+      : computeVssCompound(items, total, { onExploreProvinces: () => setExplore(true) })
+    if (!cardsProp?.length) return base
+    return base.map((c) => (c.explore
+      ? {
+        ...c,
+        explore: (
+          <button type="button" className="province-detail-btn" onClick={() => setExplore(true)}>
+            Xem tất cả tỉnh →
+          </button>
+        ),
+      }
+      : c))
+  }, [cardsProp, items, total])
+  const flash = useFlashKey(`${cardsProp ? 'api' : scoped.length}|${cards[0]?.mainValue}`)
+  const note = cardsProp?.length
+    ? (cards[0]?.subtitle || `từ đầu năm ${METRICS_YEAR}`)
+    : sampleNote(scoped, total, { years: VSS_METRICS_YEARS })
   return (
     <>
       <CompoundMetricsGrid
@@ -1360,7 +1426,13 @@ export function VssMetrics({ items, total, activeId, onFilter, loading }) {
         onFilter={onFilter}
         loading={loading}
       />
-      <ProvinceExploreModal open={explore} onClose={() => setExplore(false)} rows={items} total={total} loading={loading}
+      <ProvinceExploreModal
+        open={explore}
+        onClose={() => setExplore(false)}
+        rows={scoped}
+        rankedRows={provinces}
+        total={total}
+        loading={loading}
         onPick={(province) => {
           setExplore(false)
           onFilter?.({ ma_tinh: province.code || province.name }, `prov:${province.key}`)

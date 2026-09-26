@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, sortByDateDesc } from './api'
-import { cloudMeta, cloudMscSearch, supabaseConfigured } from './supabaseCloud'
+import { cloudMetrics, cloudMscSearch, supabaseConfigured } from './supabaseCloud'
 import { useAuth } from './auth'
 import {
   DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, MultiSelectField, IngredientText, LoadingOverlay, Pagination,
   SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize,
   serverFilters, useSectionMeta, useSelection, useLoadProgress, } from './components'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
-import { MscPriceMetrics, MscTenderMetrics, applyMetricQuick, mscStatusDisplay } from './metrics'
+import { MscPriceMetrics, MscTenderMetrics, applyMetricQuick, mscStatusDisplay, METRICS_YEAR } from './metrics'
 import { StatusBadge, resolveBidStatusFromRow } from './bidStatus'
 
 const PAGE_SIZE_DEFAULT = 100
@@ -108,18 +108,22 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const [exportPct, setExportPct] = useState(0)
   const [err, setErr] = useState('')
   const [detail, setDetail] = useState(null)
-  const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [loadPct, setLoadPct] = useState(null)
   const [metricsSample, setMetricsSample] = useState(null)
+  const [metricsCards, setMetricsCards] = useState(null)
+  const [metricsTotal, setMetricsTotal] = useState(null)
+  const [metricsProvincesYoy, setMetricsProvincesYoy] = useState(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
+  const [tableReady, setTableReady] = useState(false)
   const [metricActiveId, setMetricActiveId] = useState(null)
   const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc thầu MSC', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
+  const sawTableLoad = useRef(false)
   useEffect(() => () => { reqSeq.current += 1 }, [])
-  const meta = useSectionMeta('msc', localMode, staticFallback, refreshKey)
+  const meta = useSectionMeta('msc', localMode, null, refreshKey)
 
   useEffect(() => {
     const saved = loadUserJson(userId, 'msc', 'session', null)
@@ -135,15 +139,6 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     if (!prefsReady) return
     saveUserJson(userId, 'msc', 'session', { kind, filters, columnFilters })
   }, [userId, prefsReady, kind, filters, columnFilters])
-
-  useEffect(() => {
-    if (localMode || !supabaseConfigured) return undefined
-    let alive = true
-    cloudMeta('msc').then((m) => {
-      if (alive && m) setStaticFallback({ updated: m.updated, count: m.count })
-    }).catch(() => {})
-    return () => { alive = false }
-  }, [localMode])
 
   const cols = kind === 'prices' ? PRICE_COLS : TENDER_COLS
 
@@ -190,22 +185,59 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     }
   }, [kind, localMode, mergedFilters, embedded])
 
-  // Metrics fixed from full kind dataset — independent of table filters
+  // Metrics: cloud aggregate API after first table paint; local keeps page-backfill
   useEffect(() => {
-    if (!prefsReady || embedded) return undefined
+    if (!prefsReady || embedded) return
+    if (loading) sawTableLoad.current = true
+    else if (sawTableLoad.current) setTableReady(true)
+  }, [prefsReady, embedded, loading])
+
+  useEffect(() => {
+    setTableReady(false)
+    sawTableLoad.current = false
+    setMetricsCards(null)
+    setMetricsProvincesYoy(null)
+    setMetricsSample(null)
+  }, [kind])
+
+  useEffect(() => {
+    if (!prefsReady || embedded || !tableReady) return undefined
     if (!(localMode || supabaseConfigured)) return undefined
     let cancelled = false
-    setMetricsSample(null)
     setMetricsLoading(true)
-    const metricsFn = localMode
-      ? (page, sz) => api.mscSearch({ kind, filters: {}, page, size: sz })
-      : (page, sz) => cloudMscSearch({ kind, filters: {}, page, size: sz })
+    const finish = () => { if (!cancelled) setMetricsLoading(false) }
+    const section = kind === 'tenders' ? 'msc_tenders' : 'msc_prices'
+    if (!localMode) {
+      cloudMetrics(section)
+        .then((payload) => {
+          if (cancelled || !payload) return
+          setMetricsCards(payload.cards || [])
+          setMetricsTotal(payload.total ?? payload.sampleSize ?? null)
+          setMetricsProvincesYoy(payload.provincesYoy || null)
+          setMetricsSample(null)
+        })
+        .catch(() => { if (!cancelled) { setMetricsCards(null); setMetricsSample([]) } })
+        .finally(finish)
+      return () => { cancelled = true }
+    }
+    const y0 = `${METRICS_YEAR}-01-01`
+    const metricsFilters = { publishedFrom: y0 }
+    const metricsFn = (page, sz) => api.mscSearch({ kind, filters: metricsFilters, page, size: sz })
     fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: () => cancelled })
-      .then((all) => { if (!cancelled) setMetricsSample(all) })
+      .then((all) => {
+        if (cancelled) return
+        const scoped = (all || []).filter((r) => {
+          const d = String(r.published || r.close_date || r.decision_date || '').slice(0, 10)
+          return !d || d >= y0
+        })
+        setMetricsSample(scoped)
+        setMetricsCards(null)
+        setMetricsTotal(scoped.length)
+      })
       .catch(() => { if (!cancelled) setMetricsSample([]) })
-      .finally(() => { if (!cancelled) setMetricsLoading(false) })
+      .finally(finish)
     return () => { cancelled = true }
-  }, [prefsReady, kind, localMode, embedded])
+  }, [prefsReady, kind, localMode, embedded, tableReady])
 
   useEffect(() => {
     if (!prefsReady) return
@@ -368,8 +400,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
               </div>
             </div>
             {!embedded && (kind === 'prices'
-              ? <MscPriceMetrics items={metricsItems} total={metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />
-              : <MscTenderMetrics items={metricsItems} total={metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />)}
+              ? <MscPriceMetrics items={metricsItems} cards={metricsCards} provincesYoy={metricsProvincesYoy} total={metricsTotal ?? metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />
+              : <MscTenderMetrics items={metricsItems} cards={metricsCards} total={metricsTotal ?? metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />)}
           </div>
         </div>
 

@@ -53,6 +53,17 @@ function likeAny(where, args, col, v) {
     where.push(`(${parts.join(' OR ')})`)
     return
   }
+  // Exact enum filters (index-friendly): loai, tag-like codes
+  if (col === 'loai') {
+    if (vals.length === 1) {
+      where.push(`${col} = ?`)
+      args.push(vals[0])
+      return
+    }
+    where.push(`${col} IN (${vals.map(() => '?').join(',')})`)
+    args.push(...vals)
+    return
+  }
   if (vals.length === 1) {
     where.push(`${col} LIKE ?`)
     args.push(`%${vals[0]}%`)
@@ -63,12 +74,8 @@ function likeAny(where, args, col, v) {
   for (const x of vals) args.push(`%${x}%`)
 }
 
-/** Compact column sets — do not SELECT dropped fields. */
-const DAV_SELECT = [
-  'id', 'search', 'tag_id', 'so_dang_ky', 'ngay_cap', 'ngay_gia_han', 'ngay_het_han',
-  'ten_thuoc', 'hoat_chat', 'ham_luong', 'dang_bao_che', 'dong_goi',
-  'cty_dang_ky', 'cty_san_xuat', 'nuoc_san_xuat', 'con_hieu_luc', 'ingredient_count', 'updated_at',
-].join(', ')
+/** Compact column sets for VSS/MSC. DAV keeps full SELECT *. */
+const DAV_SELECT = '*'
 
 const VSS_SELECT = [
   'fingerprint', 'search', 'hoatchat', 'sodk', 'ten', 'duongdung', 'hamluong', 'donvitinh',
@@ -103,7 +110,7 @@ function eqAny(where, args, col, v, parseIntVal = false) {
   args.push(...parsed)
 }
 
-async function searchVss(db, filters, page, size) {
+async function searchVss(db, filters, page, size, { skipCount = false } = {}) {
   const f = filters || {}
   const where = ['1=1']
   const args = []
@@ -132,20 +139,24 @@ async function searchVss(db, filters, page, size) {
   }
 
   const wsql = where.join(' AND ')
-  const countRs = await db.execute({
-    sql: `SELECT COUNT(*) AS c FROM vss_bids WHERE ${wsql}`,
-    args,
-  })
-  const total = Number(countRs.rows[0]?.c || 0)
   const offset = Math.max(0, page) * size
+  let total = -1
+  if (!skipCount) {
+    const countRs = await db.execute({
+      sql: `SELECT COUNT(*) AS c FROM vss_bids WHERE ${wsql}`,
+      args,
+    })
+    total = Number(countRs.rows[0]?.c || 0)
+  }
   const dataRs = await db.execute({
     sql: `SELECT ${VSS_SELECT} FROM vss_bids WHERE ${wsql} ORDER BY tungay_hd DESC, fingerprint LIMIT ? OFFSET ?`,
     args: [...args, size, offset],
   })
+  if (skipCount) total = offset + (dataRs.rows?.length || 0)
   return { total, page, size, items: dataRs.rows }
 }
 
-async function searchDav(db, filters, page, size) {
+async function searchDav(db, filters, page, size, { skipCount = false } = {}) {
   const f = filters || {}
   const where = ['1=1']
   const args = []
@@ -171,20 +182,24 @@ async function searchDav(db, filters, page, size) {
   }
 
   const wsql = where.join(' AND ')
-  const countRs = await db.execute({
-    sql: `SELECT COUNT(*) AS c FROM dav_drugs WHERE ${wsql}`,
-    args,
-  })
-  const total = Number(countRs.rows[0]?.c || 0)
   const offset = Math.max(0, page) * size
+  let total = -1
+  if (!skipCount) {
+    const countRs = await db.execute({
+      sql: `SELECT COUNT(*) AS c FROM dav_drugs WHERE ${wsql}`,
+      args,
+    })
+    total = Number(countRs.rows[0]?.c || 0)
+  }
   const dataRs = await db.execute({
     sql: `SELECT ${DAV_SELECT} FROM dav_drugs WHERE ${wsql} ORDER BY ngay_cap DESC, ngay_gia_han DESC, id LIMIT ? OFFSET ?`,
     args: [...args, size, offset],
   })
+  if (skipCount) total = offset + (dataRs.rows?.length || 0)
   return { total, page, size, items: dataRs.rows }
 }
 
-async function searchMsc(db, kind, filters, page, size) {
+async function searchMsc(db, kind, filters, page, size, { skipCount = false } = {}) {
   const table = kind === 'tenders' || kind === 'msc_tenders' ? 'msc_tenders' : 'msc_prices'
   const f = filters || {}
   const where = ['1=1']
@@ -208,18 +223,28 @@ async function searchMsc(db, kind, filters, page, size) {
   ]
   for (const [col, v] of cols) likeAny(where, args, col, v)
 
+  const publishedFrom = f.publishedFrom || f.tuNgay || null
+  if (publishedFrom) {
+    where.push('(published IS NULL OR substr(published, 1, 10) >= ?)')
+    args.push(String(publishedFrom).slice(0, 10))
+  }
+
   const wsql = where.join(' AND ')
-  const countRs = await db.execute({
-    sql: `SELECT COUNT(*) AS c FROM ${table} WHERE ${wsql}`,
-    args,
-  })
-  const total = Number(countRs.rows[0]?.c || 0)
   const offset = Math.max(0, page) * size
+  let total = -1
+  if (!skipCount) {
+    const countRs = await db.execute({
+      sql: `SELECT COUNT(*) AS c FROM ${table} WHERE ${wsql}`,
+      args,
+    })
+    total = Number(countRs.rows[0]?.c || 0)
+  }
   const select = table === 'msc_tenders' ? MSC_TENDERS_SELECT : MSC_PRICES_SELECT
   const dataRs = await db.execute({
     sql: `SELECT ${select} FROM ${table} WHERE ${wsql} ORDER BY published DESC, source_id LIMIT ? OFFSET ?`,
     args: [...args, size, offset],
   })
+  if (skipCount) total = offset + (dataRs.rows?.length || 0)
   return { total, page, size, items: dataRs.rows }
 }
 
@@ -239,12 +264,13 @@ export default async function handler(req, res) {
     const page = Math.max(0, parseInt(body.page, 10) || 0)
     // Full mode may request large pages; hard-cap keeps Turso responses bounded.
     const size = Math.min(2000, Math.max(1, parseInt(body.size, 10) || 100))
+    const skipCount = Boolean(body.skipCount)
     const db = getTurso()
     let payload
-    if (kind === 'dav') payload = await searchDav(db, body.filters, page, size)
+    if (kind === 'dav') payload = await searchDav(db, body.filters, page, size, { skipCount })
     else if (kind === 'msc_prices' || kind === 'msc_tenders' || kind === 'prices' || kind === 'tenders') {
-      payload = await searchMsc(db, kind, body.filters, page, size)
-    } else payload = await searchVss(db, body.filters, page, size)
+      payload = await searchMsc(db, kind, body.filters, page, size, { skipCount })
+    } else payload = await searchVss(db, body.filters, page, size, { skipCount })
     payload = { ...payload, items: mapTursoItems(payload.items) }
     return json(res, 200, payload)
   } catch (e) {

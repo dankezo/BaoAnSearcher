@@ -12,11 +12,13 @@ const result = await build({
 const compiled = new Module('dashboard-test')
 compiled._compile(result.outputFiles[0].text, 'dashboard-test.cjs')
 const {
+  METRICS_YEAR, VSS_METRICS_YEARS,
   computeDavCompound, computeMscPriceCompound, computeVssCompound,
+  scopeMscMetricsRows, scopeVssMetricsRows,
   buildProvinceTable, buildProvinceYoYTable, fetchAllPages,
 } = compiled.exports
 
-test('DAV keeps density/tags/forms/new-sdk cards on full sample', () => {
+test('DAV keeps density/tags/forms/new-sdk cards on full sample (all years)', () => {
   const now = Date.now()
   const rows = Array.from({ length: 50 }, (_, i) => ({
     soDangKy: String(i),
@@ -33,25 +35,34 @@ test('DAV keeps density/tags/forms/new-sdk cards on full sample', () => {
   assert.equal(cards.find((c) => c.key === 'dm93'), undefined)
   assert.equal(cards.find((c) => c.key === 'life'), undefined)
   assert.ok(Number(cards.find((c) => c.key === 'new_sdk').mainValue.replace(/\./g, '')) >= 5)
+  assert.match(String(cards.find((c) => c.key === 'density').subtitle), /Toàn bộ|đã nạp/)
 })
 
-test('MSC price ranks provinces (not winners) and uses full sample', () => {
+test('MSC price ranks provinces on METRICS_YEAR sample only', () => {
+  assert.equal(VSS_METRICS_YEARS.length, 1)
+  assert.equal(VSS_METRICS_YEARS[0], METRICS_YEAR)
   const now = Date.now()
   const day = 86400000
+  const y0 = new Date(METRICS_YEAR, 0, 15).toISOString().slice(0, 10)
+  const old = new Date(METRICS_YEAR - 1, 5, 1).toISOString().slice(0, 10)
   const rows = [
-    { province: 'Hà Nội', published: new Date(now - 10 * day).toISOString().slice(0, 10), quantity: 100, unit_price: 1000 },
-    { province: 'Hà Nội', published: new Date(now - 400 * day).toISOString().slice(0, 10), quantity: 50, unit_price: 1000 },
+    { province: 'Hà Nội', published: y0, quantity: 100, unit_price: 1000 },
+    { province: 'Hà Nội', published: old, quantity: 50, unit_price: 1000 },
     { province: 'TP.HCM', published: new Date(now - 20 * day).toISOString().slice(0, 10), quantity: 200, unit_price: 1000 },
-    { province: 'TP.HCM', published: new Date(now - 400 * day).toISOString().slice(0, 10), quantity: 10, unit_price: 1000 },
+    { province: 'TP.HCM', published: old, quantity: 10, unit_price: 1000 },
     { province: 'Đà Nẵng', published: new Date(now - 5 * day).toISOString().slice(0, 10), quantity: 10, unit_price: 1000 },
   ]
+  const scoped = scopeMscMetricsRows(rows)
+  assert.equal(scoped.length, 3)
+  assert.ok(scoped.every((r) => String(r.published).slice(0, 4) === String(METRICS_YEAR)))
   const cards = computeMscPriceCompound(rows, rows.length)
   assert.ok(cards.find((c) => c.key === 'province_lead'))
   assert.ok(cards.find((c) => c.key === 'province_yoy'))
   assert.equal(cards.find((c) => c.key === 'share'), undefined)
   const lead = cards.find((c) => c.key === 'province_lead')
   assert.match(String(lead.mainValue), /HCM|Hà Nội|TP/)
-  const yoy = buildProvinceYoYTable(rows, {
+  assert.match(String(lead.subtitle), new RegExp(`đầu năm ${METRICS_YEAR}`))
+  const yoy = buildProvinceYoYTable(scoped, {
     nameKey: 'province',
     valueFn: (r) => (r.quantity || 0) * (r.unit_price || 0),
     dateKey: 'published',
@@ -60,23 +71,29 @@ test('MSC price ranks provinces (not winners) and uses full sample', () => {
   assert.ok(yoy.every((p) => p.name))
 })
 
-test('VSS province card shows leader name and keeps every province', () => {
+test('VSS province card uses METRICS_YEAR rows only', () => {
   const rows = Array.from({ length: 70 }, (_, i) => ({
     ma_tinh: String(i + 1),
     ten_tinh: `Province ${i}`,
     thanhtien: i + 1,
     nhomthau: '1',
     ma_cskcb: 'A',
+    nam: METRICS_YEAR,
   }))
-  rows.push({ ma_tinh: '1', thanhtien: 1000, nhomthau: '2', ma_cskcb: 'B' })
+  rows.push({ ma_tinh: '1', thanhtien: 1000, nhomthau: '2', ma_cskcb: 'B', nam: METRICS_YEAR })
+  rows.push({ thanhtien: 5, nam: METRICS_YEAR - 1, ten_tinh: 'Old Province' })
   rows.push({ thanhtien: 5 })
+  const scoped = scopeVssMetricsRows(rows)
+  assert.ok(scoped.every((r) => Number(r.nam) === METRICS_YEAR))
+  assert.ok(!scoped.some((r) => r.ten_tinh === 'Old Province'))
   const cards = computeVssCompound(rows, rows.length)
   const region = cards.find((c) => c.key === 'region')
   assert.ok(region)
   assert.match(String(region.mainValue), /Province/)
+  assert.match(String(region.subtitle), new RegExp(`đầu năm ${METRICS_YEAR}`))
   assert.equal(cards.find((c) => c.key === 'runrate'), undefined)
-  const ranks = buildProvinceTable(rows)
-  assert.ok(ranks.length >= 71)
+  const ranks = buildProvinceTable(scoped)
+  assert.ok(ranks.length >= 70)
   assert.ok(Math.abs(ranks.reduce((n, p) => n + p.share, 0) - 100) < 1e-8)
 })
 
