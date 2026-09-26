@@ -62,6 +62,15 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50) -> dict:
             clauses.append("fold(coalesce(json_extract(normalized, ?),'')) LIKE ?")
             args.extend([path, f"%{val}%"])
 
+    published_from = filters.get("publishedFrom") or filters.get("tuNgay") or ""
+    if published_from:
+        y0 = str(published_from)[:10]
+        clauses.append(
+            "(json_extract(normalized, '$.published') IS NULL OR "
+            "substr(coalesce(json_extract(normalized, '$.published'), ''), 1, 10) >= ?)"
+        )
+        args.append(y0)
+
     where = " WHERE " + " AND ".join(clauses)
     page = max(0, int(page))
     size = max(1, min(5000, int(size)))

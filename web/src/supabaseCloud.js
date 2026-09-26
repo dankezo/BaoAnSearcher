@@ -210,3 +210,9 @@ export async function cloudMeta(section) {
     }
   }
 }
+
+/** Pre-aggregated metric cards (Turso SQL). section: dav|vss|msc_prices|msc_tenders */
+export async function cloudMetrics(section, { force = false } = {}) {
+  if (!supabaseConfigured) return null
+  return tenderFetch('/api/tender/metrics', { section, force })
+}

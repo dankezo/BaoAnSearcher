@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, matchesYear, sortByDateDesc } from './api'
-import { cloudMeta, cloudVssSearch, supabaseConfigured } from './supabaseCloud'
+import { cloudMetrics, cloudVssSearch, supabaseConfigured } from './supabaseCloud'
 import { useAuth } from './auth'
 import {
   DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons, MultiSelectField,
@@ -9,7 +9,7 @@ import {
   useSelection, useLoadProgress, useTt20, } from './components'
 import { ingredientAllowedAtGrade } from './tt20'
 import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
-import { VssMetrics, applyMetricQuick } from './metrics'
+import { VssMetrics, applyMetricQuick, VSS_METRICS_YEARS } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
 const METRICS_CAP = 80_000
@@ -101,20 +101,23 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const [err, setErr] = useState('')
   const [infoNote, setInfoNote] = useState('')
   const [detail, setDetail] = useState(null)
-  const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [prefsReady, setPrefsReady] = useState(false)
   const [loadPct, setLoadPct] = useState(null)
   const [metricsTotal, setMetricsTotal] = useState(null)
   const [metricsSample, setMetricsSample] = useState(null)
+  const [metricsCards, setMetricsCards] = useState(null)
+  const [metricsProvinces, setMetricsProvinces] = useState(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
+  const [tableReady, setTableReady] = useState(false)
   const [metricActiveId, setMetricActiveId] = useState(null)
   const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc BHYT VSS', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
+  const sawTableLoad = useRef(false)
   useEffect(() => () => { reqSeq.current += 1 }, [])
-  const meta = useSectionMeta('vss', localMode, staticFallback, refreshKey)
+  const meta = useSectionMeta('vss', localMode, null, refreshKey)
 
   useEffect(() => {
     const saved = loadUserJson(userId, 'vss', 'session', null)
@@ -129,15 +132,6 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     if (!prefsReady) return
     saveUserJson(userId, 'vss', 'session', { filters, columnFilters })
   }, [userId, prefsReady, filters, columnFilters])
-
-  useEffect(() => {
-    if (localMode || !supabaseConfigured) return undefined
-    let alive = true
-    cloudMeta('vss').then((m) => {
-      if (alive && m) setStaticFallback({ updated: m.updated, count: m.count })
-    }).catch(() => {})
-    return () => { alive = false }
-  }, [localMode])
 
   const cols = ALL_COLS
 
@@ -206,26 +200,44 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     }
   }, [localMode, mergedFilters, tt20Index, embedded])
 
-  // Metrics: full Tân dược load once — không theo filter / năm
+  // Metrics: cloud aggregate after first table paint; local page-backfill
   useEffect(() => {
-    if (!prefsReady || embedded) return undefined
+    if (!prefsReady || embedded) return
+    if (loading) sawTableLoad.current = true
+    else if (sawTableLoad.current) setTableReady(true)
+  }, [prefsReady, embedded, loading])
+
+  useEffect(() => {
+    if (!prefsReady || embedded || !tableReady) return undefined
     if (!(localMode || supabaseConfigured)) return undefined
     let cancelled = false
     setMetricsLoading(true)
-    const base = { loai: 'Tân dược' }
+    const finish = () => { if (!cancelled) setMetricsLoading(false) }
+    if (!localMode) {
+      cloudMetrics('vss')
+        .then((payload) => {
+          if (cancelled || !payload) return
+          setMetricsCards(payload.cards || [])
+          setMetricsTotal(payload.total ?? payload.sampleSize ?? null)
+          setMetricsProvinces(payload.provinces || null)
+          setMetricsSample(null)
+        })
+        .catch(() => { if (!cancelled) { setMetricsCards(null); setMetricsSample([]) } })
+        .finally(finish)
+      return () => { cancelled = true }
+    }
+    const base = { loai: 'Tân dược', nam: VSS_METRICS_YEARS.map(String) }
     const metricsFn = async (page, size) => {
-      const result = localMode
-        ? await api.vssSearch({ filters: base, page, size })
-        : await cloudVssSearch({ filters: base, page, size })
+      const result = await api.vssSearch({ filters: base, page, size })
       if (!cancelled) setMetricsTotal(result.total)
       return result
     }
     fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: () => cancelled })
-      .then((all) => { if (!cancelled) setMetricsSample(all) })
+      .then((all) => { if (!cancelled) { setMetricsSample(all); setMetricsCards(null) } })
       .catch(() => { if (!cancelled) setMetricsSample([]) })
-      .finally(() => { if (!cancelled) setMetricsLoading(false) })
+      .finally(finish)
     return () => { cancelled = true }
-  }, [prefsReady, localMode, embedded])
+  }, [prefsReady, localMode, embedded, tableReady])
 
   useEffect(() => {
     if (!prefsReady) return
@@ -406,7 +418,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
               </div>
             </div>
             {!embedded && (
-              <VssMetrics items={metricsItems} total={metricsTotal ?? metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />
+              <VssMetrics items={metricsItems} cards={metricsCards} provinces={metricsProvinces} total={metricsTotal ?? metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />
             )}
           </div>
         </div>

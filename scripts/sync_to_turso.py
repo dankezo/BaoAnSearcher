@@ -52,6 +52,11 @@ def _env(name: str) -> str:
 def _client():
     url = _env("TURSO_DATABASE_URL")
     token = _env("TURSO_AUTH_TOKEN")
+    # libsql:// / wss:// often 400 on Windows; HTTP API is reliable for batch upserts
+    if url.startswith("libsql://"):
+        url = "https://" + url[len("libsql://"):]
+    elif url.startswith("wss://"):
+        url = "https://" + url[len("wss://"):]
     return libsql_client.create_client_sync(url=url, auth_token=token)
 
 
@@ -81,6 +86,37 @@ def _set_meta(db, key: str, value: dict):
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
         [key, json.dumps(value, ensure_ascii=False), now_iso()],
     )
+
+
+def _ensure_indexes(db):
+    """Indexes for common filters / ORDER BY — IF NOT EXISTS is safe to re-run."""
+    stmts = [
+        "CREATE INDEX IF NOT EXISTS idx_dav_tag_id ON dav_drugs(tag_id)",
+        "CREATE INDEX IF NOT EXISTS idx_dav_ngay_cap ON dav_drugs(ngay_cap DESC, ngay_gia_han DESC, id)",
+        "CREATE INDEX IF NOT EXISTS idx_dav_search ON dav_drugs(search)",
+        "CREATE INDEX IF NOT EXISTS idx_vss_loai ON vss_bids(loai)",
+        "CREATE INDEX IF NOT EXISTS idx_vss_loai_nam ON vss_bids(loai, nam)",
+        "CREATE INDEX IF NOT EXISTS idx_vss_tungay_fp ON vss_bids(tungay_hd DESC, fingerprint)",
+        "CREATE INDEX IF NOT EXISTS idx_vss_search ON vss_bids(search)",
+        "CREATE INDEX IF NOT EXISTS idx_msc_prices_pub ON msc_prices(published DESC, source_id)",
+        "CREATE INDEX IF NOT EXISTS idx_msc_tenders_pub ON msc_tenders(published DESC, source_id)",
+        "CREATE INDEX IF NOT EXISTS idx_msc_prices_search ON msc_prices(search)",
+        "CREATE INDEX IF NOT EXISTS idx_msc_tenders_search ON msc_tenders(search)",
+    ]
+    for sql in stmts:
+        try:
+            db.execute(sql)
+        except Exception as e:
+            print(f"  index warn: {e}", flush=True)
+
+
+def _clear_metrics_cache(db, *keys: str):
+    """Force /api/tender/metrics to recompute after sync."""
+    for key in keys:
+        try:
+            db.execute("DELETE FROM app_meta WHERE key = ?", [key])
+        except Exception:
+            pass
 
 
 def sync_vss(db) -> int:
@@ -145,6 +181,7 @@ def sync_vss(db) -> int:
     meta["min_year"] = VSS_MIN_YEAR
     meta["backend"] = "turso"
     _set_meta(db, "vss", meta)
+    _clear_metrics_cache(db, "metrics_vss")
     print(f"VSS done: {n:,}")
     return n
 
@@ -212,6 +249,7 @@ def sync_dav(db) -> int:
     meta["synced_at"] = now_iso()
     meta["backend"] = "turso"
     _set_meta(db, "dav", meta)
+    _clear_metrics_cache(db, "metrics_dav")
     print(f"DAV done: {n:,}")
     return n
 
@@ -266,6 +304,7 @@ def sync_msc(db) -> int:
     meta["synced_at"] = now_iso()
     meta["backend"] = "turso"
     _set_meta(db, "msc", meta)
+    _clear_metrics_cache(db, "metrics_msc_prices", "metrics_msc_tenders")
     print(f"MSC done: {total_n:,}")
     return total_n
 
@@ -278,6 +317,8 @@ def main():
     t0 = time.time()
     db = _client()
     try:
+        print("Ensuring Turso indexes…", flush=True)
+        _ensure_indexes(db)
         if "vss" in only:
             sync_vss(db)
         if "dav" in only:

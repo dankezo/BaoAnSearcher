@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, fmtDate, openDavLookup, sortByDateDesc, DAV_LOOKUP } from './api'
-import { cloudDavSearch, cloudMeta, supabaseConfigured } from './supabaseCloud'
+import { cloudDavSearch, cloudMetrics, supabaseConfigured } from './supabaseCloud'
 import { useAuth } from './auth'
 import {
   CountSelect, DataTable, DetailModal, ErrorNote, FilterModal, HospitalGradeField,
@@ -63,7 +63,6 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const [exportPct, setExportPct] = useState(0)
   const [err, setErr] = useState('')
   const [detail, setDetail] = useState(null)
-  const [staticFallback, setStaticFallback] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [suggests, setSuggests] = useState([])
   const [suggestOpen, setSuggestOpen] = useState(false)
@@ -71,16 +70,20 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const [prefsReady, setPrefsReady] = useState(false)
   const [loadPct, setLoadPct] = useState(null)
   const [metricsSample, setMetricsSample] = useState(null)
+  const [metricsCards, setMetricsCards] = useState(null)
+  const [metricsTotal, setMetricsTotal] = useState(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
+  const [tableReady, setTableReady] = useState(false)
   const [metricActiveId, setMetricActiveId] = useState(null)
   const [metricQuick, setMetricQuick] = useState(null)
   const sim = useLoadProgress(loading, 'Đang lọc thuốc DAV', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
+  const sawTableLoad = useRef(false)
   useEffect(() => () => { reqSeq.current += 1 }, [])
   const suggestSeq = useRef(0)
   const suggestTimer = useRef(null)
-  const meta = useSectionMeta('dav', localMode, staticFallback, refreshKey)
+  const meta = useSectionMeta('dav', localMode, null, refreshKey)
   const {
     selectedTags, draftTags, setDraftTags, commitDraft, configs, refreshConfigs,
   } = useTagFilterState(userId)
@@ -201,41 +204,50 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
     }
   }, [localMode, mergedFilters, tt20Index, embedded])
 
-  // Metrics: fixed full catalog, load once — không theo filter bảng
-  useEffect(() => {
-    if (!prefsReady || embedded) return undefined
-    if (!(localMode || supabaseConfigured)) return undefined
-    let cancelled = false
-    setMetricsLoading(true)
-    const metricsFn = localMode
-      ? (page, sz) => api.davSearch({ filters: {}, page, size: sz })
-      : (page, sz) => cloudDavSearch({ filters: {}, page, size: sz })
-    fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: () => cancelled })
-      .then((all) => {
-        if (cancelled) return
-        setMetricsSample(all.map(enrichRowTag))
-      })
-      .catch(() => { if (!cancelled) setMetricsSample([]) })
-      .finally(() => { if (!cancelled) setMetricsLoading(false) })
-    return () => { cancelled = true }
-  }, [prefsReady, localMode, embedded])
-
   // Initial load + pageSize only — status ticks never auto-search
   useEffect(() => {
     if (!prefsReady) return
     search(0)
   }, [prefsReady, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Meta once (not on every search — avoids tab-switch lag)
+  // Track first table paint before loading metrics (avoids bandwidth contention)
   useEffect(() => {
-    if (localMode || !supabaseConfigured) return undefined
-    let alive = true
-    cloudMeta('dav').then((m) => {
-      if (!alive || !m) return
-      setStaticFallback({ updated: m.updated, count: m.count })
-    }).catch(() => {})
-    return () => { alive = false }
-  }, [localMode])
+    if (!prefsReady || embedded) return
+    if (loading) sawTableLoad.current = true
+    else if (sawTableLoad.current) setTableReady(true)
+  }, [prefsReady, embedded, loading])
+
+  // Metrics: cloud = 1 aggregate API; local = full catalog pages (deferred after table)
+  useEffect(() => {
+    if (!prefsReady || embedded || !tableReady) return undefined
+    if (!(localMode || supabaseConfigured)) return undefined
+    let cancelled = false
+    setMetricsLoading(true)
+    const finish = () => { if (!cancelled) setMetricsLoading(false) }
+    if (!localMode) {
+      cloudMetrics('dav')
+        .then((payload) => {
+          if (cancelled || !payload) return
+          setMetricsCards(payload.cards || [])
+          setMetricsTotal(payload.total ?? payload.sampleSize ?? null)
+          setMetricsSample(null)
+        })
+        .catch(() => { if (!cancelled) { setMetricsCards(null); setMetricsSample([]) } })
+        .finally(finish)
+      return () => { cancelled = true }
+    }
+    const metricsFn = (page, sz) => api.davSearch({ filters: {}, page, size: sz })
+    fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: () => cancelled })
+      .then((all) => {
+        if (cancelled) return
+        setMetricsSample(all.map(enrichRowTag))
+        setMetricsCards(null)
+        setMetricsTotal(all.length)
+      })
+      .catch(() => { if (!cancelled) setMetricsSample([]) })
+      .finally(finish)
+    return () => { cancelled = true }
+  }, [prefsReady, localMode, embedded, tableReady])
 
   const toSuggest = useCallback((items) => (
     (items || []).slice(0, 4).map((r, i) => ({
@@ -492,7 +504,8 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
             {!embedded && (
               <DavMetrics
                 items={metricsItems}
-                total={metricsSample?.length ?? data.total}
+                cards={metricsCards}
+                total={metricsTotal ?? metricsSample?.length ?? data.total}
                 activeId={metricActiveId}
                 onFilter={onMetricFilter}
                 loading={metricsLoading}
