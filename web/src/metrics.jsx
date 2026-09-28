@@ -422,25 +422,6 @@ export function computeDavCompound(items, total) {
   ]
 }
 
-export function DavMetrics({ items, total, cards: cardsProp, activeId, onFilter, loading }) {
-  const cards = useMemo(
-    () => (cardsProp?.length ? cardsProp : computeDavCompound(items, total)),
-    [cardsProp, items, total],
-  )
-  const flash = useFlashKey(`${cardsProp ? 'api' : items?.length}|${total}|${cards[0]?.mainValue}`)
-  const note = cardsProp?.length ? (cards[0]?.subtitle || 'Toàn bộ dữ liệu đã nạp') : sampleNote(items, total)
-  return (
-    <CompoundMetricsGrid
-      title={`DAV · ${note}`}
-      flash={flash}
-      cards={cards}
-      activeId={activeId}
-      onFilter={onFilter}
-      loading={loading}
-    />
-  )
-}
-
 /* ---- MSC tenders ---- */
 /** Pipeline stage for MSC tenders.
  * Open = EMPTY status_code only (future close). DXT = reviewing. Not DXT-as-open.

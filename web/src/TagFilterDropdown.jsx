@@ -229,7 +229,6 @@ export function useTagFilterState(userId) {
     return draftTags
   }
 
-  const refreshConfigs = () => setConfigs(loadTagConfigs(userId))
   return {
     selectedTags,
     draftTags,
@@ -237,7 +236,6 @@ export function useTagFilterState(userId) {
     setSelectedTags: setTags,
     commitDraft,
     configs,
-    refreshConfigs,
   }
 }
 

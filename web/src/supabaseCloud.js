@@ -4,6 +4,7 @@
  */
 import { getSupabase, supabaseConfigured } from './supabaseClient'
 import { mapTursoItems } from './tursoMap'
+import { buildDavRpcParams } from './services/davRpc'
 
 export { supabaseConfigured, getSupabase }
 
@@ -32,27 +33,35 @@ async function accessToken() {
 
 async function tenderFetch(path, body) {
   const token = await accessToken()
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body || {}),
-  })
-  const text = await res.text()
-  let payload = null
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 55_000)
   try {
-    payload = text ? JSON.parse(text) : null
-  } catch {
-    payload = { error: text }
+    const res = await fetch(path, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body || {}),
+    })
+    const text = await res.text()
+    let payload = null
+    try {
+      payload = text ? JSON.parse(text) : null
+    } catch {
+      payload = { error: text }
+    }
+    if (!res.ok) {
+      const err = new Error(payload?.error || text || res.statusText)
+      err.status = res.status
+      throw err
+    }
+    if (!payload || typeof payload !== 'object' || payload.error) throw new Error('API dữ liệu chưa sẵn sàng.')
+    return payload
+  } finally {
+    clearTimeout(timeout)
   }
-  if (!res.ok) {
-    const err = new Error(payload?.error || text || res.statusText)
-    err.status = res.status
-    throw err
-  }
-  return payload
 }
 
 function normalizePage(payload, page, size) {
@@ -141,16 +150,7 @@ export async function cloudDavSearch({ filters = {}, page = 0, size = 100 } = {}
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
     const sb = getSupabase()
-    const f = filters || {}
-    const { data, error } = await sb.rpc('search_dav_drugs', {
-      p_q: foldParam(f.q),
-      p_ten_thuoc: f.tenThuoc ? String(f.tenThuoc).trim() : null,
-      p_so_dang_ky: f.soDangKy ? String(f.soDangKy).trim() : null,
-      p_hoat_chat: f.hoatChat ? String(f.hoatChat).trim() : null,
-      p_dang_bao_che: f.dangBaoChe ? String(f.dangBaoChe).trim() : null,
-      p_page: page,
-      p_size: size,
-    })
+    const { data, error } = await sb.rpc('search_dav_drugs', buildDavRpcParams(filters, page, size))
     if (error) throw new Error(error.message || String(error))
     const payload = typeof data === 'string' ? JSON.parse(data) : data
     return {

@@ -1,0 +1,138 @@
+.dav-filters {
+  display: grid;
+  gap: 20px;
+}
+.dav-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.dav-metric-card {
+  min-width: 0;
+  padding: 18px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 14px;
+}
+.dav-metric-card h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--text, #334155);
+}
+.dav-metric-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.dav-metric-value small {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted, #64748b);
+}
+.dav-metric-card p {
+  min-height: 30px;
+  margin: 8px 0 12px;
+  font-size: 11px;
+  color: var(--muted, #64748b);
+}
+.dav-metric-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dav-metric-badge {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.dav-metric-badge.tone-slate {
+  background: #f1f5f9;
+  color: #475569;
+}
+.dav-metric-badge.tone-emerald {
+  background: #ecfdf5;
+  color: #047857;
+}
+.dav-metric-badge.tone-amber {
+  background: #fffbeb;
+  color: #92400e;
+}
+.dav-metric-badge.tone-rose {
+  background: #fff1f2;
+  color: #be123c;
+}
+.dav-metric-badge.on {
+  border-color: currentColor;
+}
+.dav-metric-badge:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.dav-skeleton {
+  height: 18px;
+  width: 90%;
+  background: #e2e8f0;
+  border-radius: 6px;
+  margin: 14px 0;
+  animation: dav-pulse 1.4s ease-in-out infinite;
+}
+.dav-skeleton-value {
+  height: 34px;
+  width: 55%;
+}
+@keyframes dav-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+@media (max-width: 1100px) {
+  .dav-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .dav-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dav-skeleton {
+    animation: none;
+  }
+}
+
+.dav-metrics-error {
+  grid-column: 1 / -1;
+  color: var(--muted, #64748b);
+}
+
+.dav-column-picker {
+  position: relative;
+}
+.dav-column-options {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  min-width: 210px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel, white);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px #0f172a1a;
+}
+.dav-column-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.dav-metrics .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
