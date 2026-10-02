@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildSearchSql } from '../api-lib/db/searchSql.js'
 import { packageMatchFromLines } from '../api-lib/scopeMatch.js'
+import { classifyLot } from '../lib/regulatory/baoanMatch.js'
 
 function placeholders(sql) {
   return (sql.match(/\?/g) || []).length
@@ -97,4 +98,33 @@ test('tender label is derived from displayed line matches, not a stale crawl lab
   assert.equal(packageMatchFromLines([{ match: 'near' }, { match: 'near' }]), 'near')
   assert.equal(packageMatchFromLines([{ match: '' }, { match: 'exact' }, { match: 'near' }]), 'exact')
   assert.equal(packageMatchFromLines([{ match: '' }]), '')
+})
+
+test('current legal rule accepts Fenofibrat/Fenofibrate generic tablet eligibility', () => {
+  const result = classifyLot(
+    { tenHoatChat: 'Fenofibrate', nongDo: '145 mg', dangBaoChe: 'Viên', duongDung: 'Uống' },
+    [{ brand_name: 'Fenoba', inn: 'Fenofibrat', strength: '145 mg', dosage_form: 'Viên nén bao phim', route: 'Uống' }],
+  )
+  assert.equal(result.status, 'MATCH')
+  assert.equal(result.level, 'exact')
+  assert.equal(result.matchedCriteria.route, true)
+  assert.equal(result.formCompatible, true)
+})
+
+test('a supplied conflicting route never becomes an eligible match', () => {
+  const result = classifyLot(
+    { tenHoatChat: 'Fenofibrate', nongDo: '145mg', dangBaoChe: 'Viên', duongDung: 'Tiêm' },
+    [{ inn: 'Fenofibrat', strength: '0.145 g', dosage_form: 'Viên nén bao phim', route: 'Uống' }],
+  )
+  assert.equal(result.status, 'MISMATCH')
+  assert.equal(result.matchedCriteria.route, false)
+})
+
+test('special-release forms are review-only instead of silently green', () => {
+  const result = classifyLot(
+    { tenHoatChat: 'Metformin', nongDo: '1000mg', dangBaoChe: 'Viên nén', duongDung: 'Uống' },
+    [{ inn: 'Metformin', strength: '1000mg', dosage_form: 'Viên giải phóng kéo dài', route: 'Uống' }],
+  )
+  assert.equal(result.status, 'POTENTIAL')
+  assert.equal(result.level, 'near')
 })

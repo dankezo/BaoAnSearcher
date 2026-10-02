@@ -27,6 +27,12 @@ _PAREN = re.compile(r"\([^)]*\)")
 _TOKEN = re.compile(r"[a-z0-9]+")
 # Short vitamin codes written after a shared "Vitamin", as in "Vitamin B1 + B6 + B12".
 _VITAMIN_CODE = re.compile(r"(?:b\d{1,2}|d\d?|k\d?|[ace])")
+_ALIASES = {
+    "fenofibrat": "fenofibrate", "fenofibrate": "fenofibrate",
+    "atorvastatine": "atorvastatin", "ciprofloxacine": "ciprofloxacin",
+    "hydroclorid": "hydrochloride", "hydrochlorid": "hydrochloride", "hcl": "hydrochloride",
+    "sulphate": "sulfate", "sulfat": "sulfate",
+}
 
 
 def _stems(inn: str) -> list[str]:
@@ -38,6 +44,7 @@ def _stems(inn: str) -> list[str]:
         token = fold(part)
         token = re.sub(r"[^a-z0-9 ]+", " ", token)
         token = re.sub(r"\s+", " ", token).strip()
+        token = " ".join(_ALIASES.get(word, word) for word in token.split())
         if len(token) >= 5:
             stems.append(token)
     return stems
@@ -57,8 +64,8 @@ def _strengths(text: str) -> set[tuple[float, str]]:
             value = value / Decimal(1000)
             unit = "mg"
         elif unit == "g":
-            # Keep grams distinct from milligrams.
-            unit = "g"
+            value = value * Decimal(1000)
+            unit = "mg"
         found.add((float(value.quantize(Decimal("0.000001"))), unit))
     return found
 
@@ -97,6 +104,27 @@ def _family(text: str) -> str:
         return "vien nen"
     if "vien" in token:
         return "vien"
+    return token
+
+
+def _route(text: str) -> str:
+    token = re.sub(r"\s+", " ", fold(text)).strip()
+    if not token:
+        return ""
+    if "tiem truyen" in token:
+        return "tiem truyen"
+    if "tiem" in token:
+        return "tiem"
+    if "uong" in token:
+        return "uong"
+    if "nho mat" in token:
+        return "nho mat"
+    if "dung ngoai" in token or "boi da" in token:
+        return "dung ngoai"
+    if "dat am dao" in token:
+        return "dat am dao"
+    if "dat truc trang" in token:
+        return "dat truc trang"
     return token
 
 
@@ -142,6 +170,7 @@ def catalog() -> tuple[dict, ...]:
         rows.append({
             "stems": stems,
             "form": _family(item.get("dosage_form") or ""),
+            "route": _route(item.get("route") or ""),
             "strength": _strengths(f"{item.get('strength') or ''} {item.get('inn') or ''}"),
             "group": str(item.get("tender_group") or item.get("group") or ""),
             "card": {
@@ -155,18 +184,20 @@ def catalog() -> tuple[dict, ...]:
     return tuple(rows)
 
 
-def _lot_blob(lot: dict) -> tuple[str, str, set]:
+def _lot_blob(lot: dict) -> tuple[str, str, str, set]:
     blob = fold(f"{lot.get('tenHoatChat') or ''} {lot.get('lotName') or ''} {lot.get('nongDo') or ''}")
     blob = re.sub(r"[^a-z0-9 ]+", " ", blob)
     blob = re.sub(r"\s+", " ", blob)
+    blob = " ".join(_ALIASES.get(word, word) for word in blob.split())
     form = _family(lot.get("dangBaoChe") or "")
+    route = _route(lot.get("duongDung") or lot.get("route") or "")
     strength = _strengths(f"{lot.get('nongDo') or ''} {lot.get('lotName') or ''}")
-    return blob, form, strength
+    return blob, form, route, strength
 
 
 def classify_lot(lot: dict) -> tuple[str | None, list[dict]]:
     """Return exact/near/None and the Bảo An products behind that level."""
-    blob, form, strength = _lot_blob(lot if isinstance(lot, dict) else {})
+    blob, form, route, strength = _lot_blob(lot if isinstance(lot, dict) else {})
     tokens = set(_TOKEN.findall(blob))
     exact = []
     near = []
@@ -175,18 +206,20 @@ def classify_lot(lot: dict) -> tuple[str | None, list[dict]]:
             continue
         all_inns = all(_present(stem, blob, tokens) for stem in item["stems"])
         form_ok = bool(form) and form == item["form"]
+        item_route = item.get("route") or ""
+        route_ok = (not route and not item_route) or (bool(route) and bool(item_route) and route == item_route)
         strength_ok = bool(strength) and bool(item["strength"]) and strength == item["strength"]
         group_ok = _group_ok(lot.get("groupMedicine") or lot.get("group") or "", item.get("group") or "")
-        if all_inns and form_ok and strength_ok and group_ok:
+        if all_inns and form_ok and strength_ok and route_ok and group_ok:
             exact.append(item["card"])
             continue
         overlap = len(strength & item["strength"]) if strength and item["strength"] else 0
-        near.append((all_inns, form_ok, _legally_compatible_form(form, item["form"]), overlap, item["card"]))
+        near.append((all_inns, form_ok, route_ok, _legally_compatible_form(form, item["form"]), overlap, item["card"]))
     if exact:
         return "exact", exact[:6]
     if near:
-        near.sort(key=lambda row: row[:4], reverse=True)
-        return "near", [row[4] for row in near[:4]]
+        near.sort(key=lambda row: row[:5], reverse=True)
+        return "near", [row[5] for row in near[:4]]
     return None, []
 
 
@@ -221,7 +254,7 @@ def public_lines(lots) -> list[dict]:
         if not isinstance(lot, dict):
             continue
         level, hits = classify_lot(lot)
-        _blob, form, _strength = _lot_blob(lot)
+        _blob, form, _route_value, _strength = _lot_blob(lot)
         form_compatible = any(
             _present(item["stems"][0], _blob, set(_TOKEN.findall(_blob)))
             and _legally_compatible_form(form, item["form"])

@@ -181,14 +181,15 @@ function matchRank(row) {
 function rowHits(row, catalog, fromScope) {
   if (Array.isArray(row.baoanHits) && row.baoanHits.length) return row.baoanHits.slice(0, 8)
   if (fromScope || row.match) return []
-  return baoanLinesForIngredient(row.name, catalog).slice(0, 8)
+  return baoanLinesForIngredient(row, catalog).slice(0, 8)
 }
 
 function rowTone(row, hits) {
   const level = String(row?.match || '').trim()
   if (level === 'exact') return 'is-baoan'
   if (level === 'near') return 'is-baoan-near'
-  return hits.length ? 'is-baoan' : ''
+  // A catalog suggestion alone is not a tender-eligibility result.
+  return ''
 }
 
 function IngredientLineLabel({ row }) {

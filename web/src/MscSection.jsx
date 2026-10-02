@@ -125,9 +125,9 @@ function ScopeCatalog({ lines, tenderNo, embedded = false }) {
           <input type="checkbox" checked={matchedOnly} onChange={(event) => setMatchedOnly(event.target.checked)} />
           Chỉ hiện danh mục khớp
         </label>
-        <span className="muted small">{(matchedOnly ? visible.length : lines.length).toLocaleString('vi-VN')} dòng{exact ? ` · ${exact} khớp` : ''}{near ? ` · ${near} gần khớp` : ''}</span>
+        <span className="muted small">{(matchedOnly ? visible.length : lines.length).toLocaleString('vi-VN')} dòng{exact ? ` · ${exact} khớp hợp lệ` : ''}{near ? ` · ${near} cần rà soát` : ''}</span>
       </div>
-      <div className="scope-legend"><i className="exact" />Khớp Bảo An<i className="near" />Gần khớp</div>
+      <div className="scope-legend"><i className="exact" />Khớp hợp lệ<i className="near" />Cần rà soát HSMT</div>
       {ask && (
         <div className="scope-ask" role="dialog" aria-label="Đối chiếu hoạt chất">
           <p>Đối chiếu <strong>{ask.name || 'hoạt chất này'}</strong> với danh mục Bảo An?</p>
@@ -207,7 +207,8 @@ function ScopeCatalog({ lines, tenderNo, embedded = false }) {
       </div>
       {tip && createPortal(
         <div className={`scope-tip${tip.above ? ' above' : ''}`} style={{ top: tip.top, left: tip.left }}>
-          <div className="scope-tip-kicker">{tip.row.match === 'exact' ? 'Khớp thuốc Bảo An' : 'Gần khớp thuốc Bảo An'}</div>
+          <div className="scope-tip-kicker">{tip.row.match === 'exact' ? 'Khớp hợp lệ với thuốc Bảo An' : 'Cần rà soát HSMT'}</div>
+          {tip.row.legalBasis && <div className="muted small">{tip.row.legalBasis}</div>}
           {tip.row.hits.map((hit) => (
             <div key={`${hit.reg}-${hit.brand}`} className="scope-tip-hit">
               <strong>{hit.brand || hit.inn || 'Thuốc Bảo An'}</strong>

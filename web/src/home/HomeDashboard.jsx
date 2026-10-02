@@ -287,7 +287,7 @@ function TenderDetail({ row }) {
                   <td>{[line.strength, line.form].filter(Boolean).join(' · ') || '—'}</td>
                   <td>{line.group || '—'}</td>
                   <td>{moneyLabel(line.price)}</td>
-                  <td>{line.match === 'exact' || line.match === 'near' ? 'Khớp' : '—'}</td>
+                  <td>{line.status === 'MATCH' || line.match === 'exact' ? 'Khớp hợp lệ' : line.status === 'POTENTIAL' || line.match === 'near' ? 'Cần rà soát' : '—'}</td>
                 </tr>
               ))}
             </tbody>

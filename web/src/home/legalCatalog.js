@@ -21,7 +21,7 @@ export const LEGAL_CORE = [
     title: 'Thông tư 40/2025/TT-BYT',
     issued: '2025-10-25',
     status: 'active',
-    excerpt: 'Quy định đấu thầu thuốc tại cơ sở y tế công lập. Phụ lục I nêu các dạng có thể dự thầu cùng nhau, gồm nhóm viên/viên nén/bao phim và viên nang, cùng các trường hợp bao tan, giải phóng có kiểm soát, hòa tan nhanh, viên sủi. Công cụ chỉ gắn “gần khớp – cần đối chiếu KHLCNT/E-HSMT”, không tự kết luận khớp chính xác.',
+    excerpt: 'Quy định đấu thầu thuốc tại cơ sở y tế công lập. Phụ lục I nêu cách ghi dạng bào chế và các dạng có thể dự thầu cùng nhau. Máy khớp bắt buộc đối chiếu hoạt chất, hàm lượng, đường dùng và dạng bào chế; khi đủ dữ liệu sẽ ghi “Khớp hợp lệ”, khi thiếu dữ liệu HSMT chỉ ghi “Cần rà soát”.',
   },
   {
     id: 'nd-214-2025',
