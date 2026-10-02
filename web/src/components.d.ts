@@ -72,7 +72,7 @@ export function DataTable(props: {
   columnFilters: ColumnFilters
   onColumnFilter: (key: string, value: string) => void
   filtersVisible: boolean
-  onFilterEnter: () => void
+  onFilterEnter: (key?: string, value?: string) => void
   onFilterSuggest: (key: string, q: string) => Promise<string[]>
   onRowDoubleClick: (row: DrugItem) => void
   loading: boolean

@@ -520,7 +520,7 @@ export function SuggestInput({
         }}
       />
       {value ? (
-        <button type="button" className="clear" aria-label="Xóa" onClick={() => { onChange(''); setItems([]) }}>{I.x}</button>
+        <button type="button" className="clear" aria-label="Xóa" onClick={() => { onChange(''); setItems([]); onSearch?.('') }}>{I.x}</button>
       ) : null}
       {show && (
         <ul className="suggest-list col" role="listbox">
@@ -1371,8 +1371,15 @@ export const DataTable = memo(function DataTable({
                   {c.filter === false ? null : c.filter === 'select' ? (
                     <select
                       value={columnFilters[c.key] || ''}
-                      onChange={(e) => onColumnFilter?.(c.key, e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent?.isComposing) onFilterEnter?.() }}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        onColumnFilter?.(c.key, value)
+                        // A select is already a committed choice.  Send its
+                        // value with the refresh so consumers never read a
+                        // stale React state snapshot.
+                        onFilterEnter?.(c.key, value)
+                      }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent?.isComposing) onFilterEnter?.(c.key, e.currentTarget.value) }}
                       aria-label={`Lọc ${c.label}`}
                     >
                       <option value="">Tất cả</option>
@@ -1384,7 +1391,7 @@ export const DataTable = memo(function DataTable({
                       placeholder="Lọc…"
                       aria-label={`Lọc ${c.label}`}
                       onChange={(v) => onColumnFilter?.(c.key, v)}
-                      onSearch={() => onFilterEnter?.()}
+                      onSearch={(value) => onFilterEnter?.(c.key, value)}
                       suggest={defaultSuggest(c.key)}
                     />
                   )}

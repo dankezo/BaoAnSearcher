@@ -253,12 +253,17 @@ function vssWhere(filters, from, to) {
 }
 
 export async function mapPayload(query, body = {}) {
-  const source = String(body.source || '').toLowerCase() === 'msc' ? 'msc' : 'vss'
+  const requested = String(body.source || '').toLowerCase()
+  // Keep the historical `msc` contract for tender maps.  Price maps are a
+  // separate source because their amount is quantity × winning unit price,
+  // not a tender's announced package value.
+  const source = requested === 'msc_prices' ? 'msc_prices' : (requested === 'msc' || requested === 'msc_tenders' ? 'msc' : 'vss')
   const filters = body.filters && typeof body.filters === 'object' ? body.filters : {}
   const window = mapWindow(body.months)
   const withDots = body.dots !== false
   const withIngredients = body.ingredients !== false
   if (source === 'msc') return mscPayload(query, filters, window, withDots)
+  if (source === 'msc_prices') return mscPricePayload(query, filters, window, withDots, withIngredients)
   return vssPayload(query, filters, window, withDots, withIngredients)
 }
 
@@ -427,6 +432,205 @@ LIMIT 60`,
     packageAreas: {},
     packageTotal: 0,
     trendLabel: '',
+  }
+}
+
+function mscPriceWhere(filters, from, to) {
+  const clauses = ['published IS NOT NULL', 'published >= ?', 'published <= ?']
+  const args = [isoDate(from), isoDate(to)]
+  const ingredient = fold(filters.hoatchat || filters.ingredient || '').trim()
+  if (ingredient) {
+    clauses.push('ingredient_f LIKE ?')
+    args.push(`%${ingredient}%`)
+  }
+  const groups = groupSet(filters)
+  if (groups.size) {
+    clauses.push(`(${[...groups].map(() => 'group_name LIKE ?').join(' OR ')})`)
+    args.push(...[...groups].map((group) => `%${group}%`))
+  }
+  for (const word of fold(filters.q || '').trim().split(/\s+/).filter(Boolean)) {
+    clauses.push('(buyer LIKE ? OR search LIKE ?)')
+    args.push(`%${word}%`, `%${word}%`)
+  }
+  return { clauses, args, filtered: Boolean(ingredient || groups.size || String(filters.q || '').trim()) }
+}
+
+function priceMapRow(row) {
+  const place = resolveProvince(row.province)
+  return {
+    ma_tinh: place.code,
+    nhomthau: row.group_name,
+    ym: row.ym,
+    sum_thanhtien: num(row.revenue),
+    cnt: num(row.cnt),
+  }
+}
+
+/**
+ * Province heatmap for winning MSC prices.  The unfiltered map reads the
+ * tiny ingestion-time rollup; only explicit text filters use a bounded
+ * TiFlash aggregation of the fact table.
+ */
+async function mscPricePayload(query, filters, window, withDots, withIngredients) {
+  const all = mscPriceWhere(filters, window.prevFrom, window.now)
+  const fromYm = ymOf(window.prevFrom)
+  const toYm = ymOf(window.now)
+  let monthly = []
+  if (!all.filtered) {
+    try {
+      monthly = await rowsOf(
+        query,
+        `SELECT ym, province, group_name, revenue, quantity, cnt
+           FROM agg_msc_price_monthly
+          WHERE ym >= ? AND ym <= ?`,
+        [fromYm, toYm],
+      )
+    } catch {
+      monthly = []
+    }
+  }
+  if (!monthly.length) {
+    monthly = await rowsOf(
+      query,
+      `SELECT ${hint('msc_prices')}
+        DATE_FORMAT(published, '%Y-%m') AS ym,
+        COALESCE(province, '') AS province,
+        COALESCE(group_name, '') AS group_name,
+        SUM(COALESCE(unit_price, 0) * COALESCE(quantity, 0)) AS revenue,
+        SUM(COALESCE(quantity, 0)) AS quantity,
+        COUNT(*) AS cnt
+      FROM msc_prices
+      WHERE ${all.clauses.join(' AND ')}
+      GROUP BY DATE_FORMAT(published, '%Y-%m'), COALESCE(province, ''), COALESCE(group_name, '')`,
+      all.args,
+    )
+  }
+  const shaped = shapeMapRows(monthly.map(priceMapRow), filters, window)
+  const current = mscPriceWhere(filters, window.curFrom, window.now)
+  let buyers = []
+  if (withDots) {
+    try {
+      const raw = await rowsOf(
+        query,
+        `SELECT ${hint('msc_prices')}
+          COALESCE(buyer, '') AS buyer,
+          COALESCE(province, '') AS province,
+          SUM(COALESCE(unit_price, 0) * COALESCE(quantity, 0)) AS value,
+          COUNT(*) AS lots
+        FROM msc_prices
+        WHERE ${current.clauses.join(' AND ')} AND COALESCE(buyer, '') <> ''
+        GROUP BY COALESCE(buyer, ''), COALESCE(province, '')
+        ORDER BY value DESC
+        LIMIT 120`,
+        current.args,
+      )
+      buyers = raw.map((row) => {
+        const place = resolveProvince(row.province)
+        const buyer = String(row.buyer || '').trim()
+        return {
+          id: `msc-price:${place.code}:${buyer}`,
+          kind: 'price_buyer',
+          name: buyer,
+          buyer,
+          province: place.label,
+          provinceCode: place.code,
+          region: regionOf(place.code),
+          district: '',
+          precision: 'province',
+          placeNote: 'Mức tỉnh, tổng giá trị = đơn giá × số lượng trúng thầu.',
+          value: num(row.value),
+          lots: num(row.lots),
+          ingredients: [],
+        }
+      }).filter((row) => row.name && row.provinceCode)
+    } catch {
+      buyers = []
+    }
+  }
+  const packageAreas = {}
+  for (const buyer of buyers) {
+    const list = packageAreas[buyer.provinceCode] || []
+    list.push(buyer)
+    packageAreas[buyer.provinceCode] = list
+  }
+  for (const list of Object.values(packageAreas)) list.sort((a, b) => b.value - a.value)
+
+  let ingredients = []
+  let ingredientAreas = {}
+  if (withIngredients) {
+    try {
+      const raw = await rowsOf(
+        query,
+        `SELECT ${hint('msc_prices')}
+          COALESCE(ingredient, '') AS name,
+          COALESCE(province, '') AS province,
+          SUM(COALESCE(unit_price, 0) * COALESCE(quantity, 0)) AS value,
+          SUM(COALESCE(quantity, 0)) AS quantity
+        FROM msc_prices
+        WHERE ${current.clauses.join(' AND ')} AND COALESCE(ingredient, '') <> ''
+        GROUP BY COALESCE(ingredient, ''), COALESCE(province, '')`,
+        current.args,
+      )
+      const national = new Map()
+      const byArea = {}
+      for (const row of raw) {
+        const name = String(row.name || '').trim()
+        if (!name) continue
+        const item = { name, value: num(row.value), quantity: num(row.quantity), baoanHits: [] }
+        const key = fold(name)
+        const sum = national.get(key) || { ...item, value: 0, quantity: 0 }
+        sum.value += item.value
+        sum.quantity += item.quantity
+        national.set(key, sum)
+        const place = resolveProvince(row.province)
+        if (!place.code) continue
+        const list = byArea[place.code] || []
+        list.push(item)
+        byArea[place.code] = list
+      }
+      ingredients = [...national.values()].sort((a, b) => b.value - a.value).slice(0, 60)
+      const regional = {}
+      for (const [code, list] of Object.entries(byArea)) {
+        ingredientAreas[code] = list.sort((a, b) => b.value - a.value).slice(0, 40)
+        const region = regionOf(code)
+        if (region) (regional[region] ||= []).push(...list)
+      }
+      for (const [region, list] of Object.entries(regional)) {
+        const merged = new Map()
+        for (const item of list) {
+          const key = fold(item.name)
+          const sum = merged.get(key) || { ...item, value: 0, quantity: 0 }
+          sum.value += item.value
+          sum.quantity += item.quantity
+          merged.set(key, sum)
+        }
+        ingredientAreas[region] = [...merged.values()].sort((a, b) => b.value - a.value).slice(0, 40)
+      }
+    } catch {
+      ingredients = []
+      ingredientAreas = {}
+    }
+  }
+  return {
+    source: 'msc_prices',
+    months: shaped.months,
+    summary: shaped.summary,
+    provinces: shaped.provinces,
+    regions: shaped.regions,
+    dots: [],
+    areaDots: {},
+    dotTotal: buyers.length,
+    truncated: false,
+    ingredients,
+    ingredientAreas,
+    ingredientTitle: 'Hoạt chất theo đơn giá',
+    ingredientNote: 'Giá trị = đơn giá trúng thầu × số lượng, trong 12 tháng gần nhất.',
+    ingredientValueLabel: 'Giá trị',
+    ingredientQtyLabel: 'Số lượng',
+    packages: buyers,
+    packageAreas,
+    packageTotal: buyers.length,
+    trendLabel: 'Giá trị đơn giá mỗi tháng',
   }
 }
 

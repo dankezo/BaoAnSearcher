@@ -277,10 +277,21 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     draftRef.current?.reset(EMPTY_FILTERS)
     filtersRef.current = EMPTY_FILTERS
     setFilters(EMPTY_FILTERS)
+    columnFiltersRef.current = {}
     setColumnFilters({})
     search(0, {}, EMPTY_FILTERS)
   }, [search])
-  const setCF = (k, v) => setColumnFilters((f) => ({ ...f, [k]: v }))
+  const setCF = (k, v) => {
+    const next = { ...columnFiltersRef.current, [k]: v }
+    columnFiltersRef.current = next
+    setColumnFilters(next)
+  }
+  const searchColumn = useCallback((key, value) => {
+    const next = { ...columnFiltersRef.current, [key]: value }
+    columnFiltersRef.current = next
+    setColumnFilters(next)
+    search(0, next)
+  }, [search])
   const runSearch = useCallback((override) => search(0, undefined, override || null), [search])
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
 
@@ -454,7 +465,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           filtersVisible={filtersRow}
           onToggleFilters={() => setFiltersRow((v) => !v)}
           activeColumnFilters={activeCF}
-          onClearColumnFilters={() => { setColumnFilters({}); search(0, {}) }}
+          onClearColumnFilters={() => { columnFiltersRef.current = {}; setColumnFilters({}); search(0, {}) }}
         >
           <button type="button" className="btn ghost sm" onClick={() => runSearch()} title="Quét lại dữ liệu">
             {Icons.refresh} Quét lại
@@ -475,7 +486,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           columnFilters={columnFilters}
           onColumnFilter={setCF}
           filtersVisible={filtersRow}
-          onFilterEnter={() => search(0)}
+          onFilterEnter={searchColumn}
           onFilterSuggest={async (key, q) => fieldSuggest(key)(q)}
           onRowDoubleClick={setDetail}
           loading={loading}

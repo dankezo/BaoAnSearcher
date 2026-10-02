@@ -284,9 +284,10 @@ function PackagePanel({ dot, onClose, onDetail }) {
 }
 
 function RankList({ source, rows, total, truncated, selectedId, loading, onPick, place }) {
-  const msc = source === 'msc'
-  const title = msc ? 'Nhà đầu tư theo giá trị' : 'Cơ sở y tế theo giá trị'
-  const empty = msc ? 'Chưa có nhà đầu tư trong bộ lọc này.' : 'Chưa có cơ sở y tế trong bộ lọc này.'
+  const msc = source === 'msc' || source === 'msc_prices'
+  const price = source === 'msc_prices'
+  const title = price ? 'Cơ sở / CĐT theo giá trị' : (msc ? 'Nhà đầu tư theo giá trị' : 'Cơ sở y tế theo giá trị')
+  const empty = price ? 'Chưa có cơ sở / CĐT trong bộ lọc này.' : (msc ? 'Chưa có nhà đầu tư trong bộ lọc này.' : 'Chưa có cơ sở y tế trong bộ lọc này.')
   const count = !place && truncated && total
     ? `${fmtInt(rows.length)} / ${fmtInt(total)}`
     : (rows.length ? fmtInt(rows.length) : '')
@@ -304,7 +305,7 @@ function RankList({ source, rows, total, truncated, selectedId, loading, onPick,
           <ol>
             {rows.map((row, index) => {
               const label = msc
-                ? (row.buyer || row.name || 'Nhà đầu tư')
+                ? (row.buyer || row.name || (price ? 'Cơ sở / CĐT' : 'Nhà đầu tư'))
                 : (row.name || row.buyer || 'Cơ sở y tế')
               return (
                 <li key={row.id || `${label}-${index}`}>
@@ -352,6 +353,9 @@ export default function MapSection({ localMode = true }) {
   const geoRef = useRef(null)
   const zoomIntent = useRef({ north: true })
   geoRef.current = geo
+  const isTenderSource = query.source === 'msc'
+  const isPriceSource = query.source === 'msc_prices'
+  const isMscSource = isTenderSource || isPriceSource
 
   const applyFit = useCallback(() => {
     const map = mapRef.current
@@ -459,7 +463,7 @@ export default function MapSection({ localMode = true }) {
         region: query.region,
         province: query.province,
         group: query.group,
-        status: query.source === 'msc' ? query.status : '',
+        status: isTenderSource ? query.status : '',
         q: query.q,
       },
     })
@@ -475,13 +479,13 @@ export default function MapSection({ localMode = true }) {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [localMode, query])
+  }, [localMode, query, isTenderSource])
 
   const set = (key, value) => setDraft((current) => ({ ...current, [key]: value }))
   const suggestIngredient = useCallback(async (q) => {
     const needle = String(q || '').trim()
     if (needle.length < 2) return []
-    if (draft.source === 'msc') {
+    if (draft.source === 'msc' || draft.source === 'msc_prices') {
       const res = localMode
         ? await api.mscSearch({ kind: 'prices', filters: { ingredient: needle }, page: 0, size: 40 })
         : await cloudMscSearch({ kind: 'prices', filters: { ingredient: needle }, page: 0, size: 40 })
@@ -517,7 +521,7 @@ export default function MapSection({ localMode = true }) {
     const selectedCode = place?.type === 'province' ? place.id : ''
     const features = geo?.features || []
     const heatTone = query.status === 'open' ? 'open' : query.status === 'closed' ? 'closed' : 'other'
-    const sortedPositive = query.source === 'msc'
+    const sortedPositive = isMscSource
       ? [...byCode.values()].map((row) => Number(row?.value) || 0).filter((value) => value > 0).sort((a, b) => a - b)
       : []
     if (geo) {
@@ -530,7 +534,7 @@ export default function MapSection({ localMode = true }) {
           return {
             color: on || inRegion ? '#14532d' : '#64748b',
             weight: on || inRegion ? 2.4 : 1,
-            fillColor: query.source === 'msc'
+            fillColor: isMscSource
               ? heatFillValue(stats?.value, heatTone, sortedPositive)
               : heatFill(stats?.yoy, stats?.value),
             fillOpacity: 1,
@@ -588,12 +592,12 @@ export default function MapSection({ localMode = true }) {
     return () => {
       try { group.remove() } catch { /* Map already removed. */ }
     }
-  }, [applyFit, mapEpoch, geo, place, byCode, query.source, query.status])
+  }, [applyFit, mapEpoch, geo, place, byCode, isMscSource, query.status])
 
   const selectedCode = place?.type === 'province' ? place.id : ''
   const selectedRegion = place?.type === 'region' ? place.id : ''
   const rankedRows = useMemo(() => {
-    if (query.source === 'msc') {
+    if (isMscSource) {
       const areas = data?.packageAreas || {}
       if (selectedCode) return rankByValue(areas[selectedCode] || [])
       if (selectedRegion) {
@@ -607,7 +611,7 @@ export default function MapSection({ localMode = true }) {
       return rankByValue(rows)
     }
     return rankByValue((data?.dots || []).filter((dot) => dot.kind === 'facility'))
-  }, [data, query.source, selectedCode, selectedRegion])
+  }, [data, isMscSource, selectedCode, selectedRegion])
   const selectedPlace = selectedRegion || (selectedCode ? (byCode.get(selectedCode)?.name || '') : '')
   const selectedDot = useMemo(() => {
     if (pick?.type !== 'dot') return null
@@ -628,7 +632,7 @@ export default function MapSection({ localMode = true }) {
     ? 'Khu vực'
     : selectedCode
       ? 'Tỉnh / thành'
-      : (query.source === 'msc' ? 'MSC · gói thầu' : 'VSS · giá trị trúng thầu')
+      : (isTenderSource ? 'MSC · gói thầu' : (isPriceSource ? 'MSC · đơn giá' : 'VSS · giá trị trúng thầu'))
 
   const setSource = (source) => {
     zoomIntent.current = focusAfterClear().camera
@@ -655,7 +659,7 @@ export default function MapSection({ localMode = true }) {
   }
   const clearFilters = () => {
     zoomIntent.current = focusAfterClear().camera
-    const next = { ...EMPTY, source: query.source, status: query.source === 'msc' ? 'open' : '' }
+    const next = { ...EMPTY, source: query.source, status: isTenderSource ? 'open' : '' }
     setDraft(next)
     setQuery(next)
     setPlace(null)
@@ -719,24 +723,24 @@ export default function MapSection({ localMode = true }) {
               {[1, 2, 3, 4, 5].map((n) => <option key={n} value={String(n)}>Nhóm {n}</option>)}
             </select>
           </Field>
-          <Field label="Trạng thái" hint={draft.source === 'vss' ? 'VSS đã đóng' : 'MSC'}>
+          <Field label="Trạng thái" hint={draft.source === 'msc' ? 'MSC gói thầu' : 'Không áp dụng'}>
             <select
               aria-label="Trạng thái gói thầu"
-              disabled={draft.source === 'vss'}
-              title={draft.source === 'vss' ? 'Mọi gói VSS đều đã đóng thầu, nên lọc trạng thái không áp dụng.' : 'Trạng thái gói MSC'}
-              value={draft.source === 'vss' ? 'closed' : draft.status}
+              disabled={draft.source !== 'msc'}
+              title={draft.source === 'msc' ? 'Trạng thái gói MSC' : 'Bộ lọc trạng thái chỉ áp dụng cho MSC gói thầu.'}
+              value={draft.source === 'msc' ? draft.status : 'closed'}
               onChange={(event) => set('status', event.target.value)}
             >
-              {draft.source === 'vss'
+              {draft.source !== 'msc'
                 ? <option value="closed">Đã đóng</option>
                 : STATUS_OPTIONS.map(([value, label]) => <option key={value || 'all'} value={value}>{label}</option>)}
             </select>
           </Field>
-          <Field label={draft.source === 'msc' ? 'Chủ đầu tư' : 'Cơ sở y tế'}>
+          <Field label={draft.source === 'msc' ? 'Chủ đầu tư' : (draft.source === 'msc_prices' ? 'Cơ sở / CĐT' : 'Cơ sở y tế')}>
             <input
-              aria-label={draft.source === 'msc' ? 'Tìm chủ đầu tư' : 'Tìm cơ sở y tế'}
+              aria-label={draft.source === 'msc' ? 'Tìm chủ đầu tư' : (draft.source === 'msc_prices' ? 'Tìm cơ sở hoặc chủ đầu tư' : 'Tìm cơ sở y tế')}
               value={draft.q}
-              placeholder={draft.source === 'msc' ? 'Tìm chủ đầu tư' : 'Tìm cơ sở y tế'}
+              placeholder={draft.source === 'msc' ? 'Tìm chủ đầu tư' : (draft.source === 'msc_prices' ? 'Tìm cơ sở / CĐT' : 'Tìm cơ sở y tế')}
               onChange={(event) => set('q', event.target.value)}
             />
           </Field>
@@ -752,10 +756,10 @@ export default function MapSection({ localMode = true }) {
           source={query.source}
           rows={rankedRows}
           place={selectedPlace}
-          total={query.source === 'msc'
+          total={isMscSource
             ? (selectedPlace ? rankedRows.length : (data?.packageTotal || rankedRows.length))
             : (selectedPlace ? rankedRows.length : data?.dotTotal)}
-          truncated={query.source === 'msc'
+          truncated={isMscSource
             ? (!selectedPlace && Number(data?.packageTotal || 0) > (data?.packages || []).length)
             : (!selectedPlace && Boolean(data?.truncated))}
           selectedId={pick?.type === 'dot' ? pick.id : ''}
@@ -770,6 +774,7 @@ export default function MapSection({ localMode = true }) {
         <div className="map-stage">
           <div className="map-switch" role="group" aria-label="Nguồn dữ liệu">
             <button type="button" aria-pressed={query.source === 'vss'} onClick={() => setSource('vss')}>VSS</button>
+            <button type="button" aria-pressed={isPriceSource} onClick={() => setSource('msc_prices')}>MSC đơn giá</button>
             <button type="button" aria-pressed={query.source === 'msc'} onClick={() => setSource('msc')}>MSC gói thầu</button>
           </div>
           <div className="map-frame">
@@ -782,12 +787,12 @@ export default function MapSection({ localMode = true }) {
             )}
           </div>
           <p className="map-legend">
-            {query.source === 'msc' ? (
+            {isMscSource ? (
               <>
                 <span><i className="swatch" style={{ background: heatSwatch(query.status === 'open' ? 'open' : query.status === 'closed' ? 'closed' : 'other', 0.08) }} /> Thấp</span>
                 <span><i className="swatch" style={{ background: heatSwatch(query.status === 'open' ? 'open' : query.status === 'closed' ? 'closed' : 'other', 0.5) }} /> Trung bình</span>
                 <span><i className="swatch" style={{ background: heatSwatch(query.status === 'open' ? 'open' : query.status === 'closed' ? 'closed' : 'other', 1) }} /> Cao</span>
-                <span><i className="flat" /> Chưa có gói</span>
+                <span><i className="flat" /> {isPriceSource ? 'Chưa có đơn giá' : 'Chưa có gói'}</span>
               </>
             ) : (
               <>
@@ -808,7 +813,7 @@ export default function MapSection({ localMode = true }) {
             ? <PackagePanel dot={selectedDot} onClose={() => { setPick(null); setDetail(null) }} onDetail={() => setDetail(selectedDot)} />
             : (
               <StatCards
-                stats={selectedDot?.kind === 'facility' ? {
+                stats={selectedDot?.kind === 'facility' || selectedDot?.kind === 'price_buyer' ? {
                   name: selectedDot.name,
                   value: selectedDot.value,
                   yoy: null,
@@ -822,12 +827,12 @@ export default function MapSection({ localMode = true }) {
                 } : null)}
                 pending={!data}
                 months={data?.months || 12}
-                title={selectedDot?.kind === 'facility' ? 'Cơ sở y tế' : selectedDot?.kind === 'investor' ? 'Nhà đầu tư' : cardTitle}
+                title={selectedDot?.kind === 'facility' ? 'Cơ sở y tế' : selectedDot?.kind === 'price_buyer' ? 'Cơ sở / CĐT' : selectedDot?.kind === 'investor' ? 'Nhà đầu tư' : cardTitle}
                 note={selectedDot
                   ? `${selectedDot.province || ''}. ${selectedDot.placeNote || ''}`
                   : (cardStats && !Number(cardStats.value) ? 'Chưa có kết quả trong 12 tháng này.' : '')}
-                showGroups={query.source !== 'msc' && selectedDot?.kind !== 'facility'}
-                trendLabel={query.source === 'msc' ? (data?.trendLabel || 'Giá trị gói mỗi tháng') : ''}
+                showGroups={!isTenderSource && selectedDot?.kind !== 'facility' && selectedDot?.kind !== 'price_buyer'}
+                trendLabel={isMscSource ? (data?.trendLabel || 'Giá trị mỗi tháng') : ''}
               />
             )}
           <IngredientRank
