@@ -11,18 +11,28 @@ function pathIsLogin() {
 }
 
 function goLogin() {
+  // Keep the destination across the Outlook round trip, which replaces the URL.
+  if (window.location.hash === '#regulatory') {
+    try { window.sessionStorage.setItem('baoan-login-destination', '#home') } catch { /* Storage may be disabled. */ }
+  }
   const base = import.meta.env.BASE_URL || '/'
   const login = `${base.endsWith('/') ? base : `${base}/`}login`
   if (!pathIsLogin()) {
-    window.history.replaceState(null, '', login)
+    window.history.replaceState(null, '', `${login}${window.location.hash}`)
   }
 }
 
 function goHome() {
   const base = import.meta.env.BASE_URL || '/'
   const home = base.endsWith('/') ? base : `${base}/`
-  if (pathIsLogin()) {
-    window.history.replaceState(null, '', home)
+  let destination = ''
+  try {
+    const stored = window.sessionStorage.getItem('baoan-login-destination')
+    if (stored === '#home' || stored === '#regulatory') destination = '#home'
+    window.sessionStorage.removeItem('baoan-login-destination')
+  } catch { /* Preserve the current URL when browser storage is unavailable. */ }
+  if (pathIsLogin() || destination) {
+    window.history.replaceState(null, '', `${home}${destination || window.location.hash}`)
   }
 }
 

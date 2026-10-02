@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(() => getRememberPreference())
   const [busy, setBusy] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [revealPassword, setRevealPassword] = useState(false)
   const [localErr, setLocalErr] = useState('')
 
   const err = localErr || authError
@@ -108,7 +109,11 @@ export default function LoginPage() {
           <button
             type="button"
             className="login-toggle-password"
-            onClick={() => setShowPassword((v) => !v)}
+            onClick={() => setShowPassword((v) => {
+              const next = !v
+              if (!next) setRevealPassword(false)
+              return next
+            })}
             disabled={busy}
           >
             {showPassword ? 'Ẩn đăng nhập mật khẩu' : 'Admin · đăng nhập bằng mật khẩu'}
@@ -131,14 +136,19 @@ export default function LoginPage() {
             </label>
             <label className="login-field">
               <span>Mật khẩu</span>
-              <input
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={busy}
-                required
-              />
+              <div className="password-field">
+                <input
+                  type={revealPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={busy}
+                  required
+                />
+                <button type="button" className="btn ghost sm" onClick={() => setRevealPassword((v) => !v)} disabled={busy} aria-label={revealPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}>
+                  {revealPassword ? 'Ẩn' : 'Xem'}
+                </button>
+              </div>
             </label>
             <button type="submit" className="btn login-submit" disabled={busy}>
               {busy ? 'Đang đăng nhập…' : 'Đăng nhập mật khẩu'}

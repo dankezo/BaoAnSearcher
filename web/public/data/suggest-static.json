@@ -1,0 +1,404 @@
+{
+  "vss": {
+    "ten_tinh": [
+      "Hà Nội",
+      "Hà Giang",
+      "Cao Bằng",
+      "Bắc Kạn",
+      "Tuyên Quang",
+      "Lào Cai",
+      "Điện Biên",
+      "Lai Châu",
+      "Sơn La",
+      "Yên Bái",
+      "Hòa Bình",
+      "Thái Nguyên",
+      "Lạng Sơn",
+      "Quảng Ninh",
+      "Bắc Giang",
+      "Phú Thọ",
+      "Vĩnh Phúc",
+      "Bắc Ninh",
+      "Hải Dương",
+      "Hải Phòng",
+      "Hưng Yên",
+      "Thái Bình",
+      "Hà Nam",
+      "Nam Định",
+      "Ninh Bình",
+      "Thanh Hóa",
+      "Nghệ An",
+      "Hà Tĩnh",
+      "Quảng Bình",
+      "Quảng Trị",
+      "Thừa Thiên Huế",
+      "Đà Nẵng",
+      "Quảng Nam",
+      "Quảng Ngãi",
+      "Bình Định",
+      "Phú Yên",
+      "Khánh Hòa",
+      "Ninh Thuận",
+      "Bình Thuận",
+      "Kon Tum",
+      "Gia Lai",
+      "Đắk Lắk",
+      "Đắk Nông",
+      "Lâm Đồng",
+      "Bình Phước",
+      "Tây Ninh",
+      "Bình Dương",
+      "Đồng Nai",
+      "Bà Rịa - Vũng Tàu",
+      "Hồ Chí Minh",
+      "Long An",
+      "Tiền Giang",
+      "Bến Tre",
+      "Trà Vinh",
+      "Vĩnh Long",
+      "Đồng Tháp",
+      "An Giang",
+      "Kiên Giang",
+      "Cần Thơ",
+      "Hậu Giang",
+      "Sóc Trăng",
+      "Bạc Liêu",
+      "Cà Mau"
+    ],
+    "ma_tinh": [
+      {
+        "value": "01",
+        "label": "01 · Hà Nội"
+      },
+      {
+        "value": "02",
+        "label": "02 · Hà Giang"
+      },
+      {
+        "value": "04",
+        "label": "04 · Cao Bằng"
+      },
+      {
+        "value": "06",
+        "label": "06 · Bắc Kạn"
+      },
+      {
+        "value": "08",
+        "label": "08 · Tuyên Quang"
+      },
+      {
+        "value": "10",
+        "label": "10 · Lào Cai"
+      },
+      {
+        "value": "11",
+        "label": "11 · Điện Biên"
+      },
+      {
+        "value": "12",
+        "label": "12 · Lai Châu"
+      },
+      {
+        "value": "14",
+        "label": "14 · Sơn La"
+      },
+      {
+        "value": "15",
+        "label": "15 · Yên Bái"
+      },
+      {
+        "value": "17",
+        "label": "17 · Hòa Bình"
+      },
+      {
+        "value": "19",
+        "label": "19 · Thái Nguyên"
+      },
+      {
+        "value": "20",
+        "label": "20 · Lạng Sơn"
+      },
+      {
+        "value": "22",
+        "label": "22 · Quảng Ninh"
+      },
+      {
+        "value": "24",
+        "label": "24 · Bắc Giang"
+      },
+      {
+        "value": "25",
+        "label": "25 · Phú Thọ"
+      },
+      {
+        "value": "26",
+        "label": "26 · Vĩnh Phúc"
+      },
+      {
+        "value": "27",
+        "label": "27 · Bắc Ninh"
+      },
+      {
+        "value": "30",
+        "label": "30 · Hải Dương"
+      },
+      {
+        "value": "31",
+        "label": "31 · Hải Phòng"
+      },
+      {
+        "value": "33",
+        "label": "33 · Hưng Yên"
+      },
+      {
+        "value": "34",
+        "label": "34 · Thái Bình"
+      },
+      {
+        "value": "35",
+        "label": "35 · Hà Nam"
+      },
+      {
+        "value": "36",
+        "label": "36 · Nam Định"
+      },
+      {
+        "value": "37",
+        "label": "37 · Ninh Bình"
+      },
+      {
+        "value": "38",
+        "label": "38 · Thanh Hóa"
+      },
+      {
+        "value": "40",
+        "label": "40 · Nghệ An"
+      },
+      {
+        "value": "42",
+        "label": "42 · Hà Tĩnh"
+      },
+      {
+        "value": "44",
+        "label": "44 · Quảng Bình"
+      },
+      {
+        "value": "45",
+        "label": "45 · Quảng Trị"
+      },
+      {
+        "value": "46",
+        "label": "46 · Thừa Thiên Huế"
+      },
+      {
+        "value": "48",
+        "label": "48 · Đà Nẵng"
+      },
+      {
+        "value": "49",
+        "label": "49 · Quảng Nam"
+      },
+      {
+        "value": "51",
+        "label": "51 · Quảng Ngãi"
+      },
+      {
+        "value": "52",
+        "label": "52 · Bình Định"
+      },
+      {
+        "value": "54",
+        "label": "54 · Phú Yên"
+      },
+      {
+        "value": "56",
+        "label": "56 · Khánh Hòa"
+      },
+      {
+        "value": "58",
+        "label": "58 · Ninh Thuận"
+      },
+      {
+        "value": "60",
+        "label": "60 · Bình Thuận"
+      },
+      {
+        "value": "62",
+        "label": "62 · Kon Tum"
+      },
+      {
+        "value": "64",
+        "label": "64 · Gia Lai"
+      },
+      {
+        "value": "66",
+        "label": "66 · Đắk Lắk"
+      },
+      {
+        "value": "67",
+        "label": "67 · Đắk Nông"
+      },
+      {
+        "value": "68",
+        "label": "68 · Lâm Đồng"
+      },
+      {
+        "value": "70",
+        "label": "70 · Bình Phước"
+      },
+      {
+        "value": "72",
+        "label": "72 · Tây Ninh"
+      },
+      {
+        "value": "74",
+        "label": "74 · Bình Dương"
+      },
+      {
+        "value": "75",
+        "label": "75 · Đồng Nai"
+      },
+      {
+        "value": "77",
+        "label": "77 · Bà Rịa - Vũng Tàu"
+      },
+      {
+        "value": "79",
+        "label": "79 · Hồ Chí Minh"
+      },
+      {
+        "value": "80",
+        "label": "80 · Long An"
+      },
+      {
+        "value": "82",
+        "label": "82 · Tiền Giang"
+      },
+      {
+        "value": "83",
+        "label": "83 · Bến Tre"
+      },
+      {
+        "value": "84",
+        "label": "84 · Trà Vinh"
+      },
+      {
+        "value": "86",
+        "label": "86 · Vĩnh Long"
+      },
+      {
+        "value": "87",
+        "label": "87 · Đồng Tháp"
+      },
+      {
+        "value": "89",
+        "label": "89 · An Giang"
+      },
+      {
+        "value": "91",
+        "label": "91 · Kiên Giang"
+      },
+      {
+        "value": "92",
+        "label": "92 · Cần Thơ"
+      },
+      {
+        "value": "93",
+        "label": "93 · Hậu Giang"
+      },
+      {
+        "value": "94",
+        "label": "94 · Sóc Trăng"
+      },
+      {
+        "value": "95",
+        "label": "95 · Bạc Liêu"
+      },
+      {
+        "value": "96",
+        "label": "96 · Cà Mau"
+      }
+    ],
+    "nhomthau": [
+      "N1",
+      "N2",
+      "N3",
+      "N4",
+      "N5"
+    ]
+  },
+  "msc": {
+    "province": [
+      "Hà Nội",
+      "Hà Giang",
+      "Cao Bằng",
+      "Bắc Kạn",
+      "Tuyên Quang",
+      "Lào Cai",
+      "Điện Biên",
+      "Lai Châu",
+      "Sơn La",
+      "Yên Bái",
+      "Hòa Bình",
+      "Thái Nguyên",
+      "Lạng Sơn",
+      "Quảng Ninh",
+      "Bắc Giang",
+      "Phú Thọ",
+      "Vĩnh Phúc",
+      "Bắc Ninh",
+      "Hải Dương",
+      "Hải Phòng",
+      "Hưng Yên",
+      "Thái Bình",
+      "Hà Nam",
+      "Nam Định",
+      "Ninh Bình",
+      "Thanh Hóa",
+      "Nghệ An",
+      "Hà Tĩnh",
+      "Quảng Bình",
+      "Quảng Trị",
+      "Thừa Thiên Huế",
+      "Đà Nẵng",
+      "Quảng Nam",
+      "Quảng Ngãi",
+      "Bình Định",
+      "Phú Yên",
+      "Khánh Hòa",
+      "Ninh Thuận",
+      "Bình Thuận",
+      "Kon Tum",
+      "Gia Lai",
+      "Đắk Lắk",
+      "Đắk Nông",
+      "Lâm Đồng",
+      "Bình Phước",
+      "Tây Ninh",
+      "Bình Dương",
+      "Đồng Nai",
+      "Bà Rịa - Vũng Tàu",
+      "Hồ Chí Minh",
+      "Long An",
+      "Tiền Giang",
+      "Bến Tre",
+      "Trà Vinh",
+      "Vĩnh Long",
+      "Đồng Tháp",
+      "An Giang",
+      "Kiên Giang",
+      "Cần Thơ",
+      "Hậu Giang",
+      "Sóc Trăng",
+      "Bạc Liêu",
+      "Cà Mau"
+    ],
+    "group_name": [
+      "N1",
+      "N2",
+      "N3",
+      "N4",
+      "N5"
+    ]
+  }
+}

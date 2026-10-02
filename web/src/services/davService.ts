@@ -16,7 +16,9 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 export function parseDavPage(value: unknown): DavSearchResult {
-  if (!record(value) || !Array.isArray(value.items) || !Number.isFinite(Number(value.total)))
+  const total = record(value) ? value.total : undefined
+  const totalOk = total == null || Number.isFinite(Number(total))
+  if (!record(value) || !Array.isArray(value.items) || !totalOk)
     throw new Error('Dữ liệu DAV trả về chưa hợp lệ.')
   const items: DrugItem[] = value.items.map((row: unknown) => {
     if (!record(row)) throw new Error('Dòng dữ liệu DAV chưa hợp lệ.')
@@ -48,12 +50,21 @@ export function parseDavPage(value: unknown): DavSearchResult {
     if (row.conHieuLuc != null && typeof row.conHieuLuc !== 'boolean') throw new Error('Trạng thái hiệu lực chưa hợp lệ.')
     return row as DrugItem
   })
-  return { total: Number(value.total), page: Number(value.page) || 0, size: Number(value.size) || 100, items }
+  return {
+    total: value.total == null ? null : Number(value.total),
+    page: Number(value.page) || 0,
+    size: Number(value.size) || 100,
+    hasMore: typeof value.hasMore === 'boolean' ? value.hasMore : undefined,
+    nextCursor: record(value.nextCursor) ? value.nextCursor as Record<string, string> : null,
+    items,
+  }
 }
 export const api = {
   davSearch: async (request: DavSearchRequest): Promise<DavSearchResult> =>
     parseDavPage(await legacyApi.davSearch(request)),
   davValidity: (): Promise<unknown> => legacyApi.davValidity(),
+  metrics: (section: string) => legacyApi.metrics(section),
+  suggest: (section: string, field: string, q: string) => legacyApi.suggest(section, field, q),
 }
 export async function cloudDavSearch(request: DavSearchRequest): Promise<DavSearchResult> {
   return parseDavPage(await legacyCloudSearch(request))

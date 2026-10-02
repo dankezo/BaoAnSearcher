@@ -7,24 +7,61 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import dav, msc, vss
+from . import dav, msc, platform_status, stored_metrics, vss
 from .common import (
-    WEB_PUBLIC, load_secrets, save_secrets, load_status, update_status, now_iso, DM93_PATH, VN,
+    load_secrets, save_secrets, load_status, update_status, now_iso, DM93_PATH, DATA_DIR,
 )
 
 app = FastAPI(title="BaoAn Searcher", version="1.0.0")
+from .regulatory_proxy import router as regulatory_router
+from .gemini_proxy import router as gemini_router
+app.include_router(regulatory_router)
+app.include_router(gemini_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Status must remain fast while a crawler writes multi-gigabyte SQLite WAL
+# files. Metadata is refreshed only while sources are idle, then reused.
+_STATUS_META_CACHE: dict[str, tuple[float, dict]] = {}
+_STATUS_META_LOCK = threading.Lock()
+_STATUS_META_INFLIGHT: set[str] = set()
+
+
+def _queue_meta_refresh(name: str, getter) -> dict:
+    """Return cached metadata immediately; refresh it in a daemon worker.
+
+    Status polling must never synchronously open a multi-GB SQLite/WAL file.
+    An occasional stale count is preferable to freezing the control panel.
+    """
+    now = time.monotonic()
+    with _STATUS_META_LOCK:
+        cached = _STATUS_META_CACHE.get(name)
+        fresh = cached and now - cached[0] < 12
+        if fresh or name in _STATUS_META_INFLIGHT:
+            return cached[1] if cached else {}
+        _STATUS_META_INFLIGHT.add(name)
+
+    def work():
+        try:
+            value = getter()
+        except Exception as exc:
+            value = {"error": str(exc)}
+        with _STATUS_META_LOCK:
+            _STATUS_META_CACHE[name] = (time.monotonic(), value)
+            _STATUS_META_INFLIGHT.discard(name)
+
+    threading.Thread(target=work, daemon=True, name=f"status-meta-{name}").start()
+    return cached[1] if cached else {}
 
 
 class SecretsBody(BaseModel):
@@ -44,6 +81,8 @@ class CrawlBody(BaseModel):
     refresh: bool = False
     catchup: bool = False
     saveJson: bool = False
+    fullScan: bool = False
+    maxPages: Optional[int] = None
 
 
 @app.get("/api/health")
@@ -53,33 +92,39 @@ def health():
 
 @app.get("/api/status")
 def status():
+    # Read-only by design: polling this endpoint must never compete with a
+    # crawler's progress write or a SQLite writer lock.
     st = load_status()
-    try:
-        st["dav"]["count"] = dav.meta_info().get("count", 0)
-        st["dav"]["meta"] = dav.meta_info()
-    except Exception as e:
-        st["dav"]["error"] = str(e)
-    try:
-        info = msc.meta_info()
-        st["msc"]["count"] = info.get("prices", 0) + info.get("tenders", 0)
-        st["msc"]["meta"] = info
-    except Exception as e:
-        st["msc"]["error"] = str(e)
-    try:
-        st["vss"]["count"] = vss.meta_info().get("count", 0)
-        st["vss"]["meta"] = vss.meta_info()
-    except Exception as e:
-        st["vss"]["error"] = str(e)
+    dav_state = st.setdefault("dav", {})
+    msc_state = st.setdefault("msc", {})
+    vss_state = st.setdefault("vss", {})
+    dav_meta = _queue_meta_refresh("dav", dav.meta_info)
+    msc_meta = _queue_meta_refresh("msc", msc.meta_info)
+    vss_meta = _queue_meta_refresh("vss", vss.meta_info)
+    for section, meta in ((dav_state, dav_meta), (msc_state, msc_meta), (vss_state, vss_meta)):
+        if meta.get("error"):
+            section["metaError"] = meta["error"]
+            continue
+        section["meta"] = meta
+    if not dav_meta.get("error"):
+        dav_state["count"] = dav_meta.get("count", dav_state.get("count", 0))
+    if not msc_meta.get("error"):
+        # Keep the primary MSC count strictly to unit prices. Tender records
+        # remain available separately as ``meta.tenders``.
+        msc_state["count"] = msc_meta.get("prices", 0)
+    if not vss_meta.get("error"):
+        vss_state["count"] = vss_meta.get("count", vss_state.get("count", 0))
     return st
 
 
 @app.get("/api/secrets")
-def get_secrets():
+def get_secrets(revealPassword: bool = False):
     s = load_secrets()
-    # Mask passwords
+    # The local administration screen may explicitly request a reveal. This API
+    # is only served by the local crawler, never by the public Cloud build.
     out = json.loads(json.dumps(s))
     for key in ("msc", "vss"):
-        if key in out and isinstance(out[key], dict) and out[key].get("password"):
+        if key in out and isinstance(out[key], dict) and out[key].get("password") and not revealPassword:
             out[key] = {**out[key], "password": "********", "hasPassword": True}
     return out
 
@@ -95,15 +140,104 @@ def post_secrets(body: SecretsBody):
             if merged.get("password") == "********":
                 merged["password"] = prev.get("password", "")
             current[key] = merged
+    task_note = ""
     if "autoCrawl" in data:
-        current["autoCrawl"] = data["autoCrawl"]
+        prev = current.get("autoCrawl") if isinstance(current.get("autoCrawl"), dict) else {}
+        incoming = data["autoCrawl"] if isinstance(data["autoCrawl"], dict) else {}
+        merged = {**prev, **incoming}
+        if "daily" not in incoming and prev.get("daily"):
+            merged["daily"] = prev["daily"]
+        current["autoCrawl"] = merged
+        from .daily import sync_logon_task
+        task_note = sync_logon_task(bool(merged.get("enabled")))
     save_secrets(current)
-    return {"ok": True}
+    return {"ok": True, "task": task_note}
+
+
+@app.get("/api/baoan-catalog")
+def baoan_catalog():
+    path = DATA_DIR / "baoan_products.json"
+    if not path.exists():
+        raise HTTPException(404, "Chưa có danh mục Bảo An")
+    items = []
+    for item in json.loads(path.read_text(encoding="utf-8")):
+        items.append({
+            "id": item.get("id"),
+            "brand": item.get("brand_name") or "",
+            "inn": item.get("inn") or "",
+            "strength": item.get("strength") or "",
+            "form": item.get("dosage_form") or "",
+            "route": item.get("route") or "",
+            "reg": item.get("reg_number") or "",
+            "manufacturer": item.get("manufacturer") or "",
+        })
+    return {"items": items}
+
+
+@app.get("/api/baoan-portfolio")
+def baoan_portfolio(id: Optional[int] = None, registration: Optional[str] = None):
+    from .portfolio import build_portfolio
+    try:
+        return build_portfolio(id, registration)
+    except KeyError:
+        raise HTTPException(404, "Không có SKU này trong danh mục Bảo An")
 
 
 @app.get("/api/dm93")
 def dm93():
     return json.loads(DM93_PATH.read_text(encoding="utf-8"))
+
+
+@app.get("/api/metrics")
+def metrics(section: str = "vss"):
+    payload = stored_metrics.read_metrics(section)
+    if not payload:
+        raise HTTPException(404, "Chưa có chỉ số. Chạy làm mới dữ liệu trước.")
+    return payload
+
+
+@app.post("/api/metrics/slice")
+def metrics_slice(body: dict[str, Any]):
+    """One small aggregate for the current filters. Does not page source rows."""
+    from .metric_slice import slice_payload
+    try:
+        return slice_payload(body or {})
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/metrics/map")
+def metrics_map(body: dict[str, Any]):
+    """Province, region, and investor dots for the map. No raw row pages."""
+    from .map_view import map_payload
+    try:
+        return map_payload(body or {})
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/msc/scope/refresh")
+def msc_scope_refresh():
+    from .msc_scope import refresh_async
+    refresh_async(80)
+    return {"ok": True, "message": "Đang đối chiếu gói đang mời thầu với danh mục Bảo An"}
+
+
+@app.get("/api/suggest")
+def suggest(section: str = "vss", field: str = "ten", q: str = ""):
+    return {"items": stored_metrics.suggest(section, field, q)}
+
+
+@app.post("/api/daily/run")
+def daily_run():
+    from .daily import start_daily
+    return start_daily(force=True)
+
+
+@app.post("/api/regulatory/crawl")
+def regulatory_crawl():
+    from .daily import start_regulatory
+    return start_regulatory()
 
 
 @app.post("/api/dav/search")
@@ -125,9 +259,9 @@ def dav_validity_rebuild():
         update_status("dav", progress=pct, message=msg, state="running", updated=now_iso())
 
     try:
-        s = dav.build_validity_set(progress_cb=cb)
-        update_status("dav", state="idle", progress=100, message=f"Hiệu lực: {len(s):,} SĐK", updated=now_iso())
-        return {"ok": True, "count": len(s)}
+        found = dav.build_validity_set(progress_cb=cb)
+        update_status("dav", state="idle", progress=100, message=f"Hiệu lực: {len(found):,} SĐK", updated=now_iso())
+        return {"ok": True, "count": len(found)}
     except Exception as e:
         update_status("dav", state="error", message=str(e))
         raise HTTPException(500, str(e))
@@ -143,6 +277,15 @@ def dav_crawl_stop():
     return dav.stop_crawl()
 
 
+@app.post("/api/msc/match-report")
+def msc_match_report(body: dict[str, Any]):
+    from .match_report import match_report
+    try:
+        return {"rows": match_report((body or {}).get("filters") or {}, str((body or {}).get("level") or "all"))}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.post("/api/msc/search")
 def msc_search(body: dict[str, Any]):
     kind = body.get("kind") or "prices"
@@ -155,11 +298,33 @@ def msc_search(body: dict[str, Any]):
         raise HTTPException(500, str(e))
 
 
+@app.post("/api/msc/crawl/scope")
+def msc_crawl_scope(body: dict[str, Any]):
+    from .msc_scope import refresh_async
+    return refresh_async(limit=None, force=bool(body.get("refresh")))
+
+
 @app.post("/api/msc/crawl/prices")
 def msc_crawl_prices(body: CrawlBody):
     if not body.dateFrom or not body.dateTo:
         raise HTTPException(400, "Cần dateFrom và dateTo (YYYY-MM-DD)")
-    return msc.start_price_sync(body.dateFrom, body.dateTo, refresh=body.refresh)
+    max_pages = body.maxPages
+    if max_pages is not None:
+        max_pages = max(1, min(100, int(max_pages)))
+    return msc.start_price_sync(
+        body.dateFrom, body.dateTo, refresh=body.refresh,
+        max_pages=max_pages, full_scan=bool(body.fullScan),
+    )
+
+
+@app.post("/api/msc/crawl/prices/browser")
+def msc_crawl_prices_browser(body: CrawlBody):
+    if not body.dateFrom or not body.dateTo:
+        raise HTTPException(400, "Cần dateFrom và dateTo (YYYY-MM-DD)")
+    pages = body.maxPages if body.maxPages is not None else body.pages
+    return msc.start_price_browser(
+        body.dateFrom, body.dateTo, pages=pages or 20, full_scan=bool(body.fullScan),
+    )
 
 
 @app.post("/api/msc/crawl/tenders")
@@ -217,8 +382,82 @@ class SyncBody(BaseModel):
     only: Optional[str] = "vss,dav,msc"
 
 
+class ProductionSyncBody(BaseModel):
+    only: Optional[str] = "vss,dav,prices,tenders,rollup,suggest"
+    fromStart: bool = False
+
+
 _sync_lock = threading.Lock()
 _sync_state = {"state": "idle", "message": "", "ok": True}
+_tidb_sync_lock = threading.Lock()
+_tidb_sync_state = {"state": "idle", "phase": "", "message": "", "ok": True, "verified": False}
+
+
+@app.get("/api/platform/status")
+def platform_health(refresh: bool = False):
+    return platform_status.status(refresh=refresh)
+
+
+@app.get("/api/production/sync/status")
+def production_sync_status():
+    return dict(_tidb_sync_state)
+
+
+@app.post("/api/production/sync")
+def production_sync(body: ProductionSyncBody):
+    """Upsert to TiDB, then compare TiDB counts with local sources.
+
+    Completion is only reported after the independent verify step succeeds.
+    Supabase remains a separate optional mirror, not the production sync target.
+    """
+    import os
+    import subprocess
+    import sys
+    try:
+        from dotenv import load_dotenv
+        root = Path(__file__).resolve().parents[1]
+        load_dotenv(root / ".env")
+    except Exception:
+        root = Path(__file__).resolve().parents[1]
+    if not (os.environ.get("TIDB_DATABASE_URL") or (os.environ.get("TIDB_HOST") and os.environ.get("TIDB_USER") and os.environ.get("TIDB_DATABASE"))):
+        raise HTTPException(400, "Chưa có cấu hình TiDB trong .env. Thêm TIDB_DATABASE_URL hoặc TIDB_HOST/TIDB_USER/TIDB_DATABASE trước.")
+    if load_status().get("msc", {}).get("state") == "running":
+        return {"ok": False, "message": "MSC đang ghi dữ liệu. Đợi crawl xong rồi mới đồng bộ TiDB để đối chiếu chính xác."}
+    allowed = {"vss", "dav", "prices", "tenders", "rollup", "suggest"}
+    requested = [part.strip().lower() for part in (body.only or "").split(",") if part.strip()]
+    if not requested or any(part not in allowed for part in requested):
+        raise HTTPException(400, "Nhóm đồng bộ không hợp lệ.")
+    only = ",".join(dict.fromkeys(requested))
+    if not _tidb_sync_lock.acquire(blocking=False):
+        return {"ok": False, "message": "Đồng bộ TiDB đang chạy."}
+
+    def _run():
+        global _tidb_sync_state
+        try:
+            _tidb_sync_state = {"state": "running", "phase": "upload", "message": "Đang đẩy dữ liệu local lên TiDB…", "ok": True, "verified": False}
+            command = [sys.executable, str(root / "scripts" / "tidb" / "sync_to_tidb.py"), "--yes-remote", "--only", only]
+            if body.fromStart:
+                command.append("--from-start")
+            upload = subprocess.run(command, cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if upload.returncode != 0:
+                _tidb_sync_state = {"state": "error", "phase": "upload", "message": "TiDB chưa nhận đủ dữ liệu; tiến độ có thể chạy lại an toàn.", "ok": False, "verified": False}
+                return
+            _tidb_sync_state = {"state": "running", "phase": "verify", "message": "Đang đối chiếu số lượng local với TiDB…", "ok": True, "verified": False}
+            verify = subprocess.run(
+                [sys.executable, str(root / "scripts" / "tidb" / "verify.py"), "--yes-remote"],
+                cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace",
+            )
+            if verify.returncode != 0:
+                _tidb_sync_state = {"state": "error", "phase": "verify", "message": "Đã đẩy xong nhưng đối chiếu TiDB chưa đạt; chưa xác nhận production an toàn.", "ok": False, "verified": False}
+                return
+            _tidb_sync_state = {"state": "idle", "phase": "done", "message": "TiDB đã đồng bộ và đối chiếu số lượng thành công.", "ok": True, "verified": True, "updated": now_iso()}
+        except Exception:
+            _tidb_sync_state = {"state": "error", "phase": "unexpected", "message": "Đồng bộ TiDB gặp lỗi nội bộ; chưa xác nhận production.", "ok": False, "verified": False}
+        finally:
+            _tidb_sync_lock.release()
+
+    threading.Thread(target=_run, daemon=True, name="tidb-production-sync").start()
+    return {"ok": True, "message": "Đã bắt đầu đồng bộ TiDB. Hệ thống sẽ chỉ báo hoàn tất sau bước đối chiếu."}
 
 
 @app.get("/api/supabase/sync/status")
@@ -301,34 +540,21 @@ def create_app():
 
 
 def _auto_crawl_loop():
-    """When autoCrawl.enabled: daily VSS crawl of last 2 days only (default)."""
+    """When autoCrawl.enabled: DAV + MSC + VSS once per day, including right after the app opens."""
+    from .daily import start_daily
+
     while True:
         try:
-            time.sleep(1800)  # check every 30 min
-            secrets = load_secrets()
-            ac = secrets.get("autoCrawl") or {}
-            if not ac.get("enabled"):
-                continue
-            from datetime import datetime
-            today = datetime.now(VN).strftime("%Y-%m-%d")
-            if ac.get("lastVssDate") == today:
-                continue
-            days = int(ac.get("vssDays") or 2)
-            days = max(1, min(7, days))
-            st = load_status().get("vss") or {}
-            if st.get("state") == "running":
-                continue
-            vss.crawl_vss(days=days, loai=1, catchup=False)
-            secrets = load_secrets()
-            secrets.setdefault("autoCrawl", {})
-            secrets["autoCrawl"]["lastVssDate"] = today
-            secrets["autoCrawl"]["vssDays"] = days
-            save_secrets(secrets)
+            start_daily(force=False)
         except Exception:
-            time.sleep(60)
+            pass
+        time.sleep(1800)
 
 
 @app.on_event("startup")
 def _startup_auto_crawl():
-    t = threading.Thread(target=_auto_crawl_loop, daemon=True, name="vss-auto-crawl")
-    t.start()
+    try:
+        vss.reconcile_status()
+    except Exception:
+        pass
+    threading.Thread(target=_auto_crawl_loop, daemon=True, name="daily-update-watch").start()

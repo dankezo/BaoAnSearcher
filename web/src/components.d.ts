@@ -22,10 +22,6 @@ export function MultiSelectField(props: {
   suggest: (q: string) => Promise<string[]>
   placeholder?: string
 }): ReactElement
-export function HospitalGradeField(props: {
-  value: string[]
-  onChange: (value: string[]) => void
-}): ReactElement
 export function CountSelect(props: {
   label: string
   value: string
@@ -89,7 +85,8 @@ export function DataTable(props: {
 export function Pagination(props: {
   page: number
   size: number
-  total: number
+  total?: number | null
+  hasMore?: boolean
   shown: number
   onPage: (page: number) => void
   pageSize: number
@@ -117,7 +114,7 @@ export function UpdatedNote(props: {
   count: number | null
   source?: string
 }): ReactElement | null
-export { IngredientText, useTt20 } from './tt20'
+export { IngredientText } from './tt20'
 export function useSectionMeta(
   section: string,
   localMode: boolean,
@@ -143,7 +140,7 @@ export function serverFilters(
 ): Partial<Record<string, string>>
 export function applyColumnFilters(rows: DrugItem[], columns: DavColumn[], filters: ColumnFilters): DrugItem[]
 export function fetchAllPages(
-  fetchPage: (page: number, size: number) => Promise<DavSearchResult>,
+  fetchPage: (page: number, size: number, cursor?: Record<string, string> | null) => Promise<DavSearchResult>,
   options?: { size?: number; cap?: number; onProgress?: (pct: number) => void; shouldCancel?: () => boolean },
 ): Promise<DrugItem[]>
 export function exportSelectionOrAll(options: {

@@ -143,7 +143,8 @@ export function DavDataTable({
       <Pagination
         page={page}
         size={pageSizeNum}
-        total={data.total || 0}
+        total={data.total}
+        hasMore={data.hasMore}
         shown={rows.length}
         onPage={(p) => search(p)}
         pageSize={pageSize}

@@ -1,0 +1,131 @@
+.pc { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.pc-head h1 { margin: 4px 0 0; font-size: 22px; letter-spacing: -0.03em; color: var(--ink); }
+.pc-kicker { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+.pc-lead, .pc-meta { color: var(--muted); margin: 6px 0 0; }
+.pc-banner { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--accent-soft); color: var(--ink); }
+
+.pc-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.pc-kpis article { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; box-shadow: var(--shadow-1); min-width: 0; }
+.pc-kpis span { display: block; color: var(--muted); font-size: 12px; }
+.pc-kpis strong { display: block; margin-top: 4px; font-size: 22px; letter-spacing: -0.03em; color: var(--ink); }
+.pc-kpis small { display: block; margin-top: 4px; color: var(--ink-2); line-height: 1.35; }
+
+.pc-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; justify-content: space-between; }
+.pc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pc-chips button, .pc-filters select { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+.pc-chips button.on { background: var(--accent); color: white; border-color: var(--accent); }
+.pc-filters label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+.pc-filters select { border-radius: var(--r-sm); min-width: 220px; color: var(--ink); }
+
+.pc-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.pc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pc-table th { position: sticky; top: 0; text-align: left; background: var(--surface-2); color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.pc-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.pc-table tr { cursor: pointer; }
+.pc-table tr.on { background: var(--accent-soft); }
+.pc-table small { display: block; color: var(--muted); }
+.pc-dot { display: inline-flex; min-width: 1.6rem; justify-content: center; border-radius: 999px; padding: 2px 8px; font-weight: 700; }
+button.pc-dot { appearance: none; border: 0; font: inherit; cursor: pointer; }
+button.pc-dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pc-dot.ok { background: var(--ok-soft); color: var(--ok); }
+.pc-dot.warn { background: var(--warn-soft); color: var(--warn); }
+.pc-dot.danger { background: var(--danger-soft); color: var(--danger); }
+.pc-table tr.pc-sdk-expand { cursor: default; }
+.pc-table tr.pc-sdk-expand td { background: color-mix(in srgb, var(--ink) 5%, var(--surface)); padding: 0; }
+.pc-table tr.on + tr.pc-sdk-expand td { background: color-mix(in srgb, var(--ink) 7%, var(--accent-soft)); }
+.pc-sdk-panel { padding: 10px 12px 12px; }
+.pc-sdk-panel > p { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.pc-sdk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pc-sdk-list li { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.pc-sdk-list strong { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+.pc-sdk-list span { color: var(--ink); }
+.pc-sdk-list small { display: inline; color: var(--muted); }
+.pc-sdk-list em { font-style: normal; font-size: 11px; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border-radius: 999px; padding: 1px 8px; }
+
+.pc-dossier { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.pc-dossier header { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+.pc-dossier h2, .pc-dossier h3 { margin: 0; }
+.pc-dossier h2 { font-size: 20px; }
+.pc-note { margin: 0; padding: 10px 12px; background: var(--surface-2); border-radius: var(--r-sm); }
+.pc-dossier-grid, .pc-heat-grid { display: grid; grid-template-columns: minmax(280px, .85fr) minmax(0, 1.6fr); gap: 18px; }
+.pc-heat-grid { grid-template-columns: 240px 1fr; align-items: start; }
+.pc-math { display: grid; gap: 6px; margin: 8px 0; }
+.pc-math div { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.pc-math dt { color: var(--muted); }
+.pc-shield { margin: 0; padding: 10px 12px; border-radius: var(--r-sm); background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.pc-radar { margin: 0; }
+.pc-radar svg { width: 180px; height: 180px; }
+.pc-radar text { font-size: 9px; fill: var(--ink-2); }
+.pc-radar-ring { fill: none; stroke: var(--line-strong); }
+.pc-radar-fill { fill: rgba(15, 92, 107, 0.28); stroke: var(--accent); }
+.pc-radar figcaption, .pc-empty { color: var(--muted); }
+.pc-map { width: 220px; height: auto; background: var(--surface-2); border-radius: var(--r-md); }
+.pc-facilities { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.pc-facilities li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.pc-facilities small { grid-column: 1; color: var(--muted); }
+.pc-products { min-width: 2100px; table-layout: auto; }
+.pc-products th { white-space: nowrap; }
+.pc-products td:nth-child(1) { min-width: 160px; }
+.pc-products td:nth-child(2) { min-width: 190px; max-width: 310px; }
+.pc-products td:nth-child(3), .pc-products td:nth-child(4) { min-width: 120px; max-width: 220px; }
+.pc-products td:nth-child(6) { min-width: 180px; max-width: 250px; }
+.pc-products td:last-child { min-width: 210px; max-width: 280px; }
+.pc-products td small { margin-top: 4px; }
+.pc-number { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pc-history-link { border: 0; padding: 4px 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; }
+.pc-history-link:hover { text-decoration: underline; }
+.pc-rival { background: var(--surface-2); }
+.pc-rival td:first-child { padding-left: 22px; border-left: 3px solid var(--line-strong); }
+.pc-sdk-label td { font-size: 12px; background: var(--accent-soft); color: var(--accent); }
+.pc-products.is-sorted { min-width: 1280px; }
+.pc-price-line { display: inline-flex; align-items: center; gap: 6px; }
+.pc-alert {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: var(--danger);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 18px;
+  cursor: help;
+  flex: none;
+}
+.pc-alert-pop {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+  z-index: 4;
+}
+.pc-alert:hover .pc-alert-pop,
+.pc-alert:focus-visible .pc-alert-pop { display: block; }
+.pc-table td.pc-price-higher { background: var(--ok-soft); color: var(--ok); }
+.pc-table td.pc-price-lower { background: var(--danger-soft); color: var(--danger); }
+.pc-table td.pc-price-higher small, .pc-table td.pc-price-lower small { color: inherit; }
+.pc-history { min-width: 1100px; }
+.pc-dossier-grid > section { padding: 14px; border: 1px solid var(--line); border-radius: var(--r-md); min-width: 0; }
+.pc-heat-grid { margin-top: 12px; grid-template-columns: 150px 1fr; }
+.pc-map { width: 150px; }
+.pc-facilities { max-height: 300px; overflow: auto; }
+
+@media (max-width: 1100px) {
+  .pc-kpis, .pc-dossier-grid { grid-template-columns: 1fr 1fr; }
+  .pc-heat-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .pc-kpis, .pc-dossier-grid { grid-template-columns: 1fr; }
+}

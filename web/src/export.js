@@ -1,6 +1,6 @@
 /**
  * Minimal dependency-free XLSX writer.
- * Produces a real Office Open XML workbook (single sheet) using a STORED (uncompressed) zip.
+ * Produces an Office Open XML workbook using a STORED (uncompressed) zip.
  * Good enough for a few thousand rows × a few dozen columns.
  */
 
@@ -104,7 +104,7 @@ function xmlEsc(s) {
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
 }
 
-function colLetter(i) {
+export function colLetter(i) {
   let s = ''
   let n = i
   while (n >= 0) {
@@ -171,7 +171,7 @@ const STYLES_XML =
  * @param {Array<object>} rows
  * @param {(row:object, col:object)=>any} [getValue] optional accessor (default row[col.key])
  */
-export function buildXlsx(columns, rows, getValue, sheetName = 'Data') {
+export function buildXlsx(columns, rows, getValue, sheetName = 'Data', extraSheets = []) {
   const headers = columns.map((c) => c.label || c.key)
   const matrix = rows.map((r) => columns.map((c) => (getValue ? getValue(r, c) : r[c.key])))
   const widths = headers.map((h, i) => {
@@ -182,8 +182,41 @@ export function buildXlsx(columns, rows, getValue, sheetName = 'Data') {
     }
     return w
   })
-  const safeSheet = xmlEsc(sheetName.slice(0, 31).replace(/[\\/?*[\]:]/g, ' '))
+  const sheets = [{ name: sheetName, xml: sheetXml(headers, matrix, widths) }, ...extraSheets.map((sheet) => ({
+    name: String(sheet.name),
+    xml: heatmapSheetXml(sheet.rows, sheet.note),
+  }))]
+  return packageWorkbook(sheets, workbookStyles())
+}
 
+export function sheetCell(ref, value, styleId = 0) {
+  const style = styleId ? ` s="${styleId}"` : ''
+  if (value && typeof value === 'object' && value.formula) {
+    return `<c r="${ref}" t="str"${style}><f>${xmlEsc(value.formula)}</f><v>${xmlEsc(value.text || '')}</v></c>`
+  }
+  if (value == null || value === '') return styleId ? `<c r="${ref}"${style}/>` : ''
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `<c r="${ref}"${style}><v>${value}</v></c>`
+  }
+  const text = xmlEsc(typeof value === 'object' ? JSON.stringify(value) : value)
+  const preserve = /^\s|\s$/.test(text) ? ' xml:space="preserve"' : ''
+  return `<c r="${ref}" t="inlineStr"${style}><is><t${preserve}>${text}</t></is></c>`
+}
+
+export function buildSingleSheetXlsx(sheetName, sheetXmlText, stylesXml) {
+  return packageWorkbook([{ name: sheetName, xml: sheetXmlText }], stylesXml)
+}
+
+export function buildSheetsXlsx(sheets, stylesXml) {
+  return packageWorkbook(sheets, stylesXml)
+}
+
+function packageWorkbook(sheets, stylesXml) {
+  const named = sheets.map((sheet) => ({
+    name: xmlEsc(String(sheet.name).slice(0, 31).replace(/[\\/?*[\]:]/g, ' ')),
+    xml: sheet.xml,
+    rels: sheet.rels || '',
+  }))
   const files = [
     {
       name: '[Content_Types].xml',
@@ -193,7 +226,7 @@ export function buildXlsx(columns, rows, getValue, sheetName = 'Data') {
         `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
         `<Default Extension="xml" ContentType="application/xml"/>` +
         `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
-        `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` +
+        sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('') +
         `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>` +
         `</Types>`,
     },
@@ -210,7 +243,7 @@ export function buildXlsx(columns, rows, getValue, sheetName = 'Data') {
       data:
         `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
         `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
-        `<sheets><sheet name="${safeSheet}" sheetId="1" r:id="rId1"/></sheets>` +
+        `<sheets>${named.map((sheet, i) => `<sheet name="${sheet.name}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets>` +
         `</workbook>`,
     },
     {
@@ -218,14 +251,61 @@ export function buildXlsx(columns, rows, getValue, sheetName = 'Data') {
       data:
         `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
         `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-        `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>` +
-        `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>` +
+        named.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('') +
+        `<Relationship Id="rId${named.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>` +
         `</Relationships>`,
     },
-    { name: 'xl/styles.xml', data: STYLES_XML },
-    { name: 'xl/worksheets/sheet1.xml', data: sheetXml(headers, matrix, widths) },
+    { name: 'xl/styles.xml', data: stylesXml },
+    ...named.map((sheet, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: sheet.xml })),
+    ...named.flatMap((sheet, i) => (sheet.rels
+      ? [{ name: `xl/worksheets/_rels/sheet${i + 1}.xml.rels`, data: sheet.rels }]
+      : [])),
   ]
   return zipStored(files)
+}
+
+function workbookStyles() {
+  const colors = ['FFD1FAE5', 'FFFEE2E2', 'FFE2E8F0']
+  return STYLES_XML.replace('<fills count="3">', '<fills count="6">')
+    .replace('</fills>', colors.map(rgb => `<fill><patternFill patternType="solid"><fgColor rgb="${rgb}"/><bgColor indexed="64"/></patternFill></fill>`).join('') + '</fills>')
+    .replace('<cellXfs count="2">', '<cellXfs count="5">')
+    .replace('</cellXfs>', colors.map((_, i) => `<xf numFmtId="0" fontId="1" fillId="${i + 3}" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>`).join('') + '</cellXfs>')
+}
+
+function heatmapSheetXml(provinces = [], note = '') {
+  const lines = new Map(), merges = []
+  const add = (row, col, value, style = 0) => {
+    const xml = cellXml(`${colLetter(col)}${row}`, value, false).replace('<c ', `<c s="${style}" `)
+    lines.set(row, (lines.get(row) || '') + xml)
+  }
+  add(1, 0, 'HEATMAP VSS · GIÁ TRỊ TRÚNG THẦU THEO TỈNH', 1)
+  merges.push('A1:O1')
+  add(2, 0, note || '12 tháng gần nhất so với cùng kỳ năm trước · Nguồn: BHYT VSS')
+  merges.push('A2:O2')
+  add(3, 0, 'Xanh: tăng · Đỏ: giảm · Xám: chưa có cùng kỳ. Giá trị: VND. Heatmap gồm tất cả tỉnh theo bộ lọc; độc lập với các dòng được chọn ở sheet VSS.')
+  merges.push('A3:O3')
+  const money = n => Number(n || 0).toLocaleString('vi-VN') + ' đ'
+  provinces.forEach((p, i) => {
+    const row = 5 + Math.floor(i / 5) * 5, col = (i % 5) * 3
+    const style = p.yoy == null ? 4 : p.yoy < 0 ? 3 : 2
+    const values = [`${p.name || p.code} (${p.code || '—'})`, money(p.value), p.yoy == null ? 'Chưa có cùng kỳ' : `${p.yoy > 0 ? '+' : ''}${Number(p.yoy).toFixed(1)}%`, `Cùng kỳ: ${money(p.prev)}`]
+    values.forEach((value, offset) => {
+      add(row + offset, col, value, style)
+      merges.push(`${colLetter(col)}${row + offset}:${colLetter(col + 2)}${row + offset}`)
+    })
+  })
+  const start = 6 + Math.ceil(provinces.length / 5) * 5
+  const headers = ['Mã tỉnh', 'Tỉnh / TP', 'Giá trị (VND)', 'Cùng kỳ (VND)', 'Tăng trưởng (%)', 'Tỷ trọng (%)', 'Số dòng', 'N1 (VND)', 'N2 (VND)', 'N3 (VND)', 'N4 (VND)', 'N5 (VND)']
+  headers.forEach((v, c) => add(start, c, v, 1))
+  provinces.forEach((p, i) => [p.code, p.name, p.value, p.prev, p.yoy ?? 'Chưa có cùng kỳ', p.share, p.count, ...(p.groups || [])].forEach((v, c) => add(start + i + 1, c, v)))
+  const end = start + provinces.length
+  const rows = [...lines.entries()].sort((a, b) => a[0] - b[0]).map(([r, xml]) => `<row r="${r}" ht="${r === 3 ? 30 : r < start ? 25 : 20}" customHeight="1">${xml}</row>`).join('')
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    `<dimension ref="A1:O${end}"/><sheetViews><sheetView showGridLines="0" workbookViewId="0"/></sheetViews>` +
+    '<sheetFormatPr defaultRowHeight="20"/><cols><col min="1" max="15" width="14" customWidth="1"/></cols>' +
+    `<sheetData>${rows}</sheetData><autoFilter ref="A${start}:L${end}"/><mergeCells count="${merges.length}">${merges.map(ref => `<mergeCell ref="${ref}"/>`).join('')}</mergeCells>` +
+    '<pageMargins left="0.25" right="0.25" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="0"/></worksheet>'
 }
 
 export function downloadBlob(blob, filename) {
@@ -246,7 +326,7 @@ export function stamp() {
 }
 
 /** Export rows to .xlsx and trigger download. */
-export function exportXlsx({ columns, rows, getValue, filename = 'export', sheetName = 'Data' }) {
-  const blob = buildXlsx(columns, rows, getValue, sheetName)
+export function exportXlsx({ columns, rows, getValue, filename = 'export', sheetName = 'Data', extraSheets = [] }) {
+  const blob = buildXlsx(columns, rows, getValue, sheetName, extraSheets)
   downloadBlob(blob, `${filename}_${stamp()}.xlsx`)
 }

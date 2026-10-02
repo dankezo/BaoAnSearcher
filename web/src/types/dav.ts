@@ -50,7 +50,9 @@ export interface DavFilters {
 export interface PaginationState {
   page: number
   size: number
-  total: number
+  total: number | null
+  hasMore?: boolean
+  nextCursor?: Record<string, string> | null
 }
 export interface DavSearchResult extends PaginationState {
   items: DrugItem[]
@@ -59,6 +61,7 @@ export interface DavSearchRequest {
   filters?: Partial<DavFilters>
   page?: number
   size?: number
+  cursor?: Record<string, string> | null
 }
 export type ColumnFilters = Record<string, string>
 export interface DavColumn {
@@ -86,7 +89,7 @@ export interface DavSuggestion {
   title: string
   subtitle: string
   meta: string
-  row: DrugItem
+  row?: DrugItem | null
 }
 export type DavMetricPatch = Partial<DavFilters> & { _tag?: string; _quick?: string }
 export interface DavMetricCard {

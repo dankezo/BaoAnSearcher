@@ -1,11 +1,11 @@
-import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, memo, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { createPortal } from 'react-dom'
 import { fold, fmtDateTime, getStaticStatus, getStatus, relativeTime, sectionMeta } from './api'
 import { cloudMeta, supabaseConfigured } from './supabaseCloud'
 import { exportXlsx } from './export'
-import { HOSPITAL_GRADES } from './tt20'
-
-export { IngredientLink, IngredientText, Tt20Provider, useTt20 } from './tt20'
+import { pageSlots } from './pageSlots'
+export { IngredientText } from './tt20'
 
 /* ------------------------------------------------------------------ */
 /* Icons (inline, 16px)                                                 */
@@ -132,36 +132,56 @@ export function useSimProgress(active, baseMsg = 'Đang tải') {
 /* ------------------------------------------------------------------ */
 /* Filter inputs                                                        */
 /* ------------------------------------------------------------------ */
-export function Field({ label, children, hint, className = '' }) {
+function HelpTip({ children }) {
+  const [pos, setPos] = useState(null)
+  const hideTimer = useRef(null)
+  const place = (event) => {
+    clearTimeout(hideTimer.current)
+    const rect = event.currentTarget.getBoundingClientRect()
+    setPos({
+      top: rect.bottom + 8,
+      left: Math.max(12, Math.min(rect.left, window.innerWidth - 332)),
+    })
+  }
+  const hideSoon = () => {
+    clearTimeout(hideTimer.current)
+    hideTimer.current = setTimeout(() => setPos(null), 180)
+  }
   return (
-    <div className={`field ${className}`}>
-      <label>{label}{hint && <span className="hint"> {hint}</span>}</label>
-      {children}
-    </div>
+    <span
+      className="field-help"
+      tabIndex={0}
+      aria-label="Hướng dẫn"
+      onMouseEnter={place}
+      onFocus={place}
+      onMouseLeave={hideSoon}
+      onBlur={hideSoon}
+    >
+      ?
+      {pos && createPortal(
+        <span
+          className="field-help-pop"
+          role="tooltip"
+          style={{ top: pos.top, left: pos.left }}
+          onMouseEnter={() => clearTimeout(hideTimer.current)}
+          onMouseLeave={hideSoon}
+        >{children}</span>,
+        document.body,
+      )}
+    </span>
   )
 }
 
-export function HospitalGradeField({ value, onChange, multi = true }) {
-  if (multi) {
-    return (
-      <MultiSelectField
-        label="Hạng bệnh viện"
-        hint="TT 20/2022 · chọn nhiều"
-        value={asList(value)}
-        onChange={onChange}
-        options={HOSPITAL_GRADES.map((g) => ({ value: g.id, label: g.label }))}
-      />
-    )
-  }
+export function Field({ label, children, hint, help, className = '' }) {
   return (
-    <Field label="Hạng bệnh viện" hint="TT 20/2022">
-      <select value={value || ''} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Tất cả</option>
-        {HOSPITAL_GRADES.map((g) => (
-          <option key={g.id} value={g.id}>{g.label}</option>
-        ))}
-      </select>
-    </Field>
+    <div className={`field ${className}`}>
+      <label>
+        {label}
+        {hint && <span className="hint"> {hint}</span>}
+        {help && <HelpTip>{help}</HelpTip>}
+      </label>
+      {children}
+    </div>
   )
 }
 
@@ -202,14 +222,16 @@ export function MultiSelectField({
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
-  // Recommendations: fetch on open + while typing (empty q = top values)
+  // Typeahead waits 300ms and at least 2 characters (shared by VSS, DAV, MSC).
   useEffect(() => {
     if (!suggest || !open) return undefined
+    const needle = q.trim()
+    if (needle.length < 2) return undefined
     let alive = true
     const t = setTimeout(async () => {
       setSuggesting(true)
       try {
-        const list = await suggest(q.trim())
+        const list = await suggest(needle)
         if (!alive) return
         setExtra((prev) => {
           const set = new Set(prev)
@@ -221,7 +243,7 @@ export function MultiSelectField({
         })
       } catch { /* ignore */ }
       finally { if (alive) setSuggesting(false) }
-    }, q.trim() ? 200 : 40)
+    }, 300)
     return () => { alive = false; clearTimeout(t) }
   }, [q, suggest, open])
 
@@ -282,7 +304,7 @@ export function MultiSelectField({
                 autoFocus
                 onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); addFromQuery() }
+                  if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); addFromQuery() }
                   if (e.key === 'Escape') setOpen(false)
                 }}
               />
@@ -341,7 +363,7 @@ export function SuggestField({
   useEffect(() => {
     clearTimeout(timer.current)
     const q = String(value ?? '').trim()
-    if (!suggest || q.length < 1) {
+    if (!suggest || q.length < 2) {
       setItems([])
       return undefined
     }
@@ -356,7 +378,7 @@ export function SuggestField({
       } catch {
         if (id === seq.current) setItems([])
       }
-    }, 220)
+    }, 300)
     return () => clearTimeout(timer.current)
   }, [value, suggest])
 
@@ -387,6 +409,7 @@ export function SuggestField({
     }
     if (e.key === 'Enter') {
       e.preventDefault()
+      e.stopPropagation()
       if (show && hi >= 0 && items[hi]) {
         pick(items[hi])
         return
@@ -451,7 +474,7 @@ export function SuggestInput({
   useEffect(() => {
     clearTimeout(timer.current)
     const q = String(value ?? '').trim()
-    if (!suggest || q.length < 1) { setItems([]); return undefined }
+    if (!suggest || q.length < 2) { setItems([]); return undefined }
     timer.current = setTimeout(async () => {
       const id = ++seq.current
       try {
@@ -463,7 +486,7 @@ export function SuggestInput({
       } catch {
         if (id === seq.current) setItems([])
       }
-    }, 220)
+    }, 300)
     return () => clearTimeout(timer.current)
   }, [value, suggest])
 
@@ -759,11 +782,14 @@ export function ViewModeSelect({ value, onChange }) {
 /* Pagination                                                           */
 /* ------------------------------------------------------------------ */
 export function Pagination({
-  page, size, total, onPage, shown, extra, pageSize, onPageSize,
-  pageSizeOptions = [50, 100, 200, 300, 400, 500],
+  page, size, total, hasMore, onPage, shown, extra, pageSize, onPageSize,
+  pageSizeOptions = [50, 100, 200, 300, 400, 500], cursorOnly = false,
 }) {
-  const effectiveSize = size > 0 ? size : Math.max(total || 1, 1)
-  const pages = Math.max(1, Math.ceil((total || 0) / effectiveSize))
+  const knownTotal = !cursorOnly && Number.isFinite(Number(total)) ? Number(total) : null
+  const effectiveSize = size > 0 ? size : Math.max(knownTotal || 1, 1)
+  const pages = knownTotal == null ? null : Math.max(1, Math.ceil(knownTotal / effectiveSize))
+  const nextDisabled = pages != null ? page + 1 >= pages : hasMore !== true
+  const slots = pages == null ? [] : pageSlots(page, pages)
   const preset = pageSizeOptions.map(String)
   const isCustom = pageSize != null && !preset.includes(String(pageSize))
   const [customOpen, setCustomOpen] = useState(isCustom)
@@ -785,9 +811,15 @@ export function Pagination({
   return (
     <div className="footer-bar">
       <span>
-        <strong>{(total || 0).toLocaleString('vi-VN')}</strong> kết quả
-        {shown != null && shown !== Math.min(effectiveSize, Math.max(0, (total || 0) - page * effectiveSize)) && (
-          <> · hiển thị <strong>{shown}</strong> sau lọc cột</>
+        {knownTotal == null ? (
+          <>{shown != null ? <><strong>{shown.toLocaleString('vi-VN')}</strong> dòng trên trang này</> : 'Trang hiện tại'}</>
+        ) : (
+          <>
+            <strong>{knownTotal.toLocaleString('vi-VN')}</strong> kết quả
+            {shown != null && shown !== Math.min(effectiveSize, Math.max(0, knownTotal - page * effectiveSize)) && (
+              <> · hiển thị <strong>{shown}</strong> sau lọc cột</>
+            )}
+          </>
         )}
       </span>
       {extra}
@@ -832,10 +864,25 @@ export function Pagination({
           )}
         </label>
       )}
-      <span className="muted">Trang {page + 1}/{pages.toLocaleString('vi-VN')}</span>
-      <div className="pager">
+      <span className="muted">Trang {page + 1}{pages != null ? `/${pages.toLocaleString('vi-VN')}` : ''}</span>
+      <div className="pager" role="navigation" aria-label="Chọn trang">
         <button type="button" className="icon-btn" aria-label="Trang trước" disabled={page <= 0} onClick={() => onPage(page - 1)}>{I.chevL}</button>
-        <button type="button" className="icon-btn" aria-label="Trang sau" disabled={page + 1 >= pages} onClick={() => onPage(page + 1)}>{I.chevR}</button>
+        {!cursorOnly && slots.map((slot, index) => (
+          slot === 'gap'
+            ? <span key={`gap-${index}`} className="page-gap" aria-hidden="true">…</span>
+            : (
+              <button
+                key={slot}
+                type="button"
+                className={`page-num${slot === page ? ' on' : ''}`}
+                aria-current={slot === page ? 'page' : undefined}
+                onClick={() => { if (slot !== page) onPage(slot) }}
+              >
+                {slot + 1}
+              </button>
+            )
+        ))}
+        <button type="button" className="icon-btn" aria-label="Trang sau" disabled={nextDisabled} onClick={() => onPage(page + 1)}>{I.chevR}</button>
       </div>
     </div>
   )
@@ -908,23 +955,25 @@ export function UpdatedNote({ updated, count, source }) {
 /* ------------------------------------------------------------------ */
 /* Modal + detail                                                       */
 /* ------------------------------------------------------------------ */
-export function Modal({ open, onClose, title, subtitle, children, footer, width = 760 }) {
+export function Modal({ open, onClose, title, subtitle, children, footer, width = 760, className = '', portalEl = null }) {
+  const local = !!portalEl
   useEffect(() => {
-    if (!open) return
+    if (!open) return undefined
     const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
     document.addEventListener('keydown', onKey)
+    if (local) return () => document.removeEventListener('keydown', onKey)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prev
     }
-  }, [open, onClose])
+  }, [open, onClose, local])
   if (!open) return null
-  // Portal to body so split-pane `contain` / isolation cannot make the dialog look transparent.
+  // Full-screen dialogs portal to body. In split view, a pane host keeps the dim on that side only.
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
-      <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: width }}>
+    <div className={`modal-backdrop${local ? ' pane-local' : ''}`} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.() }}>
+      <div className={`modal${className ? ` ${className}` : ''}`} role="dialog" aria-modal="true" style={{ maxWidth: local ? '100%' : width }}>
         <div className="modal-head">
           <div>
             {subtitle && <div className="modal-kicker">{subtitle}</div>}
@@ -936,7 +985,7 @@ export function Modal({ open, onClose, title, subtitle, children, footer, width 
         {footer && <div className="modal-foot">{footer}</div>}
       </div>
     </div>,
-    document.body,
+    portalEl || document.body,
   )
 }
 
@@ -948,7 +997,9 @@ function isEmptyVal(v) {
  * Detail modal listing all fields of a record.
  * fields: [{key,label,text?}] ordered; remaining non-underscore keys are appended.
  */
-export function DetailModal({ row, fields, title, subtitle, onClose, sourceUrl, renderValue }) {
+export function DetailModal({ row, fields, title, subtitle, onClose, sourceUrl, renderValue, width, extra, contain = false }) {
+  const pane = useContext(PaneOverlayContext)
+  const portalEl = contain && pane ? pane : null
   // Only curated/compact fields — do not dump every DB key into the modal.
   const all = useMemo(() => {
     if (!row) return []
@@ -962,6 +1013,9 @@ export function DetailModal({ row, fields, title, subtitle, onClose, sourceUrl, 
       onClose={onClose}
       title={title}
       subtitle={subtitle}
+      width={width || 760}
+      portalEl={portalEl}
+      className={portalEl ? 'pane-fit' : (width > 900 ? 'wide' : '')}
       footer={(
         <>
           <span className="muted">{all.length} trường</span>
@@ -991,6 +1045,7 @@ export function DetailModal({ row, fields, title, subtitle, onClose, sourceUrl, 
           )
         })}
       </dl>
+      {extra}
     </Modal>
   )
 }
@@ -1142,7 +1197,7 @@ export function TableToolbar({
  * columns: [{ key, label, render?(value,row), text?(row), filter?: 'text'|'select'|false,
  *             align?: 'right'|'center', mono?: bool, nowrap?: bool, width? }]
  */
-export function DataTable({
+export const DataTable = memo(function DataTable({
   columns, rows, rowKey, startIndex = 0, showIndex = true,
   selectable = true, selected, onToggleRow, onToggleAll,
   columnFilters = {}, onColumnFilter, filtersVisible = true, onFilterEnter,
@@ -1151,6 +1206,7 @@ export function DataTable({
   trailing, // { label, render(row) }
   minWidth,
   cardKeys = null,
+  rowClassName = null,
 }) {
   const keys = useMemo(() => rows.map((r, i) => rowKey(r, i)), [rows, rowKey])
   const allChecked = rows.length > 0 && keys.every((k) => selected?.has(k))
@@ -1183,6 +1239,45 @@ export function DataTable({
   }, [columns, rows])
 
   const extraCols = (showIndex ? 1 : 0) + (selectable ? 1 : 0) + (trailing ? 1 : 0)
+  const colSpan = columns.length + extraCols
+  const scrollRef = useRef(null)
+  const [narrow, setNarrow] = useState(() => (
+    typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(max-width: 900px)').matches
+      : false
+  ))
+  const [scrollMargin, setScrollMargin] = useState(0)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined
+    const mq = window.matchMedia('(max-width: 900px)')
+    const apply = () => setNarrow(mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => (narrow ? 156 : 36),
+    overscan: 8,
+    initialRect: { width: 800, height: 640 },
+    scrollMargin,
+  })
+  const virtualizerRef = useRef(virtualizer)
+  virtualizerRef.current = virtualizer
+  useLayoutEffect(() => {
+    const thead = scrollRef.current?.querySelector('thead')
+    const height = !narrow && thead ? thead.offsetHeight || 0 : 0
+    setScrollMargin((prev) => (prev === height ? prev : height))
+  }, [narrow, filtersVisible, columns.length, rows.length])
+  useEffect(() => {
+    virtualizerRef.current?.measure()
+  }, [narrow, scrollMargin])
+  const virtualRows = rows.length ? virtualizer.getVirtualItems() : []
+  const padTop = virtualRows.length ? Math.max(0, virtualRows[0].start - scrollMargin) : 0
+  const padBottom = virtualRows.length
+    ? Math.max(0, virtualizer.getTotalSize() - (virtualRows[virtualRows.length - 1].end - scrollMargin))
+    : 0
 
   const defaultSuggest = useCallback((key) => async (q) => {
     if (onFilterSuggest) return onFilterSuggest(key, q)
@@ -1209,8 +1304,41 @@ export function DataTable({
     </div>
   )
 
+  const renderRow = (row, i, measure) => {
+    const k = keys[i]
+    const isSel = selected?.has(k)
+    return (
+      <tr
+        key={k}
+        data-index={i}
+        ref={measure ? virtualizer.measureElement : undefined}
+        className={[isSel ? 'selected' : '', typeof rowClassName === 'function' ? rowClassName(row) : ''].filter(Boolean).join(' ')}
+        onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(row) : undefined}
+        title={onRowDoubleClick ? 'Nhấp đôi để xem chi tiết' : undefined}
+      >
+        {selectable && (
+          <td className="sel" onClick={(e) => e.stopPropagation()}>
+            <input type="checkbox" checked={!!isSel} onChange={() => onToggleRow?.(k, row)} aria-label="Chọn dòng" />
+          </td>
+        )}
+        {showIndex && <td className="idx">{startIndex + i + 1}</td>}
+        {columns.map((c) => {
+          const v = row[c.key]
+          let content
+          if (c.render) content = c.render(v, row)
+          else if (typeof v === 'number') content = v.toLocaleString('vi-VN')
+          else content = v ?? ''
+          content = maybeTruncateNode(content, c)
+          const cls = [c.align ? `al-${c.align}` : '', c.mono ? 'mono' : '', c.nowrap ? 'nowrap' : ''].filter(Boolean).join(' ')
+          return <td key={c.key} className={cls || undefined}>{content}</td>
+        })}
+        {trailing && <td className="trail">{trailing.render(row)}</td>}
+      </tr>
+    )
+  }
+
   return (
-    <div className="table-wrap">
+    <div className="table-wrap" ref={scrollRef}>
       <table className={`data desktop-table${filtersVisible ? ' with-filters' : ''}`} style={minWidth ? { minWidth } : undefined}>
         <thead>
           <tr className="labels">
@@ -1267,44 +1395,28 @@ export function DataTable({
           )}
         </thead>
         <tbody>
-          {rows.map((row, i) => {
-            const k = keys[i]
-            const isSel = selected?.has(k)
-            return (
-              <tr
-                key={k}
-                className={[isSel ? 'selected' : '', typeof rowClassName === 'function' ? rowClassName(row) : ''].filter(Boolean).join(' ')}
-                onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(row) : undefined}
-                title={onRowDoubleClick ? 'Nhấp đôi để xem chi tiết' : undefined}
-              >
-                {selectable && (
-                  <td className="sel" onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={!!isSel} onChange={() => onToggleRow?.(k, row)} aria-label="Chọn dòng" />
-                  </td>
-                )}
-                {showIndex && <td className="idx">{startIndex + i + 1}</td>}
-                {columns.map((c) => {
-                  const v = row[c.key]
-                  let content
-                  if (c.render) content = c.render(v, row)
-                  else if (typeof v === 'number') content = v.toLocaleString('vi-VN')
-                  else content = v ?? ''
-                  content = maybeTruncateNode(content, c)
-                  const cls = [c.align ? `al-${c.align}` : '', c.mono ? 'mono' : '', c.nowrap ? 'nowrap' : ''].filter(Boolean).join(' ')
-                  return <td key={c.key} className={cls || undefined}>{content}</td>
-                })}
-                {trailing && <td className="trail">{trailing.render(row)}</td>}
-              </tr>
-            )
-          })}
+          {padTop > 0 && !narrow && (
+            <tr className="virt-spacer" aria-hidden="true">
+              <td colSpan={colSpan} style={{ height: padTop, padding: 0, border: 0 }} />
+            </tr>
+          )}
+          {!narrow && virtualRows.map((vi) => renderRow(rows[vi.index], vi.index, true))}
+          {padBottom > 0 && !narrow && (
+            <tr className="virt-spacer" aria-hidden="true">
+              <td colSpan={colSpan} style={{ height: padBottom, padding: 0, border: 0 }} />
+            </tr>
+          )}
           {!rows.length && !loading && (
-            <tr className="empty"><td colSpan={columns.length + extraCols}>{emptyBlock}</td></tr>
+            <tr className="empty"><td colSpan={colSpan}>{emptyBlock}</td></tr>
           )}
         </tbody>
       </table>
 
       <div className="result-cards" aria-label="Kết quả dạng thẻ">
-        {rows.map((row, i) => {
+        {narrow && padTop > 0 && <div aria-hidden="true" style={{ height: padTop }} />}
+        {narrow && virtualRows.map((vi) => {
+          const i = vi.index
+          const row = rows[i]
           const k = keys[i]
           const titleCol = cardCols[0]
           let title = '—'
@@ -1317,11 +1429,13 @@ export function DataTable({
             <button
               key={k}
               type="button"
+              data-index={i}
+              ref={virtualizer.measureElement}
               className={`result-card${selected?.has(k) ? ' selected' : ''}`}
               onClick={() => onRowDoubleClick?.(row)}
             >
               <div className="result-card-title">
-                {typeof title === 'string' || typeof title === 'number' ? title : (titleCol?.label || 'Chi tiết')}
+                {title == null || title === '' ? '—' : title}
               </div>
               <dl className="result-card-grid">
                 {cardCols.slice(1).map((c) => {
@@ -1341,11 +1455,12 @@ export function DataTable({
             </button>
           )
         })}
-        {!rows.length && !loading && emptyBlock}
+        {narrow && padBottom > 0 && <div aria-hidden="true" style={{ height: padBottom }} />}
+        {narrow && !rows.length && !loading && emptyBlock}
       </div>
     </div>
   )
-}
+})
 
 /* ------------------------------------------------------------------ */
 /* Export helper                                                        */
@@ -1354,7 +1469,7 @@ export function DataTable({
  * Export selected rows (if any) else all rows returned by fetchAll().
  * Returns the number of exported rows.
  */
-export async function exportSelectionOrAll({ columns, selected, fetchAll, filename, sheetName, columnFilters }) {
+export async function exportSelectionOrAll({ columns, selected, fetchAll, filename, sheetName, columnFilters, extraSheets = [] }) {
   let rows
   if (selected && selected.size > 0) rows = [...selected.values()]
   else {
@@ -1372,6 +1487,7 @@ export async function exportSelectionOrAll({ columns, selected, fetchAll, filena
     },
     filename,
     sheetName,
+    extraSheets,
   })
   return rows.length
 }
@@ -1390,15 +1506,34 @@ export async function fetchAllPages(fetchPage, {
   const first = await fetchPage(0, size)
   checkCancelled()
   const items = [...(first.items || [])]
+  let cursor = first.nextCursor || null
+  if (typeof first.hasMore === 'boolean') {
+    let hasMore = first.hasMore
+    let page = 1
+    while (hasMore && items.length < cap) {
+      checkCancelled()
+      const more = await fetchPage(page, size, cursor)
+      checkCancelled()
+      if (!more.items?.length) break
+      items.push(...more.items)
+      hasMore = more.hasMore === true
+      cursor = more.nextCursor || null
+      page += 1
+      onProgress?.(Math.min(99, Math.round((items.length / cap) * 100)))
+    }
+    onProgress?.(100)
+    return items.slice(0, cap)
+  }
   const total = Math.min(first.total || items.length, cap)
   onProgress?.(items.length && total ? Math.min(99, Math.round((items.length / total) * 100)) : 5)
   let page = 1
   while (items.length < total) {
     checkCancelled()
-    const more = await fetchPage(page, size)
+    const more = await fetchPage(page, size, cursor)
     checkCancelled()
     if (!more.items?.length) break
     items.push(...more.items)
+    cursor = more.nextCursor || null
     onProgress?.(Math.min(99, Math.round((items.length / Math.max(total, 1)) * 100)))
     page++
     if (more.items.length < size) break

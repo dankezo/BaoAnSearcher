@@ -28,6 +28,7 @@ export const ALLOWED_EMAILS = [
   'admin@baoanpharma.com',
   'sonnguyen@baoanpharma.com',
   'tuanvu@baoanpharma.com',
+  'qa.cursor@baoanpharma.com',
 ].map((e) => e.toLowerCase())
 
 /** Absolute session cap when "Ghi nhớ đăng nhập" is on. */

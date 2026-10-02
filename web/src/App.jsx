@@ -1,31 +1,51 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { api } from './api'
 import { useAuth } from './auth'
-import { PaneOverlayContext, Tt20Provider } from './components'
+import { PaneOverlayContext } from './components'
 import { supabaseConfigured } from './supabaseCloud'
-import DavSection from './DavSection'
-import MscSection from './MscSection'
-import VssSection from './VssSection'
-import AdminSection from './AdminSection'
+
+const DavSection = lazy(() => import('./DavSection'))
+const MscSection = lazy(() => import('./MscSection'))
+const VssSection = lazy(() => import('./VssSection'))
+const AdminSection = lazy(() => import('./AdminSection'))
+const HomeDashboard = lazy(() => import('./home/HomeDashboard'))
+const PortfolioCockpit = lazy(() => import('./PortfolioCockpit'))
+const BaoAnCatalog = lazy(() => import('./BaoAnCatalog'))
+const MapSection = lazy(() => import('./MapSection'))
+
+function PaneFallback() {
+  return <p className="info-note" role="status">Đang mở mục…</p>
+}
 
 const TABS = [
+  { id: 'home', label: 'Trang chủ', sub: 'Nhịp thầu · bảng tin' },
   { id: 'dav', label: 'Thuốc DAV', sub: 'Số đăng ký' },
   { id: 'msc', label: 'Thầu MSC', sub: 'Đơn giá · gói thầu' },
   { id: 'vss', label: 'BHYT VSS', sub: 'Trúng thầu' },
+  { id: 'map', label: 'Bản đồ', sub: 'Nhiệt tỉnh · chủ đầu tư' },
+  { id: 'portfolio', label: 'Danh mục Bảo An', sub: 'Portfolio Cockpit' },
   { id: 'admin', label: 'Quản trị', sub: 'Crawl · tài khoản' },
 ]
 
 const SPLIT_APPS = [
-  { id: 'dav', label: 'Thuốc DAV', desc: 'Số đăng ký · tag SĐK · TT20' },
+  { id: 'baoan', label: 'Danh mục Bảo An', desc: 'Tên thuốc · hoạt chất · SĐK' },
+  { id: 'dav', label: 'Thuốc DAV', desc: 'Số đăng ký · tag SĐK' },
   { id: 'msc', label: 'Thầu MSC', desc: 'Đơn giá · gói thầu quốc gia' },
   { id: 'vss', label: 'BHYT VSS', desc: 'Kết quả trúng thầu Tân dược' },
+  { id: 'map', label: 'Bản đồ', desc: 'Nhiệt tỉnh · chủ đầu tư' },
+  { id: 'portfolio', label: 'Portfolio Cockpit', desc: 'Cockpit danh mục Bảo An' },
 ]
 
 function SectionById({ id, localMode, embedded, filtersInModal }) {
-  if (id === 'dav') return <DavSection localMode={localMode} embedded={embedded} filtersInModal={filtersInModal} />
-  if (id === 'msc') return <MscSection localMode={localMode} embedded={embedded} filtersInModal={filtersInModal} />
-  if (id === 'vss') return <VssSection localMode={localMode} embedded={embedded} filtersInModal={filtersInModal} />
-  return null
+  let section = null
+  if (id === 'dav') section = <DavSection localMode={localMode} embedded={embedded} filtersInModal={filtersInModal} />
+  else if (id === 'msc') section = <MscSection localMode={localMode} embedded={embedded} filtersInModal={filtersInModal} />
+  else if (id === 'vss') section = <VssSection localMode={localMode} embedded={embedded} filtersInModal={filtersInModal} />
+  else if (id === 'map') section = <MapSection localMode={localMode} />
+  else if (id === 'portfolio') section = <PortfolioCockpit localMode={localMode} />
+  else if (id === 'baoan') section = <BaoAnCatalog localMode={localMode} />
+  if (!section) return null
+  return <Suspense fallback={<PaneFallback />}>{section}</Suspense>
 }
 
 function SplitPane({ side, appId, onSelect, onClear, localMode }) {
@@ -91,25 +111,63 @@ export default function App() {
   const [tab, setTab] = useState(() => {
     const h = window.location.hash.replace('#', '')
     if (h === 'multi') return 'multi'
-    return TABS.some((t) => t.id === h) ? h : 'dav'
+    return TABS.some((t) => t.id === h) ? h : 'home'
   })
+  const [mscKind, setMscKind] = useState('tenders')
   const [localMode, setLocalMode] = useState(false)
   const [checked, setChecked] = useState(false)
   const [leftApp, setLeftApp] = useState('dav')
   const [rightApp, setRightApp] = useState('vss')
+  const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches)
   const [visited, setVisited] = useState(() => {
     const h = window.location.hash.replace('#', '')
-    const id = TABS.some((t) => t.id === h) ? h : 'dav'
+    const id = TABS.some((t) => t.id === h) ? h : 'home'
     return { [id]: true }
   })
 
-  const multi = tab === 'multi'
+  const multi = tab === 'multi' && !phone
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(max-width: 640px)')
+    if (!media) return undefined
+    const apply = () => setPhone(media.matches)
+    apply()
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [])
+
+  useEffect(() => {
+    if (phone && tab === 'multi') setTab('msc')
+  }, [phone, tab])
 
   useEffect(() => {
     if (tab && tab !== 'multi') {
       setVisited((v) => (v[tab] ? v : { ...v, [tab]: true }))
     }
   }, [tab])
+
+  useEffect(() => {
+    const onCompare = () => {
+      setLeftApp('baoan')
+      setRightApp('msc')
+      setMscKind('tenders')
+      setTab(phone ? 'msc' : 'multi')
+    }
+    window.addEventListener('baoan-compare', onCompare)
+    return () => window.removeEventListener('baoan-compare', onCompare)
+  }, [phone])
+
+  useEffect(() => {
+    const onOpenDataset = (event) => {
+      const code = String(event.detail || '').toUpperCase()
+      if (code === 'DAV') setTab('dav')
+      else if (code === 'VSS') setTab('vss')
+      else if (code === 'MSC_PRICE') { setMscKind('prices'); setTab('msc') }
+      else if (code === 'MSC_BID') { setMscKind('tenders'); setTab('msc') }
+    }
+    window.addEventListener('baoan-open-dataset', onOpenDataset)
+    return () => window.removeEventListener('baoan-open-dataset', onOpenDataset)
+  }, [])
 
   useEffect(() => {
     api.health()
@@ -126,11 +184,17 @@ export default function App() {
   useEffect(() => {
     const onHash = () => {
       const h = window.location.hash.replace('#', '')
-      if (h === 'multi' || TABS.some((t) => t.id === h)) setTab(h)
+      if (h === 'regulatory') {
+        setTab('home')
+        if (window.location.hash !== '#home') window.history.replaceState(null, '', '#home')
+        return
+      }
+      if (h === 'multi') setTab(phone ? 'msc' : 'multi')
+      else if (TABS.some((t) => t.id === h)) setTab(h)
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
-  }, [])
+  }, [phone])
 
   const onSignOut = async () => {
     await signOut()
@@ -141,15 +205,21 @@ export default function App() {
   }
 
   return (
-    <Tt20Provider>
-      <div className={`app-shell${multi ? ' multi' : ''}`}>
+    <div className={`app-shell${multi ? ' multi' : ''}`}>
         <header className="topbar">
           <div className="brand">
             <span className="brand-mark" aria-hidden="true">B</span>
             <span className="brand-text">BaoAn <span>Searcher</span></span>
           </div>
           <nav className="nav" aria-label="Chuyên mục">
-            {TABS.map((t) => (
+            {TABS.map((t) => t.id === 'msc' ? (
+              <details className={`msc-nav-menu${tab === 'msc' ? ' active' : ''}`} key={t.id} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.open = false }} onKeyDown={(e) => { if (e.key === 'Escape') e.currentTarget.open = false }}>
+                <summary>Thầu MSC <span aria-hidden="true">⌄</span></summary>
+                <div className="msc-nav-options">
+                  {[['tenders', 'Gói thầu'], ['prices', 'Đơn giá']].map(([value, label]) => <button type="button" key={value} aria-pressed={tab === 'msc' && mscKind === value} onClick={(e) => { setMscKind(value); setTab('msc'); e.currentTarget.closest('details').open = false }}>{label}</button>)}
+                </div>
+              </details>
+            ) : (
               <button
                 key={t.id}
                 type="button"
@@ -160,15 +230,17 @@ export default function App() {
                 {t.label}
               </button>
             ))}
-            <button
-              type="button"
-              className={multi ? 'active' : ''}
-              onClick={() => setTab('multi')}
-              aria-current={multi ? 'page' : undefined}
-              title="Chia 2 khung song song"
-            >
-              Đa khung
-            </button>
+            {!phone && (
+              <button
+                type="button"
+                className={multi ? 'active' : ''}
+                onClick={() => setTab('multi')}
+                aria-current={multi ? 'page' : undefined}
+                title="Chia 2 khung song song"
+              >
+                Đa khung
+              </button>
+            )}
           </nav>
           <div className="topbar-end">
             <div
@@ -177,7 +249,7 @@ export default function App() {
                 localMode
                   ? 'Kết nối API local 127.0.0.1:8787'
                   : supabaseConfigured
-                    ? 'Hybrid: Supabase Auth + Turso data (fallback Supabase RPC)'
+                    ? 'Supabase Auth + kho Supabase (SEARCH_BACKEND). Turso chỉ khi bật rollback.'
                     : 'Thiếu VITE_SUPABASE_* — cấu hình rồi build lại'
               }
             >
@@ -187,7 +259,7 @@ export default function App() {
                 : localMode
                   ? 'Local API'
                   : supabaseConfigured
-                    ? 'Cloud · Auth+Turso'
+                    ? 'Cloud · Supabase'
                     : 'Chưa cấu hình Cloud'}
             </div>
             {user?.email && (
@@ -201,24 +273,64 @@ export default function App() {
           </div>
         </header>
         <main className={`page${multi ? ' page-split' : ''}`}>
-          {checked && !multi && visited.dav && (
-            <div className="tab-pane" hidden={tab !== 'dav'} aria-hidden={tab !== 'dav'}>
+          {checked && !multi && visited.home && (
+            <div className="tab-pane" hidden={tab !== 'home'} aria-hidden={tab !== 'home'}>
+              <Suspense fallback={<PaneFallback />}>
+              <HomeDashboard
+                localMode={localMode}
+                user={user}
+                onOpenMsc={() => { setMscKind('tenders'); setTab('msc') }}
+                onOpenAdmin={() => setTab('admin')}
+              />
+              </Suspense>
+            </div>
+          )}
+          {checked && !multi && tab === 'dav' && (
+            <div className="tab-pane">
+              <Suspense fallback={<PaneFallback />}>
               <DavSection localMode={localMode} />
+              </Suspense>
             </div>
           )}
-          {checked && !multi && visited.msc && (
-            <div className="tab-pane" hidden={tab !== 'msc'} aria-hidden={tab !== 'msc'}>
-              <MscSection localMode={localMode} />
+          {checked && !multi && tab === 'msc' && (
+            <div className="tab-pane">
+              {phone && (
+                <div className="mobile-msc-switch" role="tablist" aria-label="Dữ liệu MSC">
+                  <button type="button" className={mscKind === 'tenders' ? 'on' : ''} aria-pressed={mscKind === 'tenders'} onClick={() => setMscKind('tenders')}>Gói thầu</button>
+                  <button type="button" className={mscKind === 'prices' ? 'on' : ''} aria-pressed={mscKind === 'prices'} onClick={() => setMscKind('prices')}>Đơn giá</button>
+                </div>
+              )}
+              <Suspense fallback={<PaneFallback />}>
+              <MscSection key={mscKind} localMode={localMode} selectedKind={mscKind} />
+              </Suspense>
             </div>
           )}
-          {checked && !multi && visited.vss && (
-            <div className="tab-pane" hidden={tab !== 'vss'} aria-hidden={tab !== 'vss'}>
+          {checked && !multi && tab === 'vss' && (
+            <div className="tab-pane">
+              <Suspense fallback={<PaneFallback />}>
               <VssSection localMode={localMode} />
+              </Suspense>
+            </div>
+          )}
+          {checked && !multi && tab === 'map' && (
+            <div className="tab-pane">
+              <Suspense fallback={<PaneFallback />}>
+              <MapSection localMode={localMode} />
+              </Suspense>
+            </div>
+          )}
+          {checked && !multi && visited.portfolio && (
+            <div className="tab-pane" hidden={tab !== 'portfolio'} aria-hidden={tab !== 'portfolio'}>
+              <Suspense fallback={<PaneFallback />}>
+              <PortfolioCockpit localMode={localMode} />
+              </Suspense>
             </div>
           )}
           {checked && !multi && visited.admin && (
             <div className="tab-pane" hidden={tab !== 'admin'} aria-hidden={tab !== 'admin'}>
+              <Suspense fallback={<PaneFallback />}>
               <AdminSection localMode={localMode} />
+              </Suspense>
             </div>
           )}
           {checked && multi && (
@@ -241,6 +353,5 @@ export default function App() {
           )}
         </main>
       </div>
-    </Tt20Provider>
   )
 }

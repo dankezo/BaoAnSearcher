@@ -10,7 +10,7 @@ const dir = fileURLToPath(new URL('..', import.meta.url))
 const bundle = await build({
   stdin: {
     contents:
-      'export { useDavSearch } from "./src/hooks/useDavSearch"; export { DavMetricCards } from "./src/components/dav/DavMetricCards"; export { DavDataTable } from "./src/components/dav/DavDataTable";',
+      'export { computeDavCompound } from "./src/metrics"; export { useDavSearch } from "./src/hooks/useDavSearch"; export { DavMetricCards } from "./src/components/dav/DavMetricCards"; export { DavDataTable } from "./src/components/dav/DavDataTable";',
     resolveDir: dir,
     loader: 'tsx',
   },
@@ -36,7 +36,7 @@ const bundle = await build({
 const compiled = new Module(fileURLToPath(new URL('./dav-flow.cjs', import.meta.url)))
 compiled.paths = Module._nodeModulePaths(dir)
 compiled._compile(bundle.outputFiles[0].text, compiled.filename || 'dav-flow.cjs')
-const { useDavSearch, DavMetricCards, DavDataTable } = compiled.exports
+const { computeDavCompound, useDavSearch, DavMetricCards, DavDataTable } = compiled.exports
 const flush = () => new Promise((resolve) => setTimeout(resolve, 15))
 
 test('DAV flow: load, metrics, draft filters, pagination, selection, columns, retry and real XLSX export', async () => {
@@ -74,6 +74,7 @@ test('DAV flow: load, metrics, draft filters, pagination, selection, columns, re
   }))
   const originalFetch = global.fetch
   global.fetch = async (url, opts = {}) => {
+    if (String(url).includes('/api/metrics?section=dav')) return { ok: true, json: async () => ({ cards: computeDavCompound(rows, rows.length), total: rows.length }) }
     if (String(url).includes('/api/status')) return { ok: true, json: async () => ({}) }
     const body = JSON.parse(opts.body || '{}')
     calls.push(body)
@@ -98,7 +99,8 @@ test('DAV flow: load, metrics, draft filters, pagination, selection, columns, re
     })
     await act(flush)
     assert.equal(controller.data.total, 125)
-    assert.equal(controller.metricsSample.length, 125)
+    assert.equal(controller.metricsTotal, 125)
+    assert.equal(controller.metricsCards.length, 4)
     assert.equal(controller.loading, false)
     const metrics = require('react-dom/server').renderToStaticMarkup(
       React.createElement(DavMetricCards, {

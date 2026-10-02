@@ -2,7 +2,12 @@
 """Shared paths and helpers for BaoAn Searcher."""
 from __future__ import annotations
 import json
+import os
 import re
+import threading
+import time
+import uuid
+import sqlite3
 import unicodedata
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -18,6 +23,7 @@ MSC_DB = ROOT / "test zone" / "procurement" / "data" / "procurement.sqlite3"
 VSS_DB = DATA_DIR / "vss_bhyt.sqlite3"
 DM93_PATH = WEB_PUBLIC / "dm93.json"
 STATUS_PATH = DATA_DIR / "crawl_status.json"
+_STATUS_LOCK = threading.RLock()
 
 VN = timezone(timedelta(hours=7))
 DAV_SEARCH_URL = "https://dichvucong.dav.gov.vn/congbothuoc/index"
@@ -30,8 +36,57 @@ def fold(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
 
 
+def configure_sqlite(con) -> None:
+    """WAL for writers, plus a 64 MiB cache and in-memory temp tables."""
+    readonly = False
+    try:
+        readonly = bool(con.execute("PRAGMA query_only").fetchone()[0])
+    except sqlite3.Error:
+        readonly = False
+    if not readonly:
+        try:
+            con.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.Error:
+            pass
+    con.execute("PRAGMA cache_size=-65536")
+    con.execute("PRAGMA temp_store=MEMORY")
+
+
 def now_iso() -> str:
     return datetime.now(VN).isoformat(timespec="seconds")
+
+
+METADATA_DDL = """
+CREATE TABLE IF NOT EXISTS app_metadata (
+    key_name TEXT PRIMARY KEY,
+    total_records INTEGER NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+
+def ensure_metadata(con) -> None:
+    con.execute(METADATA_DDL)
+
+
+def read_metadata(con, key: str) -> int | None:
+    ensure_metadata(con)
+    row = con.execute(
+        "SELECT total_records FROM app_metadata WHERE key_name = ?",
+        (key,),
+    ).fetchone()
+    if not row or row[0] is None:
+        return None
+    return int(row[0])
+
+
+def write_metadata(con, key: str, total: int) -> None:
+    ensure_metadata(con)
+    con.execute(
+        "INSERT OR REPLACE INTO app_metadata (key_name, total_records, updated_at) "
+        "VALUES (?, ?, CURRENT_TIMESTAMP)",
+        (key, int(total)),
+    )
 
 
 def load_secrets() -> dict:
@@ -45,13 +100,17 @@ def save_secrets(data: dict) -> None:
     SECRETS.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def load_status() -> dict:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    default = {
+def _default_status() -> dict:
+    return {
         "dav": {"state": "idle", "progress": 0, "message": "", "updated": None, "count": 0},
         "msc": {"state": "idle", "progress": 0, "message": "", "updated": None, "count": 0},
         "vss": {"state": "idle", "progress": 0, "message": "", "updated": None, "count": 0},
     }
+
+
+def _load_status_unlocked() -> dict:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    default = _default_status()
     if not STATUS_PATH.exists():
         return default
     try:
@@ -68,20 +127,47 @@ def load_status() -> dict:
         return default
 
 
-def save_status(status: dict) -> None:
+def load_status() -> dict:
+    # Atomic replacement lets readers see either the old complete JSON or the
+    # new one. The lock also prevents same-process read/modify/write races.
+    with _STATUS_LOCK:
+        return _load_status_unlocked()
+
+
+def _save_status_unlocked(status: dict) -> bool:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = STATUS_PATH.with_suffix(".json.tmp")
     payload = json.dumps(status, ensure_ascii=False, indent=2)
-    tmp.write_text(payload, encoding="utf-8")
-    tmp.replace(STATUS_PATH)
+    # A shared ``crawl_status.json.tmp`` caused WinError 5 when DAV/MSC/VSS
+    # reported progress at the same moment. Use a unique temporary name and
+    # retry the replace; status telemetry must never stop a crawler.
+    for attempt in range(6):
+        tmp = STATUS_PATH.with_name(f".{STATUS_PATH.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp")
+        try:
+            tmp.write_text(payload, encoding="utf-8")
+            os.replace(tmp, STATUS_PATH)
+            return True
+        except OSError:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if attempt < 5:
+                time.sleep(0.025 * (2 ** attempt))
+    return False
+
+
+def save_status(status: dict) -> bool:
+    with _STATUS_LOCK:
+        return _save_status_unlocked(status)
 
 
 def update_status(app: str, **kwargs) -> dict:
-    status = load_status()
-    status.setdefault(app, {})
-    status[app].update(kwargs)
-    save_status(status)
-    return status
+    with _STATUS_LOCK:
+        status = _load_status_unlocked()
+        status.setdefault(app, {})
+        status[app].update(kwargs)
+        _save_status_unlocked(status)
+        return status
 
 
 # Synonyms for DM93 matching (TT 03/2024 notes)

@@ -1,27 +1,34 @@
-/**
- * Per-user UI prefs (filters / tags / view) — never shared across accounts.
- */
-export function userStorageKey(userId, section, name = 'v1') {
-  const uid = String(userId || 'anon').trim() || 'anon'
-  return `baoan.user.${uid}.${section}.${name}`
+export function userKeyPart(user) {
+  return user?.id || user?.email || 'anon'
 }
 
-export function loadUserJson(userId, section, name = 'v1', fallback = null) {
+export function userJsonKey(key, user) {
+  return `baoan.userjson.${userKeyPart(user)}.${key}`
+}
+
+function browserStorage() {
   try {
-    const raw = localStorage.getItem(userStorageKey(userId, section, name))
-    if (!raw) return fallback
+    if (typeof localStorage === 'undefined') return null
+    return localStorage
+  } catch {
+    return null
+  }
+}
+
+export function loadUserJson(key, user, fallback = null) {
+  const store = browserStorage()
+  if (!store) return fallback
+  try {
+    const raw = store.getItem(userJsonKey(key, user))
+    if (raw == null || raw === '') return fallback
     return JSON.parse(raw)
   } catch {
     return fallback
   }
 }
 
-export function saveUserJson(userId, section, name, value) {
-  try {
-    localStorage.setItem(userStorageKey(userId, section, name), JSON.stringify(value))
-  } catch { /* quota / private mode */ }
-}
-
-export function userKeyPart(user) {
-  return user?.id || user?.email || 'anon'
+export function saveUserJson(key, user, value) {
+  const store = browserStorage()
+  if (!store) return
+  store.setItem(userJsonKey(key, user), JSON.stringify(value))
 }

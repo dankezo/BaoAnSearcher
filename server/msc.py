@@ -29,7 +29,14 @@ def meta_info() -> dict:
         return info
     core = _import_core()
     with core.connect(MSC_DB) as con:
-        info["prices"] = con.execute("SELECT count(*) FROM records WHERE kind='prices'").fetchone()[0]
+        # app_metadata is rebuilt separately and can be stale after a long
+        # browser crawl. This runs in the background status cache, so report
+        # the actual searchable rows rather than an old snapshot.
+        info["prices"] = con.execute(
+            "SELECT count(*) FROM records WHERE kind='prices' "
+            "AND json_extract(normalized, '$.source_label')='API Mua sắm công' "
+            "AND NOT EXISTS (SELECT 1 FROM excel_matches m WHERE m.excel_id=records.source_id)"
+        ).fetchone()[0]
         info["tenders"] = con.execute("SELECT count(*) FROM records WHERE kind='tenders'").fetchone()[0]
         row = con.execute(
             "SELECT max(collected_at) FROM records"
@@ -41,10 +48,13 @@ def meta_info() -> dict:
 def search(kind: str, filters: dict, page: int = 0, size: int = 50) -> dict:
     core = _import_core()
     if not MSC_DB.exists():
-        return {"total": 0, "page": page, "size": size, "items": []}
+        return {"total": None, "page": page, "size": size, "hasMore": False, "items": []}
     kind = "prices" if kind == "prices" else "tenders"
     q = fold(filters.get("q") or "")
     clauses, args = ["kind=?"], [kind]
+    if kind == "prices":
+        clauses.append("json_extract(normalized, '$.source_label')='API Mua sắm công'")
+        clauses.append("NOT EXISTS (SELECT 1 FROM excel_matches m WHERE m.excel_id=records.source_id)")
     if q:
         for w in q.split():
             clauses.append("search_text LIKE ?")
@@ -54,13 +64,18 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50) -> dict:
         "name": "$.name", "ingredient": "$.ingredient", "registration": "$.registration",
         "manufacturer": "$.manufacturer", "province": "$.province", "tender_no": "$.tender_no",
         "buyer": "$.buyer", "winner": "$.winner", "group_name": "$.group_name",
-        "medicine_type": "$.medicine_type", "country": "$.country", "route": "$.route",
+        "dosage_form": "$.dosage_form", "medicine_type": "$.medicine_type", "country": "$.country", "route": "$.route",
     }
     for key, path in field_map.items():
-        val = fold(filters.get(key) or "")
-        if val:
-            clauses.append("fold(coalesce(json_extract(normalized, ?),'')) LIKE ?")
-            args.extend([path, f"%{val}%"])
+        if kind == "tenders" and key in ("ingredient", "dosage_form"):
+            continue
+        raw = filters.get(key)
+        values = raw if isinstance(raw, list) else [raw]
+        values = [fold(v).strip() for v in values if str(v or "").strip()]
+        if values:
+            clauses.append("(" + " OR ".join("fold(coalesce(json_extract(normalized, ?),'')) LIKE ?" for _ in values) + ")")
+            for val in values:
+                args.extend([path, f"%{val}%"])
 
     published_from = filters.get("publishedFrom") or filters.get("tuNgay") or ""
     if published_from:
@@ -74,15 +89,16 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50) -> dict:
     where = " WHERE " + " AND ".join(clauses)
     page = max(0, int(page))
     size = max(1, min(5000, int(size)))
+    scope_filter = kind == "tenders" and any(filters.get(k) for k in ("ingredient", "dosage_form", "metricQuick"))
     with core.connect(MSC_DB) as con:
-        total = con.execute("SELECT count(*) FROM records" + where, args).fetchone()[0]
+        # List path: normalized holds the display fields. raw stays on the row for a later detail read.
         rows = con.execute(
-            "SELECT normalized, raw, collected_at FROM records" + where +
-            " ORDER BY coalesce(json_extract(normalized, '$.published'), collected_at) DESC LIMIT ? OFFSET ?",
-            args + [size, page * size],
+            "SELECT normalized, collected_at FROM records" + where +
+            " ORDER BY coalesce(json_extract(normalized, '$.published'), collected_at) DESC" + ("" if scope_filter else " LIMIT ? OFFSET ?"),
+            args if scope_filter else args + [size + 1, page * size],
         ).fetchall()
     items = []
-    for norm, raw, collected in rows:
+    for norm, collected in rows:
         item = json.loads(norm)
         item["_collected_at"] = collected
         items.append(item)
@@ -91,17 +107,42 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50) -> dict:
         key=lambda it: str(it.get("published") or it.get("close_date") or it.get("_collected_at") or ""),
         reverse=True,
     )
-    return {"total": total, "page": page, "size": size, "items": items}
+    if scope_filter:
+        from .msc_scope import attach, matches_scope
+        from .msc_filters import matches_quick
+        attach(items)
+        items = [item for item in items if matches_scope(item, filters) and matches_quick(item, filters)]
+        items = items[page * size:page * size + size + 1]
+    has_more = len(items) > size
+    if has_more:
+        items = items[:size]
+    if kind == "prices":
+        from .sdk_forms import form_for
+        for item in items:
+            looked = form_for(item.get("registration"))
+            if looked:
+                item["dosage_form"] = looked
+    else:
+        from .msc_scope import attach
+        if not scope_filter:
+            attach(items)
+    if kind == "tenders":
+        from .msc_scope import present
+        present(items)
+    return {"total": None, "page": page, "size": size, "hasMore": has_more, "items": items}
 
 
-def start_price_sync(date_from: str, date_to: str, refresh: bool = False) -> dict:
+def start_price_sync(date_from: str, date_to: str, refresh: bool = False, *, max_pages: int | None = None, full_scan: bool = False) -> dict:
     global _thread
     if _thread and _thread.is_alive():
         return {"ok": False, "message": "MSC đang chạy"}
 
     def work():
         try:
-            update_status("msc", state="running", progress=1, message="Tải đơn giá…", updated=now_iso())
+            mode = "Quét tổng thể đơn giá (tự chia dải thời gian)…" if full_scan else (
+                f"Cập nhật {max_pages} trang đơn giá mới nhất…" if max_pages else "Tải đơn giá…"
+            )
+            update_status("msc", state="running", progress=1, message=mode, updated=now_iso())
             p = str(_proc_path())
             if p not in sys.path:
                 sys.path.insert(0, p)
@@ -115,23 +156,87 @@ def start_price_sync(date_from: str, date_to: str, refresh: bool = False) -> dic
 
             # Prefer Downloader class API if present
             if hasattr(sync, "Downloader"):
-                dl = sync.Downloader(report=report)
-                dl.run(date_from=date_from, date_to=date_to, refresh=refresh)
+                dl = sync.Downloader(report=report, delay=2.5 if full_scan else 0.4)
+                dl.run(date_from=date_from, date_to=date_to, refresh=refresh, max_pages=max_pages, full_scan=full_scan)
             elif hasattr(sync, "download"):
                 sync.download(date_from, date_to, refresh=refresh, report=report)
             else:
                 raise RuntimeError("Không tìm thấy sync.Downloader")
             info = meta_info()
             update_status(
-                "msc", state="idle", progress=100, message="Hoàn tất đơn giá",
-                updated=now_iso(), count=info["prices"] + info["tenders"],
+                "msc", state="idle", progress=100,
+                message="Hoàn tất quét tổng thể đơn giá" if full_scan else "Hoàn tất đơn giá",
+                updated=now_iso(), count=info["prices"],
             )
         except Exception as e:
             update_status("msc", state="error", message=str(e), updated=now_iso())
 
     _thread = threading.Thread(target=work, daemon=True)
     _thread.start()
-    return {"ok": True, "message": "Đã bắt đầu tải đơn giá MSC"}
+    return {"ok": True, "message": "Đã bắt đầu quét tổng thể đơn giá MSC" if full_scan else "Đã bắt đầu tải đơn giá MSC"}
+
+
+def start_price_browser(date_from: str, date_to: str, pages: int = 20, full_scan: bool = False) -> dict:
+    """Run unit-price collection inside the logged-in Playwright session.
+
+    MSC can throttle its public endpoint unpredictably.  Keeping the requests
+    in the normal browser session is slower than raw HTTP but is substantially
+    more reliable and never stores the browser cookies in our app.
+    """
+    global _thread
+    if _thread and _thread.is_alive():
+        return {"ok": False, "message": "MSC đang chạy"}
+    pages = max(1, min(100, int(pages)))
+    secrets = load_secrets()
+
+    def work():
+        done = threading.Event()
+        updater = None
+        try:
+            label = "Quét tổng thể đơn giá bằng trình duyệt…" if full_scan else f"Cập nhật {pages} trang đơn giá bằng trình duyệt…"
+            update_status("msc", state="running", progress=1, message=label, updated=now_iso())
+            p = str(_proc_path())
+            if p not in sys.path:
+                sys.path.insert(0, p)
+            import browser_update
+
+            def report(msg):
+                text = str(msg)
+                progress = 20
+                if "/" in text:
+                    progress = 45
+                update_status("msc", state="running", progress=progress, message=text[:300], updated=now_iso())
+
+            updater = browser_update.BrowserUpdater(report, done.set)
+            account = secrets.get("msc") or {}
+            updater.start_prices(
+                date_from, date_to, pages=pages, full_scan=full_scan,
+                username=account.get("username") or "", password=account.get("password") or "",
+            )
+            # Browser login/captcha is interactive; total scans can take hours.
+            if not done.wait(timeout=8 * 3600):
+                raise RuntimeError("Lượt quét đơn giá quá 8 giờ nên đã dừng an toàn. Tiến độ đã lưu; có thể bấm tải tiếp.")
+            if updater.last_error:
+                raise RuntimeError(updater.last_error)
+            info = meta_info()
+            update_status(
+                "msc", state="idle", progress=100,
+                message="Hoàn tất quét tổng thể đơn giá" if full_scan else "Hoàn tất cập nhật đơn giá",
+                updated=now_iso(), count=info["prices"],
+            )
+        except Exception as e:
+            update_status("msc", state="error", message=str(e), updated=now_iso())
+        finally:
+            if updater:
+                updater.close()
+
+    _thread = threading.Thread(target=work, daemon=True, name="msc-price-browser")
+    _thread.start()
+    return {
+        "ok": True,
+        "message": "Đã mở quét đơn giá bằng trình duyệt. Xác nhận captcha/đăng nhập trong cửa sổ MSC nếu được hỏi.",
+        "hint_user": (secrets.get("msc") or {}).get("username") or "",
+    }
 
 
 def start_tender_browser(pages: int = 20) -> dict:
@@ -158,14 +263,21 @@ def start_tender_browser(pages: int = 20) -> dict:
                 done.set()
 
             updater = browser_update.BrowserUpdater(report, finished)
-            updater.start(pages=pages, resume=False, recheck=True, prices=False)
+            account = secrets.get("msc") or {}
+            from .msc_scope import scan_open_with_page
+            updater.start(
+                pages=pages, resume=False, recheck=True, prices=False,
+                username=account.get("username") or "",
+                password=account.get("password") or "",
+                after=scan_open_with_page,
+            )
             # Wait up to 2h for interactive login + crawl
             done.wait(timeout=7200)
             updater.close()
             info = meta_info()
             update_status(
                 "msc", state="idle", progress=100, message="Hoàn tất gói thầu",
-                updated=now_iso(), count=info["prices"] + info["tenders"],
+                updated=now_iso(), count=info["prices"],
             )
         except Exception as e:
             update_status("msc", state="error", message=str(e), updated=now_iso())

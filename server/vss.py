@@ -2,6 +2,7 @@
 """VSS BHYT winning-bid drugs: SQLite store, Excel import, export crawl."""
 from __future__ import annotations
 import json
+import math
 import re
 import sqlite3
 import threading
@@ -12,7 +13,8 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from .common import (
-    VSS_DB, VSS_BASE, DATA_DIR, fold, now_iso, update_status, load_secrets,
+    VSS_DB, VSS_BASE, DATA_DIR, fold, now_iso, update_status, load_secrets, load_status, read_metadata,
+    configure_sqlite,
 )
 
 # DNS for quanlythuocv1.vss.gov.vn intermittently fails on some Windows resolvers;
@@ -37,6 +39,50 @@ DEFAULT_VIEW = [
 
 _crawl_stop = threading.Event()
 _crawl_thread = None
+_http_session = None
+_session_lock = threading.Lock()
+
+
+class CrawlStopped(Exception):
+    pass
+
+
+def crawl_alive() -> bool:
+    return bool(_crawl_thread and _crawl_thread.is_alive())
+
+
+def reconcile_status() -> None:
+    """A dead worker must not leave the card on “Đang chạy / Đang dừng…”."""
+    state = (load_status().get("vss") or {})
+    if state.get("state") == "running" and not crawl_alive():
+        update_status(
+            "vss",
+            state="idle",
+            progress=100,
+            message="Đã dừng. Phiên crawl trước không còn chạy.",
+            updated=now_iso(),
+        )
+
+
+def _drop_session() -> None:
+    global _http_session
+    with _session_lock:
+        session = _http_session
+        _http_session = None
+    if session is not None:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+def _borrow_session():
+    global _http_session
+    import requests
+    with _session_lock:
+        if _http_session is None:
+            _http_session = requests.Session()
+        return _http_session
 
 
 def connect():
@@ -44,7 +90,7 @@ def connect():
     con = sqlite3.connect(VSS_DB, timeout=60)
     con.row_factory = sqlite3.Row
     con.create_function("fold", 1, fold)
-    con.execute("PRAGMA journal_mode=WAL")
+    configure_sqlite(con)
     con.execute("""
     CREATE TABLE IF NOT EXISTS bids (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,6 +103,8 @@ def connect():
     )""")
     con.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_bids_search ON bids(search)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_bids_sodk ON bids(sodk)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_bids_ten ON bids(ten)")
     return con
 
 
@@ -69,9 +117,286 @@ def meta_put(con, key, val):
     con.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, json.dumps(val, ensure_ascii=False)))
 
 
+# Identity fields compared after normalization. Empty vs filled is allowed;
+# two non-empty values must match. soluong is separate (truncated qty can still match).
+_TEXT_IDENTITY = (
+    "loai_thau", "ten_don_vi", "ten_cskcb", "ten", "hoatchat", "duongdung",
+    "maduongdung", "madd_gy", "dangbaoche", "hamluong", "donggoi", "nhasx",
+    "nuocsx", "donvitinh", "tennhathau", "quyetdinh", "goithau", "tieuchuan",
+    "nhomthau", "loai", "ht_thau", "ten_tinh",
+)
+_CODE_IDENTITY = ("sodk", "ma_tinh", "ma_cskcb", "ma", "ma_gy")
+_DATE_IDENTITY = ("tungay", "denngay", "tungay_hd", "denngay_hd", "congbo", "hieuluc")
+_MONEY_IDENTITY = ("gia", "thanhtien")
+SIGNATURE_KEYS = _TEXT_IDENTITY + _CODE_IDENTITY + _DATE_IDENTITY + _MONEY_IDENTITY
+
+
+def norm_vss_text(val) -> str:
+    """Case, diacritics, and spacing-insensitive text."""
+    s = fold(val).replace("\xa0", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    s = re.sub(r"\s*([^\w\s])\s*", r"\1", s)
+    return s
+
+
+def norm_vss_code(val) -> str:
+    """Codes and registration numbers: also drop internal whitespace/newlines."""
+    return re.sub(r"\s+", "", norm_vss_text(val))
+
+
+def norm_vss_day(val) -> str:
+    """Calendar day. Date-with-time and date-only are the same day."""
+    s = str(val or "").strip()
+    if not s:
+        return ""
+    norm = normalize_vss_date(s) or s
+    m = re.match(r"^(20\d{2}-\d{2}-\d{2})", norm)
+    if m:
+        return m.group(1)
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(20\d{2})", s)
+    if m:
+        d, mo, y = int(m.group(1)), int(m.group(2)), m.group(3)
+        return f"{y}-{mo:02d}-{d:02d}"
+    return norm_vss_text(s)
+
+
+def parse_vn_number(val):
+    """Parse a VSS money/qty. Vietnamese 380.000 means 380000, not 380."""
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, (int, float)):
+        n = float(val)
+        return n if math.isfinite(n) else None
+    s = str(val or "").strip().replace(" ", "").replace("\u00a0", "")
+    if not s:
+        return None
+    if "." in s and "," in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        if re.fullmatch(r"-?\d{1,3}(,\d{3})+", s):
+            s = s.replace(",", "")
+        else:
+            s = s.replace(",", ".")
+    elif "." in s and re.fullmatch(r"-?\d{1,3}(\.\d{3})+", s):
+        s = s.replace(".", "")
+    try:
+        n = float(s)
+    except ValueError:
+        return None
+    return n if math.isfinite(n) else None
+
+
+def format_vn_number(n) -> str:
+    if n is None:
+        return ""
+    if abs(n - round(n)) < 1e-6:
+        return str(int(round(n)))
+    return f"{n:.6f}".rstrip("0").rstrip(".")
+
+
+def numbers_close(a, b) -> bool:
+    if a is None or b is None:
+        return False
+    scale = max(abs(a), abs(b), 1.0)
+    return abs(a - b) <= max(1.0, scale * 1e-6)
+
+
+def _qty_digits(n) -> str:
+    if n is None or not math.isfinite(n):
+        return ""
+    if abs(n - round(n)) > 1e-4:
+        return ""
+    return str(int(round(abs(n))))
+
+
+def is_truncated_qty(small, large) -> bool:
+    """True when small is a chopped or thousand-scaled form of large (38 vs 380000)."""
+    a, b = _qty_digits(small), _qty_digits(large)
+    if not a or not b or len(b) <= len(a):
+        return False
+    if not b.startswith(a):
+        return False
+    try:
+        ratio = int(b) / int(a)
+    except ZeroDivisionError:
+        return False
+    if ratio < 10:
+        return False
+    log = math.log10(ratio)
+    return abs(log - round(log)) < 1e-6
+
+
+def qty_compatible(q1, q2) -> bool:
+    """Same quantity, one side blank, or one side a truncated form of the other."""
+    if q1 is None or q2 is None or numbers_close(q1, q2):
+        return True
+    small, large = (q1, q2) if abs(q1) < abs(q2) else (q2, q1)
+    return is_truncated_qty(small, large)
+
+
+def canonical_soluong(d: dict) -> str:
+    """Use the quantity implied by thành tiền / giá when the stored qty was truncated."""
+    qty = parse_vn_number(d.get("soluong"))
+    gia = parse_vn_number(d.get("gia"))
+    tt = parse_vn_number(d.get("thanhtien"))
+    if qty is None:
+        return ""
+    if gia in (None, 0) or tt is None or numbers_close(qty * gia, tt):
+        return format_vn_number(qty)
+    implied = tt / gia
+    if is_truncated_qty(qty, implied):
+        return format_vn_number(implied)
+    return format_vn_number(qty)
+
+
+def lacks_province(d: dict) -> bool:
+    """No tỉnh/TP: both province code and province name are blank."""
+    return not norm_vss_code(d.get("ma_tinh")) and not norm_vss_text(d.get("ten_tinh"))
+
+
+# Official pre-2025 codes, plus 97/98 (Bảo hiểm xã hội Bộ Quốc phòng).
+_PROVINCE_CODES = {
+    "01", "02", "04", "06", "08", "10", "11", "12", "14", "15", "17", "19", "20",
+    "22", "24", "25", "26", "27", "30", "31", "33", "34", "35", "36", "37", "38",
+    "40", "42", "44", "45", "46", "48", "49", "51", "52", "54", "56", "58", "60",
+    "62", "64", "66", "67", "68", "70", "72", "74", "75", "77", "79", "80", "82",
+    "83", "84", "86", "87", "89", "91", "92", "93", "94", "95", "96", "97", "98",
+}
+# Column-shifted exports: Han/Hangul/Thai in the drug identity, or template tokens.
+_HAN_GARBAGE = re.compile(
+    r"[\u0e00-\u0e7f\u0f00-\u0fff\u1100-\u11ff\u3040-\u30ff\u3400-\u9fff"
+    r"\uac00-\ud7af\uf900-\ufaff\ufffd\ufffe\uffff]"
+)
+_GARBAGE_TOKEN = re.compile(
+    r"(?:NHASX|ISDEL|CONGBO|TCCL|DAGIAMDINH)\d|TEN\d+_|"
+    r"JEIS\.Core|xem th[eê]m|giamdinh\.|:p\d",
+    re.I,
+)
+
+
+def province_code_key(val) -> str:
+    key = norm_vss_code(val)
+    return key.zfill(2) if key.isdigit() else key
+
+
+# Vietnamese, Latin, or numbers on a real bid. A Han character here means the
+# export columns slid. Manufacturer and unit are left alone so one dirty cell
+# on an otherwise real product is kept.
+_SHIFT_FIELDS = ("ten", "sodk", "hoatchat", "dangbaoche", "hamluong", "donggoi", "nhomthau")
+
+
+def is_garbled_bid(d: dict) -> bool:
+    """Shifted VSS export row: fake province code, or identity fields full of junk.
+
+    A real bid that only has one dirty side cell and a valid province code is kept.
+    A row with no province plus junk in the dosage columns is the shifted export.
+    """
+    code = province_code_key(d.get("ma_tinh"))
+    if code and code not in _PROVINCE_CODES:
+        return True
+    identity = "\n".join(str(d.get(k) or "") for k in ("ten", "sodk", "hoatchat"))
+    if _HAN_GARBAGE.search(identity) or _GARBAGE_TOKEN.search(identity):
+        return True
+    if norm_vss_text(d.get("ten")) == "ten" and norm_vss_text(d.get("sodk")) == "sodk":
+        return True
+    if code:
+        return False
+    shifted = "\n".join(str(d.get(k) or "") for k in _SHIFT_FIELDS)
+    if _HAN_GARBAGE.search(shifted) or _GARBAGE_TOKEN.search(shifted):
+        return True
+    return norm_vss_text(d.get("nhomthau")) == ":p"
+
+
+def _field_norm(d: dict, key: str) -> str:
+    if key in _CODE_IDENTITY or key == "sodk":
+        return norm_vss_code(d.get(key))
+    if key in _DATE_IDENTITY:
+        return norm_vss_day(d.get(key))
+    if key in _MONEY_IDENTITY:
+        return format_vn_number(parse_vn_number(d.get(key)))
+    if key == "soluong":
+        return canonical_soluong(d)
+    return norm_vss_text(d.get(key))
+
+
+def _filled_fields_compatible(a: dict, b: dict) -> bool:
+    keys = _TEXT_IDENTITY + _CODE_IDENTITY + _DATE_IDENTITY + _MONEY_IDENTITY
+    for key in keys:
+        va, vb = _field_norm(a, key), _field_norm(b, key)
+        if va and vb and va != vb:
+            return False
+    return True
+
+
+def place_conflict(a: dict, b: dict) -> bool:
+    """True when both rows name a different province, facility unit, or bidder place."""
+    for key, norm in (
+        ("ma_tinh", norm_vss_code),
+        ("ten_tinh", norm_vss_text),
+        ("ten_don_vi", norm_vss_text),
+        ("ma_cskcb", norm_vss_code),
+        ("ten_cskcb", norm_vss_text),
+    ):
+        va, vb = norm(a.get(key)), norm(b.get(key))
+        if va and vb and va != vb:
+            return True
+    for src, dst in ((a, b), (b, a)):
+        unit = norm_vss_text(src.get("ten_don_vi"))
+        tinh = norm_vss_text(dst.get("ten_tinh"))
+        other_unit = norm_vss_text(dst.get("ten_don_vi"))
+        if unit and tinh and unit != tinh and unit != other_unit:
+            return True
+    return False
+
+
+def same_province(a: dict, b: dict) -> bool:
+    """Same tỉnh/TP. A blank side does not count as a different province."""
+    ma1, ma2 = norm_vss_code(a.get("ma_tinh")), norm_vss_code(b.get("ma_tinh"))
+    t1, t2 = norm_vss_text(a.get("ten_tinh")), norm_vss_text(b.get("ten_tinh"))
+    if ma1 and ma2 and ma1 != ma2:
+        return False
+    if t1 and t2 and t1 != t2:
+        return False
+    if not ((ma1 or t1) and (ma2 or t2)):
+        return False
+    if (ma1 and ma2 and ma1 == ma2) or (t1 and t2 and t1 == t2):
+        return True
+    return False
+
+
+def is_same_bid(a: dict, b: dict) -> bool:
+    """Same winning bid after normalization. Truncated soluong still matches when money matches."""
+    if place_conflict(a, b):
+        return False
+    if not _filled_fields_compatible(a, b):
+        return False
+    if not qty_compatible(parse_vn_number(a.get("soluong")), parse_vn_number(b.get("soluong"))):
+        return False
+    ten_a, ten_b = norm_vss_text(a.get("ten")), norm_vss_text(b.get("ten"))
+    sdk_a, sdk_b = norm_vss_code(a.get("sodk")), norm_vss_code(b.get("sodk"))
+    gia_a = format_vn_number(parse_vn_number(a.get("gia")))
+    gia_b = format_vn_number(parse_vn_number(b.get("gia")))
+    tt_a = format_vn_number(parse_vn_number(a.get("thanhtien")))
+    tt_b = format_vn_number(parse_vn_number(b.get("thanhtien")))
+    if not (gia_a and gia_a == gia_b and tt_a and tt_a == tt_b):
+        return False
+    if not ((ten_a and ten_a == ten_b) or (sdk_a and sdk_a == sdk_b)):
+        return False
+    return True
+
+
 def row_fingerprint(d: dict) -> str:
-    keys = ("sodk", "ten", "hamluong", "ma_cskcb", "tungay_hd", "denngay_hd", "gia", "soluong", "nhomthau")
-    return "|".join(str(d.get(k) or "") for k in keys)
+    """Normalized identity, including tỉnh/TP so two provinces stay distinct.
+
+    soluong is the quantity implied by thành tiền / giá when the stored number
+    was truncated (38 vs 380000, or 380.000 read as 380).
+    """
+    parts = [_field_norm(d, key) for key in SIGNATURE_KEYS]
+    parts.append(canonical_soluong(d))
+    return "|".join(parts)
 
 
 def _year_in(text: str) -> int | None:
@@ -103,19 +428,79 @@ def derive_nam(d: dict) -> int | None:
     return None
 
 
-def save_rows(rows: list[dict]) -> int:
+def _candidate_bid_rows(con, d: dict):
+    """Rows that might be the same registration (or the same name if SĐK is blank)."""
+    sodk = str(d.get("sodk") or "").strip()
+    code = norm_vss_code(sodk)
+    if code:
+        rows = con.execute("SELECT id, raw FROM bids WHERE sodk = ?", (sodk,)).fetchall()
+        if not rows and re.search(r"\s", sodk):
+            rows = con.execute(
+                """SELECT id, raw FROM bids
+                   WHERE replace(replace(replace(coalesce(sodk,''), char(10), ''), char(13), ''), ' ', '') = ?""",
+                (code,),
+            ).fetchall()
+        return rows
+    ten = str(d.get("ten") or "").strip()
+    if not ten:
+        return []
+    return con.execute("SELECT id, raw FROM bids WHERE ten = ?", (ten,)).fetchall()
+
+
+def bid_completeness(d: dict) -> tuple:
+    """Prefer a row that has tỉnh/TP, then one whose quantity matches the line total."""
+    qty = parse_vn_number(d.get("soluong"))
+    gia = parse_vn_number(d.get("gia"))
+    tt = parse_vn_number(d.get("thanhtien"))
+    money = int(
+        qty is not None and gia not in (None, 0) and tt not in (None, 0) and numbers_close(qty * gia, tt)
+    )
+    filled = sum(1 for key in SIGNATURE_KEYS if _field_norm(d, key))
+    return (int(not lacks_province(d)), money, filled, str(d.get("created_date") or ""))
+
+
+def confident_money(d: dict) -> bool:
+    gia = parse_vn_number(d.get("gia"))
+    tt = parse_vn_number(d.get("thanhtien"))
+    return gia not in (None, 0) and tt not in (None, 0)
+
+
+def _same_bid_rows(con, d: dict) -> list[tuple[int, dict]]:
+    found = []
+    for row in _candidate_bid_rows(con, d):
+        other = json.loads(row["raw"])
+        if is_same_bid(d, other):
+            found.append((int(row["id"]), other))
+    return found
+
+
+def save_rows(rows: list[dict], stop_check=None) -> int:
     n = 0
     with connect() as con:
-        for d in rows:
+        for index, d in enumerate(rows):
+            if stop_check and index % 200 == 0 and stop_check():
+                break
+            if is_garbled_bid(d):
+                continue
             for k in ("tungay_hd", "denngay_hd", "tungay", "denngay", "congbo"):
                 if d.get(k):
                     d[k] = normalize_vss_date(d.get(k)) or d.get(k)
+            # A second copy of a bid we already stored — including a province-less
+            # or half-filled twin, and a truncated quantity — is not inserted.
+            # Ambiguous matches (several different facilities) are left to the fingerprint.
+            if confident_money(d):
+                matches = _same_bid_rows(con, d)
+                if len(matches) == 1:
+                    existing_id, other = matches[0]
+                    if bid_completeness(d) <= bid_completeness(other):
+                        continue
+                    con.execute("DELETE FROM bids WHERE id = ?", (existing_id,))
             fp = row_fingerprint(d)
             search = fold(" ".join(str(d.get(c) or "") for c in COLUMNS))
             nam = derive_nam(d)
             d["nam"] = nam
             try:
-                con.execute(
+                cur = con.execute(
                     """INSERT OR IGNORE INTO bids
                     (fingerprint, raw, search, sodk, hoatchat, ten, loai, nhomthau, loai_thau,
                      ma_tinh, nuocsx, duongdung, tungay_hd, denngay_hd, nam)
@@ -128,7 +513,7 @@ def save_rows(rows: list[dict]) -> int:
                         d.get("denngay_hd"), nam,
                     ),
                 )
-                if con.total_changes:
+                if cur.rowcount:
                     n += 1
             except sqlite3.IntegrityError:
                 pass
@@ -430,7 +815,10 @@ def download_kqdt_export(ngay: str, loai: int = 1, cookie: str = "", timeout: in
     params = {"loai": str(loai), "ngaycongbo": ngay}
     last_err: Exception | None = None
 
+    session = _borrow_session()
     for attempt in range(1, retries + 1):
+        if _crawl_stop.is_set():
+            raise CrawlStopped()
         try:
             if _vss_prefer_ip:
                 url = f"https://{VSS_IP_FALLBACK}{VSS_EXPORT_PATH}"
@@ -440,7 +828,7 @@ def download_kqdt_export(ngay: str, loai: int = 1, cookie: str = "", timeout: in
                 url = f"https://{VSS_HOST}{VSS_EXPORT_PATH}"
                 headers = _browser_headers(cookie)
                 verify = True
-            resp = requests.get(url, params=params, headers=headers, timeout=timeout, verify=verify)
+            resp = session.get(url, params=params, headers=headers, timeout=timeout, verify=verify)
             resp.raise_for_status()
             data = resp.content or b""
             if data.startswith(b"<") and b"Workbook" not in data[:500] and b"html" in data[:200].lower():
@@ -448,7 +836,11 @@ def download_kqdt_export(ngay: str, loai: int = 1, cookie: str = "", timeout: in
             if len(data) < 64:
                 raise RuntimeError(f"Export rỗng / quá ngắn ({len(data)} bytes)")
             return data
+        except CrawlStopped:
+            raise
         except Exception as e:
+            if _crawl_stop.is_set():
+                raise CrawlStopped() from e
             last_err = e
             # DNS failure → switch to IP fallback next try
             err_s = str(e).lower()
@@ -457,7 +849,8 @@ def download_kqdt_export(ngay: str, loai: int = 1, cookie: str = "", timeout: in
             elif not _vss_prefer_ip and attempt == 1:
                 # also try IP after first generic failure
                 _vss_prefer_ip = True
-            time.sleep(min(2 * attempt, 6))
+            if _crawl_stop.wait(min(2 * attempt, 6)):
+                raise CrawlStopped()
     raise RuntimeError(f"Export thất bại sau {retries} lần ({ngay}): {last_err}")
 
 
@@ -683,11 +1076,15 @@ def crawl_vss(
         cookie = (secrets.get("vss") or {}).get("cookie") or ""
         total_ins = 0
         empty_streak = 0
+        failed_days = []
+        completed_days = 0
+        stopped = False
         mode = "bắt kịp export" if catchup else f"export {len(days_list)} ngày"
         update_status("vss", state="running", progress=1, message=f"Crawl VSS {mode}…", updated=now_iso())
         try:
             for day_i, ngay in enumerate(days_list):
                 if _crawl_stop.is_set():
+                    stopped = True
                     break
                 try:
                     blob = download_kqdt_export(ngay, loai=loai, cookie=cookie)
@@ -697,8 +1094,12 @@ def crawl_vss(
                             r["congbo"] = ngay
                         if not r.get("loai"):
                             r["loai"] = "Tân dược"
-                    n = save_rows(rows) if rows else 0
+                    n = save_rows(rows, stop_check=_crawl_stop.is_set) if rows else 0
+                    completed_days += 1
                     total_ins += n
+                    if _crawl_stop.is_set():
+                        stopped = True
+                        break
                     if save_json and rows:
                         path = write_day_json(rows, ngay)
                         json_note = f" → {path.name}"
@@ -713,26 +1114,54 @@ def crawl_vss(
                     )
                     if not rows:
                         empty_streak += 1
-                        if empty_streak >= empty_stop:
-                            update_status("vss", message=f"Dừng sớm: {empty_streak} ngày export trống")
-                            break
+                        # Holidays and quiet periods are not evidence that older
+                        # announcement days contain no data. Scan the full range.
                     else:
                         empty_streak = 0
+                except CrawlStopped:
+                    stopped = True
+                    break
                 except Exception as e:
+                    if _crawl_stop.is_set():
+                        stopped = True
+                        break
                     update_status("vss", message=f"Lỗi {ngay}: {e}")
+                    failed_days.append({"day": ngay, "error": str(e)})
                     empty_streak += 1
                     if empty_streak >= empty_stop:
                         break
-                # throttle 3–5s between days
-                if day_i < len(days_list) - 1 and not _crawl_stop.is_set():
-                    time.sleep(3 + (day_i % 3))  # 3,4,5 cycling
+                # throttle 3–5s between days; stop wakes this wait immediately
+                if day_i < len(days_list) - 1 and _crawl_stop.wait(3 + (day_i % 3)):
+                    stopped = True
+                    break
             info = meta_info()
-            update_status(
-                "vss", state="idle", progress=100,
-                message=f"Crawl export xong +{total_ins}", updated=now_iso(), count=info["count"],
-            )
+            if stopped:
+                update_status(
+                    "vss", state="idle", progress=100,
+                    message=f"Đã dừng · đã lưu +{total_ins}", updated=now_iso(), count=info["count"],
+                )
+            elif failed_days:
+                update_status(
+                    "vss", state="error", progress=int(100 * completed_days / max(1, len(days_list))),
+                    message=f"Chưa tải đủ: {completed_days}/{len(days_list)} ngày, {len(failed_days)} ngày lỗi · đã lưu +{total_ins}",
+                    failed_days=failed_days, updated=now_iso(), count=info["count"],
+                )
+            else:
+                update_status(
+                    "vss", state="idle", progress=100,
+                    message=f"Crawl export xong +{total_ins}", failed_days=[], updated=now_iso(), count=info["count"],
+                )
         except Exception as e:
-            update_status("vss", state="error", message=str(e), updated=now_iso())
+            if _crawl_stop.is_set():
+                info = meta_info()
+                update_status(
+                    "vss", state="idle", progress=100,
+                    message=f"Đã dừng · đã lưu +{total_ins}", updated=now_iso(), count=info["count"],
+                )
+            else:
+                update_status("vss", state="error", message=str(e), updated=now_iso())
+        finally:
+            _drop_session()
 
     _crawl_thread = threading.Thread(target=work, daemon=True, name="vss-export-crawl")
     _crawl_thread.start()
@@ -741,7 +1170,11 @@ def crawl_vss(
 
 def stop_crawl():
     _crawl_stop.set()
-    update_status("vss", message="Đang dừng…")
+    _drop_session()
+    if crawl_alive():
+        update_status("vss", message="Đang dừng…", updated=now_iso())
+    else:
+        update_status("vss", state="idle", progress=100, message="Đã dừng", updated=now_iso())
     return {"ok": True}
 
 
@@ -751,9 +1184,30 @@ def meta_info() -> dict:
     if not VSS_DB.exists():
         return info
     with connect() as con:
-        info["count"] = con.execute("SELECT count(*) FROM bids").fetchone()[0]
+        stored = read_metadata(con, "vss_total")
+        info["count"] = stored if stored is not None else 0
         info["updated"] = meta_get(con, "updated")
     return info
+
+
+# Real bids columns used by the list. Money, province name, and a few dates
+# live only inside raw JSON — project those keys, do not SELECT *.
+_VSS_SQL_COLS = (
+    "sodk", "hoatchat", "ten", "loai", "nhomthau", "loai_thau",
+    "duongdung", "ma_tinh", "nuocsx", "tungay_hd", "denngay_hd", "nam",
+)
+_VSS_JSON_COLS = (
+    "hamluong", "donvitinh", "soluong", "gia", "thanhtien", "nhasx",
+    "ten_tinh", "ma_cskcb", "ten_cskcb", "congbo", "tennhathau", "tungay",
+    "created_date",
+)
+_VSS_LIST_SQL = (
+    "SELECT "
+    + ", ".join(_VSS_SQL_COLS)
+    + ", "
+    + ", ".join(f"json_extract(raw, '$.{key}') AS {key}" for key in _VSS_JSON_COLS)
+    + " FROM bids"
+)
 
 
 def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
@@ -833,7 +1287,7 @@ def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
                         AND length(coalesce(denngay_hd,'')) >= 10
                         AND tungay_hd <= ? AND denngay_hd >= ?
                     )
-                    OR coalesce(congbo,'') LIKE ?
+                    OR coalesce(json_extract(raw, '$.congbo'), '') LIKE ?
                 )"""
             )
             args.extend([year, f"{y}%", y_end, y_start, f"{y}%"])
@@ -881,15 +1335,24 @@ def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
     with connect() as con:
         total = con.execute("SELECT count(*) FROM bids" + where, args).fetchone()[0]
         rows = con.execute(
-            "SELECT raw, nam FROM bids" + where +
+            _VSS_LIST_SQL + where +
             " ORDER BY coalesce(tungay_hd,'') DESC, id DESC LIMIT ? OFFSET ?",
-            args + [size, page * size],
+            args + [size + 1, page * size],
         ).fetchall()
     items = []
-    for i, (raw, nam_col) in enumerate(rows):
-        d = json.loads(raw)
+    for i, row in enumerate(rows):
+        d = {}
+        for key in (*_VSS_SQL_COLS, *_VSS_JSON_COLS):
+            value = row[key]
+            d[key] = "" if value is None else value
         d["stt"] = page * size + i + 1
-        if d.get("nam") is None:
-            d["nam"] = nam_col if nam_col is not None else derive_nam(d)
+        if d.get("nam") in (None, ""):
+            d["nam"] = derive_nam(d)
         items.append(d)
-    return {"total": total, "page": page, "size": size, "items": items}
+    has_more = len(items) > size
+    if has_more:
+        items = items[:size]
+    from .sdk_forms import form_for
+    for item in items:
+        item["dangbaoche"] = form_for(item.get("sodk"))
+    return {"total": int(total), "page": page, "size": size, "hasMore": has_more, "items": items}

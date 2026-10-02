@@ -1,17 +1,17 @@
+import { useEffect, useRef, useState } from 'react'
 import {
   CountSelect,
   FilterModal,
-  HospitalGradeField,
   Icons,
   MultiSelectField,
-  SearchSuggestBar,
   SuggestField,
 } from '../../components'
 import { TagFilterDropdown } from '../../TagFilterDropdown'
 import { EMPTY_FILTERS } from './davConfig'
 import { api, davErrorMessage } from '../../services/davService'
 import type { DavSearchController } from '../../hooks/useDavSearch'
-import type { DavSectionProps } from '../../types/dav'
+import type { DavFilters, DavSectionProps } from '../../types/dav'
+
 export function DavFilterSection({
   controller,
   localMode,
@@ -26,96 +26,120 @@ export function DavFilterSection({
     setDraftTags,
     configs,
     setErr,
-    setF,
-    runSearch,
+    applyFilters,
     fieldSuggest,
-    suggests,
-    suggestOpen,
-    setSuggestOpen,
-    loading,
-    suggesting,
-    setDetail,
     draftTags,
     userId,
-    advancedActive,
     setFilterModalOpen,
     filterModalOpen,
   } = controller
+  const draftRef = useRef(filters)
+  const [draft, setDraft] = useState(filters)
+  const appliedKey = JSON.stringify(filters)
+  useEffect(() => {
+    const next = JSON.parse(appliedKey) as DavFilters
+    draftRef.current = next
+    setDraft(next)
+  }, [appliedKey])
+
+  const setLocal = <K extends keyof DavFilters>(key: K, val: DavFilters[K]) => {
+    const next = { ...draftRef.current, [key]: val }
+    draftRef.current = next
+    setDraft(next)
+  }
+  const commit = (override?: Partial<DavFilters>) => {
+    const next = { ...draftRef.current, ...(override || {}) }
+    draftRef.current = next
+    setDraft(next)
+    applyFilters(next)
+  }
+  const advancedActive = [
+    draft.tenThuoc,
+    draft.soDangKy,
+    draft.hoatChat,
+    draft.dangBaoChe,
+    draft.sanXuat,
+    draft.dangKy,
+    draft.nuocSanXuat,
+    draft.ingredientCount,
+    draft.dosageFormCount,
+    draft.strengthCount,
+  ].filter((v) => (Array.isArray(v) ? v.length > 0 : String(v ?? '').trim() !== '')).length
+
   const detailFields = (
-    <div className="filter-grid tight">
+    <div className="filter-grid tight cols-4">
+      <SuggestField
+        label="Hoạt chất"
+        value={draft.hoatChat}
+        onChange={(v) => setLocal('hoatChat', v)}
+        onSearch={(v) => commit({ hoatChat: v })}
+        suggest={fieldSuggest('hoatChat')}
+      />
       <SuggestField
         label="Tên thuốc"
-        value={filters.tenThuoc}
-        onChange={(v) => setF('tenThuoc', v)}
-        onSearch={(v) => runSearch({ tenThuoc: v })}
+        value={draft.tenThuoc}
+        onChange={(v) => setLocal('tenThuoc', v)}
+        onSearch={(v) => commit({ tenThuoc: v })}
         suggest={fieldSuggest('tenThuoc')}
       />
       <SuggestField
         label="Số ĐK"
-        value={filters.soDangKy}
-        onChange={(v) => setF('soDangKy', v)}
-        onSearch={(v) => runSearch({ soDangKy: v })}
+        value={draft.soDangKy}
+        onChange={(v) => setLocal('soDangKy', v)}
+        onSearch={(v) => commit({ soDangKy: v })}
         suggest={fieldSuggest('soDangKy')}
       />
       <SuggestField
-        label="Hoạt chất"
-        value={filters.hoatChat}
-        onChange={(v) => setF('hoatChat', v)}
-        onSearch={(v) => runSearch({ hoatChat: v })}
-        suggest={fieldSuggest('hoatChat')}
-      />
-      <SuggestField
         label="Dạng bào chế"
-        value={filters.dangBaoChe}
-        onChange={(v) => setF('dangBaoChe', v)}
-        onSearch={(v) => runSearch({ dangBaoChe: v })}
+        value={draft.dangBaoChe}
+        onChange={(v) => setLocal('dangBaoChe', v)}
+        onSearch={(v) => commit({ dangBaoChe: v })}
         suggest={fieldSuggest('dangBaoChe')}
+      />
+      <MultiSelectField
+        label="Nước SX"
+        value={draft.nuocSanXuat}
+        onChange={(v) => setLocal('nuocSanXuat', v)}
+        suggest={fieldSuggest('nuocSanXuat')}
+        placeholder="Chọn nước…"
       />
       <SuggestField
         label="Công ty SX"
-        value={filters.sanXuat}
-        onChange={(v) => setF('sanXuat', v)}
-        onSearch={(v) => runSearch({ sanXuat: v })}
+        value={draft.sanXuat}
+        onChange={(v) => setLocal('sanXuat', v)}
+        onSearch={(v) => commit({ sanXuat: v })}
         suggest={fieldSuggest('sanXuat')}
       />
       <SuggestField
         label="Công ty ĐK"
-        value={filters.dangKy}
-        onChange={(v) => setF('dangKy', v)}
-        onSearch={(v) => runSearch({ dangKy: v })}
+        value={draft.dangKy}
+        onChange={(v) => setLocal('dangKy', v)}
+        onSearch={(v) => commit({ dangKy: v })}
         suggest={fieldSuggest('dangKy')}
       />
-      <MultiSelectField
-        label="Nước SX"
-        value={filters.nuocSanXuat}
-        onChange={(v) => setF('nuocSanXuat', v)}
-        suggest={fieldSuggest('nuocSanXuat')}
-        placeholder="Chọn nước…"
-      />
-      <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
       <CountSelect
         label="Số hoạt chất"
-        value={filters.ingredientCount}
-        otherValue={filters.ingredientCountOther}
+        value={draft.ingredientCount}
+        otherValue={draft.ingredientCountOther}
         options={[1, 2, 3, 4, 5]}
-        onChange={(v) => setF('ingredientCount', v)}
-        onOther={(v) => setF('ingredientCountOther', v)}
+        onChange={(v) => setLocal('ingredientCount', v)}
+        onOther={(v) => setLocal('ingredientCountOther', v)}
       />
       <CountSelect
         label="Số dạng bào chế (nhóm HC)"
-        value={filters.dosageFormCount}
-        otherValue={filters.dosageFormCountOther}
+        value={draft.dosageFormCount}
+        otherValue={draft.dosageFormCountOther}
         options={[1, 2, 3, 4, 5, 6, 7]}
-        onChange={(v) => setF('dosageFormCount', v)}
-        onOther={(v) => setF('dosageFormCountOther', v)}
+        onChange={(v) => setLocal('dosageFormCount', v)}
+        onOther={(v) => setLocal('dosageFormCountOther', v)}
       />
       <CountSelect
         label="Mức hàm lượng (nhóm HC)"
-        value={filters.strengthCount}
-        otherValue={filters.strengthCountOther}
+        value={draft.strengthCount}
+        otherValue={draft.strengthCountOther}
         options={[1, 3, 4, 5]}
-        onChange={(v) => setF('strengthCount', v)}
-        onOther={(v) => setF('strengthCountOther', v)}
+        onChange={(v) => setLocal('strengthCount', v)}
+        onOther={(v) => setLocal('strengthCountOther', v)}
       />
     </div>
   )
@@ -123,24 +147,6 @@ export function DavFilterSection({
   return (
     <>
       <div className="filters-left">
-        <SearchSuggestBar
-          value={filters.q}
-          onChange={(v) => setF('q', v)}
-          onSubmit={() => runSearch()}
-          suggestions={suggests}
-          open={suggestOpen}
-          onOpenChange={setSuggestOpen}
-          loading={loading || suggesting}
-          hint="Gõ gợi ý · tick trạng thái rồi bấm Tìm kiếm"
-          onPick={(s) => {
-            const row = s.row
-            const q = row?.tenThuoc || s.title || filters.q
-            setFilters((f) => ({ ...f, q }))
-            setSuggestOpen(false)
-            if (row) setDetail(row)
-            runSearch({ q })
-          }}
-        />
         <div className="filter-actions">
           <TagFilterDropdown
             selectedTags={draftTags}
@@ -149,6 +155,7 @@ export function DavFilterSection({
             userId={userId}
             deferApply
           />
+          <button type="button" className="btn" onClick={() => commit()}>{Icons.search} Tìm kiếm</button>
           {filtersInModal ? (
             <button
               type="button"
@@ -163,6 +170,8 @@ export function DavFilterSection({
             type="button"
             className="btn secondary"
             onClick={() => {
+              draftRef.current = EMPTY_FILTERS
+              setDraft(EMPTY_FILTERS)
               setFilters(EMPTY_FILTERS)
               setColumnFilters({})
               setSuggests([])
@@ -178,7 +187,7 @@ export function DavFilterSection({
               onClick={() =>
                 api
                   .davValidity()
-                  .then(() => runSearch())
+                  .then(() => commit())
                   .catch((e) => setErr(davErrorMessage(e)))
               }
             >
@@ -194,7 +203,7 @@ export function DavFilterSection({
       <FilterModal
         open={filtersInModal && filterModalOpen}
         onClose={() => setFilterModalOpen(false)}
-        onApply={() => runSearch()}
+        onApply={() => commit()}
       >
         {detailFields}
       </FilterModal>

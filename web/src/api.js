@@ -40,22 +40,41 @@ export async function health() {
 
 export const api = {
   health,
-  status: () => request('/api/status'),
-  secrets: () => request('/api/secrets'),
+  status: () => request('/api/status', { timeoutMs: 8000 }),
+  secrets: ({ revealPassword = false } = {}) => request(`/api/secrets${revealPassword ? '?revealPassword=true' : ''}`),
   saveSecrets: (body) => request('/api/secrets', { method: 'POST', body: JSON.stringify(body) }),
   dm93: () => request('/api/dm93'),
+  metrics: (section) => request(`/api/metrics?section=${encodeURIComponent(section)}`),
+  metricsSlice: (body) => request('/api/metrics/slice', { method: 'POST', body: JSON.stringify(body || {}) }),
+  metricsMap: (body) => request('/api/metrics/map', { method: 'POST', body: JSON.stringify(body || {}), timeoutMs: 90000 }),
+  suggest: (section, field, q) => request(
+    `/api/suggest?section=${encodeURIComponent(section)}&field=${encodeURIComponent(field)}&q=${encodeURIComponent(q || '')}`,
+  ),
   davSearch: (body) => request('/api/dav/search', { method: 'POST', body: JSON.stringify(body) }),
   davCrawl: (body) => request('/api/dav/crawl', { method: 'POST', body: JSON.stringify(body || {}) }),
   davCrawlStop: () => request('/api/dav/crawl/stop', { method: 'POST', body: '{}' }),
   davValidity: () => request('/api/dav/validity/rebuild', { method: 'POST', body: '{}' }),
   mscSearch: (body) => request('/api/msc/search', { method: 'POST', body: JSON.stringify(body) }),
+  mscMatchReport: (body) => request('/api/msc/match-report', { method: 'POST', body: JSON.stringify(body || {}), timeoutMs: 120000 }),
+  mscScope: (body = {}) => request('/api/msc/crawl/scope', { method: 'POST', body: JSON.stringify(body) }),
   mscPrices: (body) => request('/api/msc/crawl/prices', { method: 'POST', body: JSON.stringify(body) }),
+  mscPricesBrowser: (body) => request('/api/msc/crawl/prices/browser', { method: 'POST', body: JSON.stringify(body) }),
   mscTenders: (body) => request('/api/msc/crawl/tenders', { method: 'POST', body: JSON.stringify(body) }),
   vssSearch: (body) => request('/api/vss/search', { method: 'POST', body: JSON.stringify(body) }),
   vssCrawl: (body) => request('/api/vss/crawl', { method: 'POST', body: JSON.stringify(body || {}) }),
   vssCrawlStop: () => request('/api/vss/crawl/stop', { method: 'POST', body: '{}' }),
   vssImport: (body) => request('/api/vss/import', { method: 'POST', body: JSON.stringify(body || {}) }),
   supabaseSync: (body) => request('/api/supabase/sync', { method: 'POST', body: JSON.stringify(body || {}), timeoutMs: 600000 }),
+  productionSync: (body) => request('/api/production/sync', { method: 'POST', body: JSON.stringify(body || {}), timeoutMs: 600000 }),
+  productionSyncStatus: () => request('/api/production/sync/status'),
+  platformStatus: (refresh = false) => request(`/api/platform/status${refresh ? '?refresh=true' : ''}`, { timeoutMs: 8000 }),
+  dailyRun: () => request('/api/daily/run', { method: 'POST', body: '{}' }),
+  regulatoryCrawl: () => request('/api/regulatory/crawl', { method: 'POST', body: '{}' }),
+  baoanCatalog: () => request('/api/baoan-catalog'),
+  baoanPortfolio: (id, registration) => request(
+    id == null ? '/api/baoan-portfolio' : `/api/baoan-portfolio?id=${encodeURIComponent(id)}${registration == null ? '' : `&registration=${encodeURIComponent(registration)}`}`,
+    { timeoutMs: 90000 },
+  ),
 }
 
 /* ------------------------------------------------------------------ */
@@ -75,6 +94,47 @@ export function containsWords(haystack, needle) {
   const h = fold(haystack)
   return n.split(/\s+/).every((w) => h.includes(w))
 }
+
+function filterIsSet(value) {
+  if (Array.isArray(value)) return value.length > 0
+  if (value == null || value === false) return false
+  return String(value).trim() !== ''
+}
+
+function sameFilterValue(value, fallback) {
+  const left = Array.isArray(value) ? value.map(String) : value
+  const right = Array.isArray(fallback) ? fallback.map(String) : fallback
+  if (Array.isArray(left) || Array.isArray(right)) {
+    const a = Array.isArray(left) ? left : []
+    const b = Array.isArray(right) ? right : []
+    return a.length === b.length && a.every((item, i) => item === b[i])
+  }
+  return String(left ?? '').trim() === String(right ?? '').trim()
+}
+
+/**
+ * Skip a search when the only text the user typed is shorter than 2 characters
+ * and every other field still matches the section defaults.
+ * Empty / whitespace text is "no query" and still allows the normal page load.
+ */
+export function skipShortTextSearch(filters, textKeys, defaults = {}) {
+  const texts = []
+  for (const key of textKeys) {
+    const raw = filters?.[key]
+    if (Array.isArray(raw)) continue
+    const text = String(raw ?? '').trim()
+    if (text) texts.push(text)
+  }
+  if (!texts.length || texts.some((text) => text.length >= 2)) return false
+  for (const [key, value] of Object.entries(filters || {})) {
+    if (textKeys.includes(key)) continue
+    if (sameFilterValue(value, defaults[key])) continue
+    if (filterIsSet(value)) return false
+  }
+  return true
+}
+
+export const SHORT_SEARCH_NOTE = 'Nhập ít nhất 2 ký tự, hoặc chọn thêm bộ lọc, rồi tìm lại.'
 
 /** string | string[] | "a|b" → trimmed non-empty list */
 export function asFilterList(v) {
@@ -256,7 +316,9 @@ export function sectionMeta(status, section) {
   const s = status?.[section]
   if (!s) return { updated: null, count: null }
   const meta = s.meta || {}
-  const count = meta.count ?? s.count ?? (meta.prices != null ? (meta.prices || 0) + (meta.tenders || 0) : null)
+  // MSC exposes two independent stores.  Its headline must be the unit-price
+  // catalogue; the tender count is displayed in its own tab/card.
+  const count = meta.count ?? (meta.prices != null ? meta.prices : s.count ?? null)
   return { updated: meta.updated || s.updated || null, count, state: s.state, message: s.message }
 }
 

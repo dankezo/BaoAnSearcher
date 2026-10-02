@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { sortByDateDesc } from '../api'
-import { supabaseConfigured } from '../supabaseCloud'
+import { SHORT_SEARCH_NOTE, skipShortTextSearch, sortByDateDesc } from '../api'
+import { supabaseConfigured, cloudSuggest, cloudCount } from '../supabaseCloud'
 import { useAuth } from '../auth'
 import {
   applyColumnFilters,
@@ -11,17 +11,14 @@ import {
   useSectionMeta,
   useSelection,
   useLoadProgress,
-  useTt20,
-  DAV_METRICS_CAP,
 } from '../components'
 import { useTagFilterState } from '../TagFilterDropdown'
-import { enrichRowTag } from '../tagConfig'
-import { ingredientAllowedAtGrade } from '../tt20'
-import { loadUserJson, saveUserJson, userKeyPart } from '../userPrefs'
+import { DEFAULT_TAG_CONFIGS, enrichRowTag } from '../tagConfig'
+import { userKeyPart } from '../userPrefs'
 import { applyMetricQuick } from '../metrics'
 import { EMPTY_FILTERS, SERVER_MAP } from '../components/dav/davConfig'
 import { useDavColumns } from '../components/dav/useDavColumns'
-import { api, cloudDavSearch, cloudMetrics, davErrorMessage, readDavSession } from '../services/davService'
+import { api, cloudDavSearch, cloudMetrics, davErrorMessage } from '../services/davService'
 import type {
   ColumnFilters,
   DavFilters,
@@ -34,12 +31,12 @@ import type {
 } from '../types/dav'
 
 const PAGE_SIZE_DEFAULT = 100
-const METRICS_CAP = DAV_METRICS_CAP
+const DAV_TEXT_KEYS = ['q', 'tenThuoc', 'soDangKy', 'hoatChat', 'dangBaoChe', 'sanXuat', 'dangKy']
+const METRICS_REFRESH_NOTE = 'Chưa chạy làm mới dữ liệu hàng ngày — chỉ số DAV chưa được lưu.'
 
 export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
   const { user } = useAuth()
   const userId = userKeyPart(user)
-  const { index: tt20Index } = useTt20()
   const [filters, setFilters] = useState<DavFilters>(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>({})
   const [filtersRow, setFiltersRow] = useState(false)
@@ -56,7 +53,6 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
   const [suggests, setSuggests] = useState<DavSuggestion[]>([])
   const [suggestOpen, setSuggestOpen] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
-  const [prefsReady, setPrefsReady] = useState(false)
   const [loadPct, setLoadPct] = useState<number | null>(null)
   const [metricsSample, setMetricsSample] = useState<DrugItem[] | null>(null)
   const [metricsCards, setMetricsCards] = useState<DavMetricCard[] | null>(null)
@@ -85,29 +81,13 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
   const columnFiltersRef = useRef(columnFilters)
   const selectedTagsRef = useRef(selectedTags)
   const pageSizeRef = useRef(pageSize)
+  const pageRef = useRef(0)
+  const cursorRef = useRef<Record<string, string> | null>(null)
   filtersRef.current = filters
   columnFiltersRef.current = columnFilters
   selectedTagsRef.current = selectedTags
   pageSizeRef.current = pageSize
 
-  // Restore per-user session filters (isolated by user id)
-  useEffect(() => {
-    const saved = readDavSession(loadUserJson(userId, 'dav', 'session', null))
-    if (saved && typeof saved === 'object') {
-      if (saved.filters) setFilters({ ...EMPTY_FILTERS, ...saved.filters, tags: null })
-      if (saved.columnFilters) setColumnFilters(saved.columnFilters)
-    }
-    setPrefsReady(true)
-  }, [userId])
-
-  // Persist per-user session
-  useEffect(() => {
-    if (!prefsReady) return
-    saveUserJson(userId, 'dav', 'session', {
-      filters: { ...filters, tags: null },
-      columnFilters,
-    })
-  }, [userId, prefsReady, filters, columnFilters])
 
   const cols = useDavColumns(configs)
 
@@ -130,41 +110,38 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
       const id = ++reqSeq.current
       const stale = () => id !== reqSeq.current
       const size = resolvePageSize(pageSizeRef.current)
+      const active = { ...mergedFilters(cf, tagsOverride), ...(override || {}) }
+      const check = { ...active }
+      if (Array.isArray(check.tags) && check.tags.length >= DEFAULT_TAG_CONFIGS.length) check.tags = null
+      if (skipShortTextSearch(check, DAV_TEXT_KEYS, EMPTY_FILTERS)) {
+        setErr(SHORT_SEARCH_NOTE)
+        setLoading(false)
+        return
+      }
       setLoading(true)
       setErr('')
-      const active = { ...mergedFilters(cf, tagsOverride), ...(override || {}) }
       try {
         if (localMode || supabaseConfigured) {
-          const needGrade = Array.isArray(active.hangBenhVien)
-            ? active.hangBenhVien.length > 0
-            : !!active.hangBenhVien
+          const sequential = p === pageRef.current + 1
+          const cursor = !localMode && sequential ? cursorRef.current : null
           const searchFn = localMode
-            ? (page: number, sz: number) => api.davSearch({ filters: active, page, size: sz })
-            : (page: number, sz: number) => cloudDavSearch({ filters: active, page, size: sz })
-
-          if (needGrade) {
-            const allRaw = await fetchAllPages(searchFn, {
-              size: Math.max(size, 400),
-              onProgress: (pct) => {
-                if (!stale()) setLoadPct(pct)
-              },
-            })
-            if (stale()) return
-            let items = allRaw.map(enrichRowTag)
-            const grades = Array.isArray(active.hangBenhVien) ? active.hangBenhVien : [active.hangBenhVien]
-            items = items.filter((r) =>
-              grades.some((g) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, g)),
-            )
-            items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
-            setData({ total: items.length, items, page: 0, size: items.length || size })
-            setPage(0)
-          } else {
-            const res = await searchFn(p, size)
-            if (stale()) return
-            let items = (res.items || []).map(enrichRowTag)
-            items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
-            setData({ ...res, items })
-            setPage(p)
+            ? (page: number, sz: number, _cursor?: Record<string, string> | null) => api.davSearch({ filters: active, page, size: sz })
+            : (page: number, sz: number, nextCursor?: Record<string, string> | null) => cloudDavSearch({ filters: active, page, size: sz, cursor: nextCursor })
+          const res = await searchFn(p, size, cursor)
+          if (stale()) return
+          pageRef.current = p
+          cursorRef.current = res.nextCursor || null
+          let items = (res.items || []).map(enrichRowTag)
+          items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
+          setData({ ...res, items })
+          setPage(p)
+          if (!localMode && res.total == null) {
+            cloudCount('dav', active)
+              .then((total) => {
+                if (stale() || total == null) return
+                setData((prev) => ({ ...prev, total }))
+              })
+              .catch(() => {})
           }
           return
         }
@@ -180,25 +157,24 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
         }
       }
     },
-    [localMode, mergedFilters, tt20Index],
+    [localMode, mergedFilters],
   )
 
   // Draft filters are applied only on explicit search; suggestions remain debounced.
   useEffect(() => {
-    if (!prefsReady) return
     search(0)
-  }, [prefsReady, pageSize, search])
+  }, [pageSize, search])
 
   // Track first table paint before loading metrics (avoids bandwidth contention)
   useEffect(() => {
-    if (!prefsReady || embedded) return
+    if (embedded) return
     if (loading) sawTableLoad.current = true
     else if (sawTableLoad.current) setTableReady(true)
-  }, [prefsReady, embedded, loading])
+  }, [embedded, loading])
 
   // Metrics: cloud = 1 aggregate API; local = full catalog pages (deferred after table)
   useEffect(() => {
-    if (!prefsReady || embedded || !tableReady) return undefined
+    if (embedded || !tableReady) return undefined
     if (!(localMode || supabaseConfigured)) {
       setMetricsSample([])
       setMetricsError('Chưa cấu hình nguồn dữ liệu DAV.')
@@ -231,25 +207,27 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
         cancelled = true
       }
     }
-    const metricsFn = (page: number, sz: number) => api.davSearch({ filters: {}, page, size: sz })
-    fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: () => cancelled })
-      .then((all) => {
+    api.metrics('dav')
+      .then((payload: { cards?: DavMetricCard[]; total?: number; sampleSize?: number } | null) => {
         if (cancelled) return
-        setMetricsSample(all.map(enrichRowTag))
-        setMetricsCards(null)
-        setMetricsTotal(all.length)
+        if (!payload?.cards?.length) throw new Error('Chưa có chỉ số')
+        setMetricsCards(payload.cards)
+        setMetricsTotal(payload.total ?? payload.sampleSize ?? null)
+        setMetricsSample(null)
+        setMetricsError('')
       })
       .catch(() => {
-        if (!cancelled) {
-          setMetricsSample([])
-          setMetricsError('Chưa tải được chỉ số DAV.')
-        }
+        if (cancelled) return
+        setMetricsCards([])
+        setMetricsSample(null)
+        setMetricsTotal(null)
+        setMetricsError(METRICS_REFRESH_NOTE)
       })
       .finally(finish)
     return () => {
       cancelled = true
     }
-  }, [prefsReady, localMode, embedded, tableReady, metricsRetry])
+  }, [localMode, embedded, tableReady, metricsRetry])
 
   const toSuggest = useCallback(
     (items: DrugItem[]) =>
@@ -275,28 +253,40 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
     suggestTimer.current = setTimeout(async () => {
       setSuggesting(true)
       try {
-        let items: DrugItem[] = []
-        if (localMode || supabaseConfigured) {
-          const res = localMode
-            ? await api.davSearch({
-                filters: { ...mergedFilters(), q, tenThuoc: '', soDangKy: '', hoatChat: '' },
-                page: 0,
-                size: 4,
-              })
-            : await cloudDavSearch({
-                filters: { ...mergedFilters(), q, tenThuoc: '', soDangKy: '', hoatChat: '' },
-                page: 0,
-                size: 4,
-              })
-          items = res?.items || []
+        if (localMode) {
+          const res = await api.suggest('dav', 'q', q)
+          const names = (res?.items || []) as string[]
+          if (id === suggestSeq.current) {
+            setSuggests(names.slice(0, 4).map((title: string, i: number) => ({
+              id: `${title}-${i}`,
+              title,
+              subtitle: '',
+              meta: '',
+              row: null,
+            })))
+          }
+          return
         }
-        if (id === suggestSeq.current) setSuggests(toSuggest(items))
+        if (supabaseConfigured) {
+          const names = await cloudSuggest('dav', 'q', q)
+          if (id === suggestSeq.current) {
+            setSuggests(names.slice(0, 4).map((title: string, i: number) => ({
+              id: `${title}-${i}`,
+              title,
+              subtitle: '',
+              meta: '',
+              row: null,
+            })))
+          }
+          return
+        }
+        if (id === suggestSeq.current) setSuggests([])
       } catch {
         if (id === suggestSeq.current) setSuggests([])
       } finally {
         if (id === suggestSeq.current) setSuggesting(false)
       }
-    }, 260)
+    }, 300)
     return () => {
       clearTimeout(suggestTimer.current)
       suggestSeq.current += 1
@@ -318,50 +308,24 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
     filters.ingredientCount,
     filters.dosageFormCount,
     filters.strengthCount,
-    filters.hangBenhVien,
   ].filter((v) => (Array.isArray(v) ? v.length > 0 : String(v ?? '').trim() !== '')).length
 
   const fieldSuggest = useCallback(
     (fieldKey: string) => async (q: string) => {
       const needle = String(q || '').trim()
+      if (needle.length < 2) return []
       try {
-        let items: DrugItem[] = []
-        if (localMode || supabaseConfigured) {
-          const filters = needle
-            ? { ...mergedFilters(), [fieldKey]: needle, q: '' }
-            : { ...mergedFilters(), q: '' }
-          const res = localMode
-            ? await api.davSearch({ filters, page: 0, size: needle ? 40 : 80 })
-            : await cloudDavSearch({ filters, page: 0, size: needle ? 40 : 80 })
-          items = res?.items || []
+        if (localMode) {
+          const res = await api.suggest('dav', fieldKey, needle)
+          return ((res?.items || []) as string[]).filter(Boolean).slice(0, 8)
         }
-        const seen = new Set<string>()
-        const out: string[] = []
-        const rowKeyOf =
-          (
-            {
-              tenThuoc: 'tenThuoc',
-              soDangKy: 'soDangKy',
-              hoatChat: 'hoatChat',
-              dangBaoChe: 'dangBaoChe',
-              sanXuat: 'ctySanXuat',
-              dangKy: 'ctyDangKy',
-              nuocSanXuat: 'nuocSanXuat',
-            } as Record<string, keyof DrugItem>
-          )[fieldKey] || (fieldKey as keyof DrugItem)
-        for (const r of items) {
-          const t = String(r[rowKeyOf] || '').trim()
-          if (!t || seen.has(t)) continue
-          seen.add(t)
-          out.push(t)
-          if (out.length >= (needle ? 8 : 12)) break
-        }
-        return out
+        if (!supabaseConfigured) return []
+        return cloudSuggest('dav', fieldKey, needle)
       } catch {
         return []
       }
     },
-    [localMode, mergedFilters],
+    [localMode],
   )
 
   const runSearch = useCallback(
@@ -372,6 +336,15 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
     },
     [search, commitDraft],
   )
+
+  /** Publish the draft the filter form is showing, then search. */
+  const applyFilters = useCallback((next: DavFilters) => {
+    filtersRef.current = next
+    setFilters(next)
+    setSuggestOpen(false)
+    const tags = commitDraft()
+    search(0, undefined, null, tags)
+  }, [search, commitDraft])
 
   const rows = useMemo(() => {
     let list = applyColumnFilters(data.items, cols, columnFilters)
@@ -419,14 +392,9 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
     if (!localMode && !supabaseConfigured) return []
     const searchFn = localMode
       ? (p: number, size: number) => api.davSearch({ filters: mergedFilters(), page: p, size })
-      : (p: number, size: number) => cloudDavSearch({ filters: mergedFilters(), page: p, size })
-    const all = await fetchAllPages(searchFn, { onProgress: setExportPct })
-    if (filters.hangBenhVien && (Array.isArray(filters.hangBenhVien) ? filters.hangBenhVien.length : true)) {
-      const grades = Array.isArray(filters.hangBenhVien) ? filters.hangBenhVien : [filters.hangBenhVien]
-      return all.filter((r) => grades.some((g) => ingredientAllowedAtGrade(tt20Index, r.hoatChat, g)))
-    }
-    return all
-  }, [localMode, mergedFilters, filters, selectedTags, tt20Index])
+      : (p: number, size: number, cursor?: Record<string, string> | null) => cloudDavSearch({ filters: mergedFilters(), page: p, size, cursor })
+    return fetchAllPages(searchFn, { onProgress: setExportPct })
+  }, [localMode, mergedFilters, filters, selectedTags])
 
   const doExport = async () => {
     setExporting(true)
@@ -496,6 +464,7 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
     advancedActive,
     fieldSuggest,
     runSearch,
+    applyFilters,
     rows,
     rowKey,
     pageSizeNum,

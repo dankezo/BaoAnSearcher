@@ -5,6 +5,7 @@
 import { getSupabase, supabaseConfigured } from './supabaseClient'
 import { mapTursoItems } from './tursoMap'
 import { buildDavRpcParams } from './services/davRpc'
+import { cachedQuery, stableKey } from './queryCache'
 
 export { supabaseConfigured, getSupabase }
 
@@ -31,19 +32,25 @@ async function accessToken() {
   return token
 }
 
-async function tenderFetch(path, body) {
+const abortByKey = new Map()
+
+async function rawTender(path, body, { method = 'POST', abortKey } = {}) {
   const token = await accessToken()
   const controller = new AbortController()
+  if (abortKey) {
+    abortByKey.get(abortKey)?.abort()
+    abortByKey.set(abortKey, controller)
+  }
   const timeout = setTimeout(() => controller.abort(), 55_000)
   try {
     const res = await fetch(path, {
-      method: 'POST',
+      method,
       signal: controller.signal,
       headers: {
-        'Content-Type': 'application/json',
+        ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify(body || {}),
+      body: method === 'POST' ? JSON.stringify(body || {}) : undefined,
     })
     const text = await res.text()
     let payload = null
@@ -61,14 +68,58 @@ async function tenderFetch(path, body) {
     return payload
   } finally {
     clearTimeout(timeout)
+    if (abortKey && abortByKey.get(abortKey) === controller) abortByKey.delete(abortKey)
   }
+}
+
+async function tenderFetch(path, body, options = {}) {
+  const method = options.method || 'POST'
+  const key = stableKey(`${method} ${path}`, method === 'POST' ? body : null)
+  return cachedQuery(key, () => rawTender(path, body, options), {
+    freshMs: options.freshMs ?? 10000,
+    staleMs: options.staleMs ?? 60000,
+  })
+}
+
+export function cloudMap(body) {
+  return tenderFetch('/api/metrics/map', body || {}, {
+    freshMs: 20000,
+    staleMs: 120000,
+    abortKey: 'metrics:map',
+  })
+}
+
+export function cloudBootstrap(section) {
+  const safe = encodeURIComponent(section || 'vss')
+  return tenderFetch(`/api/tender/bootstrap?section=${safe}`, null, {
+    method: 'GET',
+    freshMs: 30000,
+    staleMs: 120000,
+  })
+}
+
+export async function cloudSuggest(section, field, q) {
+  const params = new URLSearchParams({
+    section: String(section || 'vss'),
+    field: String(field || ''),
+    q: String(q || ''),
+  })
+  const payload = await tenderFetch(`/api/tender/suggest?${params}`, null, {
+    method: 'GET',
+    freshMs: 20000,
+    staleMs: 60000,
+    abortKey: `suggest:${section}:${field}`,
+  })
+  return payload?.items || []
 }
 
 function normalizePage(payload, page, size) {
   return {
-    total: payload?.total ?? 0,
+    total: payload?.total ?? null,
     page: payload?.page ?? page,
     size: payload?.size ?? size,
+    hasMore: payload?.hasMore === true,
+    nextCursor: payload?.nextCursor || null,
     items: mapTursoItems(payload?.items || []),
   }
 }
@@ -120,7 +171,10 @@ async function supabaseVss(filters, page, size) {
 }
 
 /** Cloud search — Turso first, Supabase RPC fallback. */
-export async function cloudVssSearch({ filters = {}, page = 0, size = 100 } = {}) {
+/**
+ * @param {{ filters?: object, page?: number, size?: number, cursor?: Record<string, string> | null }} [opts]
+ */
+export async function cloudVssSearch({ filters = {}, page = 0, size = 100, cursor = null } = {}) {
   if (!supabaseConfigured) throw new Error('Chưa cấu hình Supabase (VITE_SUPABASE_URL / ANON_KEY).')
   try {
     const payload = await tenderFetch('/api/tender/search', {
@@ -128,7 +182,8 @@ export async function cloudVssSearch({ filters = {}, page = 0, size = 100 } = {}
       filters,
       page,
       size,
-    })
+      cursor,
+    }, { abortKey: 'search:vss' })
     return normalizePage(payload, page, size)
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
@@ -137,7 +192,10 @@ export async function cloudVssSearch({ filters = {}, page = 0, size = 100 } = {}
   }
 }
 
-export async function cloudDavSearch({ filters = {}, page = 0, size = 100 } = {}) {
+/**
+ * @param {{ filters?: object, page?: number, size?: number, cursor?: Record<string, string> | null }} [opts]
+ */
+export async function cloudDavSearch({ filters = {}, page = 0, size = 100, cursor = null } = {}) {
   if (!supabaseConfigured) throw new Error('Chưa cấu hình Supabase (VITE_SUPABASE_URL / ANON_KEY).')
   try {
     const payload = await tenderFetch('/api/tender/search', {
@@ -145,7 +203,8 @@ export async function cloudDavSearch({ filters = {}, page = 0, size = 100 } = {}
       filters,
       page,
       size,
-    })
+      cursor,
+    }, { abortKey: 'search:dav' })
     return normalizePage(payload, page, size)
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
@@ -162,7 +221,10 @@ export async function cloudDavSearch({ filters = {}, page = 0, size = 100 } = {}
   }
 }
 
-export async function cloudMscSearch({ kind = 'prices', filters = {}, page = 0, size = 100 } = {}) {
+/**
+ * @param {{ kind?: string, filters?: object, page?: number, size?: number, cursor?: Record<string, string> | null }} [opts]
+ */
+export async function cloudMscSearch({ kind = 'prices', filters = {}, page = 0, size = 100, cursor = null } = {}) {
   if (!supabaseConfigured) throw new Error('Chưa cấu hình Supabase (VITE_SUPABASE_URL / ANON_KEY).')
   try {
     const payload = await tenderFetch('/api/tender/search', {
@@ -170,7 +232,8 @@ export async function cloudMscSearch({ kind = 'prices', filters = {}, page = 0, 
       filters,
       page,
       size,
-    })
+      cursor,
+    }, { abortKey: `search:msc:${kind}:${stableKey('f', { filters, cursor, size })}` })
     return normalizePage(payload, page, size)
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
@@ -196,23 +259,70 @@ export async function cloudMscSearch({ kind = 'prices', filters = {}, page = 0, 
 export async function cloudMeta(section) {
   if (!supabaseConfigured) return null
   try {
-    return await tenderFetch('/api/tender/meta', { section })
+    const boot = await cloudBootstrap(section)
+    return boot?.meta || null
   } catch {
-    const sb = getSupabase()
-    if (!sb) return null
-    const { data, error } = await sb.from('app_meta').select('value, updated_at').eq('key', section).maybeSingle()
-    if (error || !data) return null
-    const value = data.value || {}
-    return {
-      ...value,
-      updated: value.updated || value.synced_at || data.updated_at,
-      count: value.count ?? value.synced ?? value.prices ?? null,
-    }
+    return null
   }
 }
 
-/** Pre-aggregated metric cards (Turso SQL). section: dav|vss|msc_prices|msc_tenders */
+/** The Cloud admin view fetches only the four registry rows from TiDB. */
+export function cloudDataRegistry() {
+  return tenderFetch('/api/admin/datasets', null, {
+    method: 'GET', freshMs: 5000, staleMs: 30000, abortKey: 'admin:data-registry',
+  })
+}
+
+/** Resolve an authenticated direct R2 CSV URL; no file bytes pass through Vercel. */
+export function cloudDatasetDownload(code) {
+  return tenderFetch(`/api/admin/datasets/download/${encodeURIComponent(code)}`, null, {
+    method: 'GET', freshMs: 0, staleMs: 0,
+  })
+}
+
+/** Explicit count endpoint retained for offline reports only; never call it in a table flow. */
+export async function cloudCount(kind, filters) {
+  const payload = await tenderFetch('/api/tender/count', { kind, filters }, { abortKey: `count:${kind}` })
+  const total = Number(payload?.total)
+  return Number.isFinite(total) ? total : null
+}
+
+/** Pre-aggregated metric cards. Uses the bootstrap payload when it already has them. */
 export async function cloudMetrics(section, { force = false } = {}) {
   if (!supabaseConfigured) return null
-  return tenderFetch('/api/tender/metrics', { section, force })
+  if (!force) {
+    const boot = await cloudBootstrap(section)
+    if (boot?.metrics_summary?.cards?.length >= 4 || (section !== 'dav' && boot?.metrics_summary?.cards)) {
+      if (section !== 'dav' && section !== 'msc_prices' && section !== 'msc_tenders') return boot.metrics_summary
+    }
+  }
+  return tenderFetch('/api/tender/metrics', { section, force }, { abortKey: `metrics:${section}` })
+}
+
+export function cloudMetricsSlice(body) {
+  return tenderFetch('/api/tender/metrics', { ...(body || {}), slice: true }, {
+    freshMs: 20000,
+    staleMs: 120000,
+    abortKey: `slice:${body?.section || ''}`,
+  })
+}
+
+export function cloudCatalog() {
+  return tenderFetch('/api/tender/metrics', { section: 'baoan' }, { freshMs: 60000, staleMs: 300000, abortKey: 'baoan-catalog' })
+}
+
+export function cloudPortfolio(id, registration) {
+  return tenderFetch('/api/tender/metrics', {
+    section: 'portfolio',
+    id: id ?? null,
+    registration: registration ?? null,
+  }, { freshMs: 60000, staleMs: 300000, abortKey: id == null ? 'portfolio' : `portfolio:${id}` })
+}
+
+export function cloudMatchReport(body) {
+  return tenderFetch('/api/tender/metrics', { section: 'msc_match', ...(body || {}) }, {
+    freshMs: 15000,
+    staleMs: 60000,
+    abortKey: `match:${body?.level || 'all'}`,
+  })
 }

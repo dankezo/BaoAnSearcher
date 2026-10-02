@@ -1,8 +1,11 @@
 /** Compound metric cards — 4 per section, dbl-click pills → table filters. No long tips. */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { TAG_CAM, TAG_VANG, TAG_XAM, TAG_XANH } from './tagConfig'
+import { provinceNameFromCode } from './vnProvinces'
+import { GROUP_COLORS } from './mapGeo'
 import { resolveBidStatusFromRow } from './bidStatus'
 import { Modal } from './components'
+import { metricHelp } from './metricHelp'
 
 const MONTH_MS = 30.4375 * 24 * 3600 * 1000
 const DAY_MS = 86400000
@@ -25,12 +28,42 @@ export function fmtInt(n) {
   return Math.round(Number(n)).toLocaleString('vi-VN')
 }
 
+function fmtCompact(n) {
+  const v = Math.abs(Number(n) || 0)
+  if (v >= 1e6) return `${(v / 1e6).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} tr`
+  if (v >= 1e3) return `${(v / 1e3).toLocaleString('vi-VN', { maximumFractionDigits: 0 })} n`
+  return fmtInt(v)
+}
+
 export function fmtMoney(n) {
   if (n == null || Number.isNaN(Number(n))) return '—'
   const v = Number(n)
   if (Math.abs(v) >= 1e9) return `${(v / 1e9).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} Tỷ`
   if (Math.abs(v) >= 1e6) return `${(v / 1e6).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} Tr`
   return v.toLocaleString('vi-VN')
+}
+
+/** Map cards: round to tỷ (3 decimals under 10) or triệu, with VND. */
+export function fmtVndCompact(n) {
+  if (n == null || Number.isNaN(Number(n))) return '—'
+  const v = Number(n)
+  const sign = v < 0 ? '-' : ''
+  const amount = Math.abs(v)
+  if (amount >= 1e9) {
+    const ty = amount / 1e9
+    const digits = ty >= 100 ? 0 : ty >= 10 ? 1 : 3
+    const text = ty.toLocaleString('vi-VN', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+    return `${sign}${text} tỷ VND`
+  }
+  if (amount >= 1e6) {
+    const trieu = Math.round(amount / 1e6)
+    return `${sign}${trieu.toLocaleString('vi-VN')} triệu VND`
+  }
+  return `${sign}${Math.round(amount).toLocaleString('vi-VN')} VND`
+}
+
+export function fmtVndShort(n) {
+  return fmtVndCompact(n).replace(/ VND$/, '')
 }
 
 export function fmtPct(n, digits = 1) {
@@ -184,9 +217,11 @@ export function DonutChart({ slices, size = 100, center = null }) {
           offset += len
           return el
         })}
-        <text x="50" y="52" textAnchor="middle" className="donut-center">
-          {center != null ? center : fmtInt(sum)}
-        </text>
+        {center !== '' && (
+          <text x="50" y="52" textAnchor="middle" className="donut-center" fontSize={center != null && String(center).length > 8 ? 8 : 11}>
+            {center != null ? center : fmtInt(sum)}
+          </text>
+        )}
       </svg>
       <ul className="donut-legend">
         {slices.map((sl) => (
@@ -248,7 +283,9 @@ export function CompoundMetricCard({
                 key={item.id}
                 type="button"
                 className={`compound-pill tone-${item.tone || 'neutral'}${on ? ' on' : ''}${item.info ? ' info' : ''}`}
-                title={item.title || (item.info ? undefined : 'Nhấp đúp để lọc bảng bên dưới')}
+                title={metricHelp(item)}
+                aria-pressed={item.info ? undefined : on}
+                onKeyDown={(e) => { if (!item.info && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onFilter?.(item.patch || { _quick: item.id }, item.id) } }}
                 onDoubleClick={item.info ? undefined : (e) => {
                   e.preventDefault()
                   onFilter?.(item.patch || { _quick: item.id }, item.id)
@@ -352,23 +389,28 @@ export function computeDavCompound(items, total) {
   let new3 = 0
   let new6 = 0
   let new12 = 0
+  let expireSoon = 0
   for (const r of rows) {
     const t = parseDateMs(r.ngayCap)
-    if (t == null) continue
-    const age = now - t
-    if (age < 0) continue
-    if (age <= 3 * MONTH_MS) new3 += 1
-    if (age <= 6 * MONTH_MS) new6 += 1
-    if (age <= 12 * MONTH_MS) new12 += 1
+    if (t != null) {
+      const age = now - t
+      if (age >= 0) {
+        if (age <= 3 * MONTH_MS) new3 += 1
+        if (age <= 6 * MONTH_MS) new6 += 1
+        if (age <= 12 * MONTH_MS) new12 += 1
+      }
+    }
+    const left = r.monthsLeft != null ? Number(r.monthsLeft) : monthsLeft(r.ngayHetHan)
+    if (left != null && left >= 0 && left <= 6) expireSoon += 1
   }
 
   return [
     {
       key: 'density',
       scope: 'fixed',
-      title: 'Ô kỹ thuật · mật độ SĐK',
+      title: 'Mật độ SĐK/HC',
       mainValue: fmtInt(blue),
-      unit: 'ô 1–2 SĐK',
+      unit: 'hoạt chất 1–2 SĐK',
       subtitle: note,
       subMetrics: [
         { id: 'sdk_1_2', label: '1–2 SĐK', count: fmtInt(blue), tone: 'ok', patch: { ingredientCount: '1' } },
@@ -381,13 +423,13 @@ export function computeDavCompound(items, total) {
       scope: 'fixed',
       title: 'Tag hồ sơ',
       mainValue: fmtInt(tags.xanh),
-      unit: 'SĐK xanh',
+      unit: 'sẵn sàng dự thầu',
       subtitle: note,
       subMetrics: [
-        { id: 'tag_xanh', label: 'Xanh', count: fmtInt(tags.xanh), tone: 'ok', patch: { _tag: TAG_XANH } },
-        { id: 'tag_vang', label: 'Vàng', count: fmtInt(tags.vang), tone: 'warn', patch: { _tag: TAG_VANG } },
-        { id: 'tag_cam', label: 'Cam', count: fmtInt(tags.cam), tone: 'danger', patch: { _tag: TAG_CAM } },
-        { id: 'tag_xam', label: 'Xám', count: fmtInt(tags.xam), tone: 'neutral', patch: { _tag: TAG_XAM } },
+        { id: 'tag_xanh', label: 'Sẵn sàng dự thầu', count: fmtInt(tags.xanh), tone: 'ok', patch: { _tag: TAG_XANH } },
+        { id: 'tag_vang', label: 'Cần xác minh', count: fmtInt(tags.vang), tone: 'warn', patch: { _tag: TAG_VANG } },
+        { id: 'tag_cam', label: 'Bẫy DM93', count: fmtInt(tags.cam), tone: 'danger', patch: { _tag: TAG_CAM } },
+        { id: 'tag_xam', label: 'Đã hết hạn', count: fmtInt(tags.xam), tone: 'neutral', patch: { _tag: TAG_XAM } },
       ],
     },
     {
@@ -417,6 +459,7 @@ export function computeDavCompound(items, total) {
         { id: 'new_3m', label: '3 th', count: fmtInt(new3), tone: 'ok', patch: { _quick: 'new_3m' } },
         { id: 'new_6m', label: '6 th', count: fmtInt(new6), tone: 'warn', patch: { _quick: 'new_6m' } },
         { id: 'new_12m', label: '12 th', count: fmtInt(new12), tone: 'neutral', patch: { _quick: 'new_12m' } },
+        { id: 'expire_6m', label: 'Sắp hết hạn', count: fmtInt(expireSoon), tone: 'danger', patch: { _quick: 'expire_6m' } },
       ],
     },
   ]
@@ -464,17 +507,12 @@ export function computeMscTenderCompound(items, total) {
   let openVal = 0
   let big50t = 0
   let small10t = 0
-  let under50m = 0
-  let over50m = 0
-  const tiers = { so: 0, tw: 0, bv: 0 }
-  const buyers = new Set()
+  let matchExact = 0
+  let matchNear = 0
 
   for (const r of rows) {
     const { stage, isOpen } = mscTenderStage(r, now)
     const bp = num(r.bid_price ?? r.bidPrice) ?? 0
-    const tier = buyerTier(r.buyer)
-    tiers[tier] += 1
-    if (r.buyer) buyers.add(String(r.buyer).trim())
 
     if (stage === 'open') openN += 1
     else if (stage === 'review') reviewN += 1
@@ -485,19 +523,28 @@ export function computeMscTenderCompound(items, total) {
       openVal += bp
       if (bp >= 50e9) big50t += 1
       if (bp > 0 && bp < 10e9) small10t += 1
+      if (r.baoan_match === 'exact') matchExact += 1
+      else if (r.baoan_match === 'near') matchNear += 1
     }
-    if (bp > 0 && bp < 50e6) under50m += 1
-    else if (bp >= 50e6) over50m += 1
-    else under50m += 1
   }
 
-  const n = rows.length || 1
-  const bondN = under50m + over50m || 1
-  const freePct = Math.round((under50m / n) * 100)
   const highlightOpen = openN + newN + closingN
   const pipelineN = highlightOpen + reviewN || 1
 
   return [
+    {
+      key: 'baoan_match',
+      scope: 'live',
+      title: 'Khớp danh mục Bảo An',
+      mainValue: fmtInt(matchExact),
+      unit: 'gói khớp',
+      subtitle: note,
+      titleTip: 'Gói đang mời thầu có đầu thuốc trùng hoạt chất, dạng bào chế và hàm lượng với danh mục Bảo An. Gói vừa khớp vừa gần khớp vẫn tính là khớp.',
+      subMetrics: [
+        { id: 'match_exact', label: 'Khớp', count: fmtInt(matchExact), tone: 'ok', patch: { _quick: 'match_exact' } },
+        { id: 'match_near', label: 'Gần khớp', count: fmtInt(matchNear), tone: 'warn', patch: { _quick: 'match_near' } },
+      ],
+    },
     {
       key: 'pipeline',
       scope: 'fixed',
@@ -521,7 +568,7 @@ export function computeMscTenderCompound(items, total) {
     {
       key: 'budget',
       scope: 'fixed',
-      title: 'Ngân sách mời thầu (đang mở)',
+      title: 'Tổng giá gói đang mời thầu',
       mainValue: fmtMoney(openVal),
       unit: 'đ',
       subtitle: note,
@@ -530,49 +577,528 @@ export function computeMscTenderCompound(items, total) {
         { id: 'small_10t', label: 'Gói <10 Tỷ', count: fmtInt(small10t), tone: 'ok', patch: { _quick: 'small_10t' } },
       ],
     },
-    {
-      key: 'bond',
-      scope: 'fixed',
-      title: 'Miễn bảo lãnh NH',
-      mainValue: `${freePct}%`,
-      unit: 'gói ≤50 Tr',
-      subtitle: note,
-      subMetrics: [
-        { id: 'under_50m', label: '≤50 Tr', count: fmtInt(under50m), tone: 'ok', patch: { _quick: 'under_50m' } },
-        { id: 'over_50m', label: '>50 Tr', count: fmtInt(over50m), tone: 'warn', patch: { _quick: 'over_50m' } },
-      ],
-      segments: [
-        { key: 'u', pct: (under50m / bondN) * 100, color: '#22c55e' },
-        { key: 'o', pct: (over50m / bondN) * 100, color: '#f59e0b' },
-      ],
-    },
-    {
-      key: 'tier',
-      scope: 'fixed',
-      title: 'Cấp mời thầu',
-      mainValue: fmtInt(buyers.size),
-      unit: 'CĐT',
-      subtitle: note,
-      subMetrics: [
-        { id: 'tier_so', label: 'Sở Y tế', count: fmtInt(tiers.so), tone: 'ok', patch: { _quick: 'tier_so' } },
-        { id: 'tier_tw', label: 'TW / Bộ', count: fmtInt(tiers.tw), tone: 'warn', patch: { _quick: 'tier_tw' } },
-        { id: 'tier_bv', label: 'BV tự mua', count: fmtInt(tiers.bv), tone: 'neutral', patch: { _quick: 'tier_bv' } },
-      ],
-      segments: [
-        { key: 'so', pct: (tiers.so / n) * 100, color: '#0d9488' },
-        { key: 'tw', pct: (tiers.tw / n) * 100, color: '#2563eb' },
-        { key: 'bv', pct: (tiers.bv / n) * 100, color: '#d97706' },
-      ],
-    },
   ]
 }
 
-export function MscTenderMetrics({ items, total, cards: cardsProp, activeId, onFilter, loading }) {
+export function DualLineChart({ series = [] }) {
+  const [hover, setHover] = useState(null)
+  const W = 1100
+  const H = 300
+  const left = 86
+  const right = 78
+  const top = 16
+  const bottom = 36
+  const innerW = W - left - right
+  const innerH = H - top - bottom
+  const qtyMax = Math.max(1, ...series.map((p) => Number(p.qty) || 0))
+  const revMax = Math.max(1, ...series.map((p) => Number(p.revenue) || 0))
+  const xAt = (i) => (series.length <= 1 ? left + innerW / 2 : left + (i * innerW) / (series.length - 1))
+  const yQty = (v) => top + innerH - ((Number(v) || 0) / qtyMax) * innerH
+  const yRev = (v) => top + innerH - ((Number(v) || 0) / revMax) * innerH
+  const line = (key, yFn) => series.map((p, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)},${yFn(p[key]).toFixed(1)}`).join(' ')
+  const area = (key, yFn) => {
+    if (!series.length) return ''
+    const base = top + innerH
+    return `${line(key, yFn)} L${xAt(series.length - 1).toFixed(1)},${base} L${xAt(0).toFixed(1)},${base} Z`
+  }
+  const ticks = [0, 0.5, 1]
+  const point = hover != null ? series[hover] : null
+  const onMove = (event) => {
+    if (!series.length) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = ((event.clientX - rect.left) / rect.width) * W
+    let best = 0
+    let dist = Infinity
+    series.forEach((_, i) => {
+      const gap = Math.abs(xAt(i) - x)
+      if (gap < dist) {
+        dist = gap
+        best = i
+      }
+    })
+    setHover(best)
+  }
+  return (
+    <div className="stock-chart">
+      <div className="stock-legend">
+        <span><i className="rev" /> Doanh thu (SL × đơn giá)</span>
+        <span><i className="qty" /> Số lượng</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        role="img"
+        aria-label="Biến động số lượng và doanh thu"
+        onMouseMove={onMove}
+        onMouseLeave={() => setHover(null)}
+      >
+        <defs>
+          <linearGradient id="revFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#0b7285" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#0b7285" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="qtyFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#e8590c" stopOpacity="0.16" />
+            <stop offset="100%" stopColor="#e8590c" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {ticks.map((t) => {
+          const y = top + innerH - t * innerH
+          return (
+            <g key={t}>
+              <line x1={left} x2={W - right} y1={y} y2={y} className="stock-grid" />
+              <text x={left - 8} y={y + 4} className="stock-tick rev" textAnchor="end">{fmtMoney(revMax * t)}</text>
+              <text x={W - right + 8} y={y + 4} className="stock-tick qty" textAnchor="start">{fmtCompact(qtyMax * t)}</text>
+            </g>
+          )
+        })}
+        <line x1={left} x2={left} y1={top} y2={top + innerH} className="stock-axis" />
+        <line x1={W - right} x2={W - right} y1={top} y2={top + innerH} className="stock-axis" />
+        <path d={area('revenue', yRev)} fill="url(#revFill)" />
+        <path d={area('qty', yQty)} fill="url(#qtyFill)" />
+        <path d={line('revenue', yRev)} className="stock-line rev" />
+        <path d={line('qty', yQty)} className="stock-line qty" />
+        {series.map((p, i) => (
+          <text key={p.key || p.label} x={xAt(i)} y={H - 8} className="stock-month" textAnchor="middle">{p.label}</text>
+        ))}
+        {point && (
+          <g>
+            <line x1={xAt(hover)} x2={xAt(hover)} y1={top} y2={top + innerH} className="stock-cross" />
+            <circle cx={xAt(hover)} cy={yRev(point.revenue)} r="4.5" className="stock-dot rev" />
+            <circle cx={xAt(hover)} cy={yQty(point.qty)} r="4.5" className="stock-dot qty" />
+          </g>
+        )}
+      </svg>
+      {point && (
+        <div
+          className={`stock-tip${(xAt(hover) / W) > 0.78 ? ' align-end' : (xAt(hover) / W) < 0.22 ? ' align-start' : ''}`}
+          style={{ left: `${(xAt(hover) / W) * 100}%` }}
+        >
+          <strong>{point.label}</strong>
+          <span className="rev">Doanh thu {fmtMoney(point.revenue)}</span>
+          <span className="qty">Số lượng {fmtInt(point.qty)}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function heatTone(yoy, share) {
+  if (yoy == null) return `rgba(100, 116, 139, ${0.12 + Math.min(share, 40) / 80})`
+  const mag = Math.min(1, Math.abs(yoy) / 40)
+  if (yoy >= 0) return `rgba(22, 163, 74, ${0.16 + mag * 0.7})`
+  return `rgba(220, 38, 38, ${0.16 + mag * 0.7})`
+}
+
+function padProvinceCode(code) {
+  const key = String(code || '').trim()
+  if (!key) return ''
+  return /^\d+$/.test(key) ? key.padStart(2, '0') : key
+}
+
+function heatmapProvince(p) {
+  const code = padProvinceCode(p?.code)
+  const raw = String(p?.name || '').trim()
+  const official = provinceNameFromCode(code)
+  const bad = !raw || /^tỉnh mã|^tinh ma/i.test(raw)
+  return { name: official || (bad ? 'Chưa xác định tỉnh' : raw), code }
+}
+
+export function VssHeatmap({ provinces = [], loading = false, onPick, activeCodes = [] }) {
+  const cells = provinces || []
+  const selected = new Set((Array.isArray(activeCodes) ? activeCodes : [activeCodes]).map(padProvinceCode).filter(Boolean))
+  return (
+    <aside className={`vss-heat${loading ? ' is-loading' : ''}`} aria-label="Heatmap giá trị trúng thầu theo tỉnh">
+      <header className="metric-head">
+        <div>
+          <p className="metric-kicker">BHYT VSS</p>
+          <h2>Giá trị trúng thầu theo tỉnh</h2>
+          <p className="metric-lead">12 tháng so với cùng kỳ năm trước. Màu theo mức tăng hoặc giảm. Bấm để chọn tỉnh; nhấp đúp để bỏ chọn.</p>
+        </div>
+        <div className="vss-heat-legend" aria-hidden="true">
+          <span><i className="up" /> Tăng</span>
+          <span><i className="down" /> Giảm</span>
+          <span><i className="flat" /> Chưa có cùng kỳ</span>
+        </div>
+      </header>
+      {loading && <p className="metric-lead">Đang tính lại theo bộ lọc…</p>}
+      <div className="vss-heat-grid">
+        {cells.map((p) => {
+          const shown = heatmapProvince(p)
+          const on = selected.has(shown.code)
+          const yoyClass = p.yoy == null ? 'flat' : p.yoy < 0 ? 'neg' : 'pos'
+          return (
+            <button
+              key={p.key || shown.code || shown.name}
+              type="button"
+              className={`vss-heat-cell${on ? ' is-on' : ''}`}
+              style={{ background: heatTone(p.yoy, p.share || 0) }}
+              aria-label={`${shown.name}${shown.code ? `, mã ${shown.code}` : ''}, ${fmtMoney(p.value)}, ${p.yoy == null ? 'chưa có cùng kỳ' : fmtPct(p.yoy)}`}
+              aria-pressed={on}
+              title={`${shown.name}: ${fmtVnd(p.value)} · ${p.yoy == null ? 'Chưa có cùng kỳ' : fmtPct(p.yoy)}`}
+              onClick={() => onPick?.(p)}
+              onDoubleClick={() => onPick?.(null)}
+              onKeyDown={(e) => { if (e.key === 'Escape') onPick?.(null) }}
+            >
+              <strong className="vss-heat-name">{shown.name}</strong>
+              {shown.code ? <small className="vss-heat-code">Mã {shown.code}</small> : <small className="vss-heat-code">Không có mã</small>}
+              <em className="vss-heat-value">{fmtMoney(p.value)}</em>
+              <span className={`vss-heat-yoy ${yoyClass}`}>{p.yoy == null ? 'Chưa có cùng kỳ' : fmtPct(p.yoy)}</span>
+            </button>
+          )
+        })}
+      </div>
+      {!cells.length && <p className="empty">{loading ? 'Đang tính heatmap…' : 'Chưa có tỉnh trong cửa sổ này.'}</p>}
+    </aside>
+  )
+}
+
+/** @param {{slices?: Array<{key: string, label: string, color: string, value: number}>, label?: string}} props */
+export function ShareBar({ slices = [], label = 'Cơ cấu' }) {
+  const total = slices.reduce((sum, slice) => sum + (Number(slice.value) || 0), 0)
+  return (
+    <div className="share-bar" aria-label={label}>
+      {total <= 0
+        ? <span className="share-bar-empty" title="Chưa có số liệu" />
+        : slices.map((slice) => {
+          const share = (Number(slice.value) || 0) / total
+          if (share <= 0) return null
+          return (
+            <span
+              key={slice.key}
+              style={{ width: `${share * 100}%`, background: slice.color }}
+              title={`${slice.label}: ${Math.round(share * 100)}%`}
+            />
+          )
+        })}
+    </div>
+  )
+}
+
+export function GroupShareBar({ groups = [] }) {
+  return (
+    <ShareBar
+      label="Cơ cấu nhóm 1 đến 5"
+      slices={GROUP_COLORS.map((color, index) => ({
+        key: `n${index + 1}`,
+        label: `Nhóm ${index + 1}`,
+        color,
+        value: Number(groups[index]) || 0,
+      }))}
+    />
+  )
+}
+
+function trendAnchorIndexes(count, width) {
+  const slots = Math.max(2, Math.floor((width || 280) / 44))
+  if (count <= slots) return Array.from({ length: count }, (_, index) => index)
+  const chosen = new Set([0, count - 1])
+  const inner = Math.max(0, slots - 2)
+  for (let step = 1; step <= inner; step += 1) {
+    chosen.add(Math.round((step * (count - 1)) / (inner + 1)))
+  }
+  return [...chosen].sort((a, b) => a - b)
+}
+
+function provinceShort(name) {
+  const text = String(name || '').trim()
+  const tail = text.replace(/^(thành phố|tỉnh|tp\.?)\s+/iu, '').trim()
+  return tail || text
+}
+
+function trendRangeLabel(series) {
+  if (!series.length) return 'Xu hướng tháng'
+  const start = series[0].label || series[0].key
+  const end = series[series.length - 1].label || series[series.length - 1].key
+  return start && end && start !== end ? `Xu hướng tháng ${start} – ${end}` : 'Xu hướng tháng'
+}
+
+function MonthTrend({ series = [] }) {
+  const [hover, setHover] = useState(null)
+  const boxRef = useRef(null)
+  const [width, setWidth] = useState(280)
+  useEffect(() => {
+    const node = boxRef.current
+    if (!node) return undefined
+    const measure = () => setWidth(node.clientWidth || 280)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [series.length])
+  const values = series.map((point) => Number(point.revenue) || 0)
+  const max = Math.max(1, ...values)
+  const count = series.length
+  if (!count) return <p className="price-strip-empty">Chưa có tháng có dữ liệu.</p>
+  const xAt = (index) => ((index + 0.5) / count) * 100
+  const yAt = (value) => 3 + (1 - (Number(value) || 0) / max) * 32
+  const line = values.map((value, index) => `${index ? 'L' : 'M'}${xAt(index).toFixed(2)},${yAt(value).toFixed(2)}`).join(' ')
+  const area = `${line} L${xAt(count - 1).toFixed(2)},36 L${xAt(0).toFixed(2)},36 Z`
+  const anchors = trendAnchorIndexes(count, width)
+  const anchorSet = new Set(anchors)
+  const point = hover != null ? series[hover] : null
+  const dots = hover != null && !anchorSet.has(hover) ? [...anchors, hover] : anchors
+  return (
+    <div className="price-trend" ref={boxRef} onMouseLeave={() => setHover(null)}>
+      <p className="price-trend-tip">{point ? `${point.label || point.key} · ${fmtMoney(point.revenue)}` : '\u00a0'}</p>
+      <div className="price-trend-plot">
+        <svg viewBox="0 0 100 38" preserveAspectRatio="none" role="img" aria-label="Xu hướng doanh thu theo tháng">
+          {hover != null && (
+            <line
+              x1={xAt(hover)}
+              x2={xAt(hover)}
+              y1="1"
+              y2="36"
+              className="price-trend-grid is-on"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+          <line x1="0" x2="100" y1="36" y2="36" className="price-trend-axis" vectorEffect="non-scaling-stroke" />
+          <path d={area} className="price-trend-area" />
+          <path d={line} className="price-trend-line" vectorEffect="non-scaling-stroke" />
+        </svg>
+        {dots.map((index) => (
+          <i
+            key={series[index].key}
+            className={hover === index ? 'price-trend-dot is-on' : 'price-trend-dot'}
+            style={{ left: `${xAt(index)}%`, top: `${(yAt(values[index]) / 38) * 100}%` }}
+          />
+        ))}
+      </div>
+      <div className="price-trend-months" style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}>
+        {series.map((item, index) => {
+          const marked = anchorSet.has(index)
+          const year = item.key.slice(0, 4)
+          const prevAnchor = anchors.filter((at) => at < index).pop()
+          const showYear = marked && (index === 0 || year !== series[prevAnchor ?? 0].key.slice(0, 4))
+          return (
+            <span
+              key={item.key}
+              className={hover === index ? 'is-on' : ''}
+              onMouseEnter={() => setHover(index)}
+            >
+              {marked && <b>{item.label || item.key}</b>}
+              {marked && <small>{showYear ? year.slice(2) : '\u00a0'}</small>}
+            </span>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ProvinceRank({ title, note, rows, loading, empty, renderValue, onPick, active = '' }) {
+  return (
+    <div className="price-strip-top">
+      <span>{title}</span>
+      {note && <small>{note}</small>}
+      <ol>
+        {rows.map((row, index) => (
+          <li
+            key={row.name}
+            className={active === row.name ? 'is-on' : ''}
+            title={`${row.name}. Nhấp đúp để lọc bảng theo tỉnh này.`}
+            onDoubleClick={() => onPick?.(row.name)}
+          >
+            <span className="price-rank">{index + 1}</span>
+            <strong><b>{provinceShort(row.name)}</b></strong>
+            {renderValue(row)}
+          </li>
+        ))}
+        {!rows.length && <li className="price-strip-empty">{loading ? 'Đang tính…' : empty}</li>}
+      </ol>
+    </div>
+  )
+}
+
+export function MscPriceSlice({ view, loading, onProvince, activeProvince = '' }) {
+  const top = (view?.topProvinces || []).slice(0, 6)
+  const groups = Array.isArray(view?.groups) ? view.groups : []
+  const groupTotal = groups.reduce((sum, value) => sum + (Number(value) || 0), 0)
+  const months = Number(view?.months) || 12
+  const yoyClass = view?.yoy == null ? 'flat' : view.yoy < 0 ? 'neg' : 'pos'
+  return (
+    <aside className={`price-strip${loading ? ' is-loading' : ''}`} aria-label="Chỉ số đơn giá">
+      <div className="price-strip-kpi">
+        <span>Doanh thu {months} tháng</span>
+        <strong>{fmtMoney(view?.revenue)}</strong>
+        <em className={yoyClass}>{view?.yoy == null ? 'Chưa có cùng kỳ' : `${fmtPct(view.yoy)} cùng kỳ`}</em>
+        <div className="price-strip-share">
+          <span>Nhóm 1–5</span>
+          <GroupShareBar groups={groups} />
+          <ol className="share-legend">
+            {GROUP_COLORS.map((color, index) => {
+              const value = Number(groups[index]) || 0
+              const pct = groupTotal > 0 ? Math.round((value / groupTotal) * 100) : 0
+              return (
+                <li key={color}>
+                  <i style={{ background: color }} />
+                  N{index + 1}
+                  <em>{pct}%</em>
+                </li>
+              )
+            })}
+          </ol>
+        </div>
+      </div>
+      <div className="price-strip-trend">
+        <span>{trendRangeLabel(view?.series || [])}</span>
+        <MonthTrend series={view?.series || []} />
+        {view?.coverage && <small className="price-coverage" role="status">{view.coverage.from ? `Đã tải: ${view.coverage.from} – ${view.coverage.to} · ${fmtInt(view.coverage.records)} dòng.` : 'Chưa có dữ liệu theo bộ lọc.'} {!view.coverage.previousRecords && ' Chưa có dữ liệu cùng kỳ năm trước; cần bổ sung lịch sử MSC để tính tăng trưởng.'}</small>}
+      </div>
+      <ProvinceRank
+        title="Top doanh thu tỉnh"
+        rows={top}
+        loading={loading}
+        empty="Chưa có tỉnh trong cửa sổ này."
+        onPick={onProvince}
+        active={activeProvince}
+        renderValue={(row) => <em>{fmtMoney(row.value)}</em>}
+      />
+    </aside>
+  )
+}
+
+function ExcelDownload({ label, busy, onClick }) {
+  return (
+    <button type="button" className="match-excel" aria-label={label} title={label} disabled={busy} onClick={(event) => { event.stopPropagation(); onClick() }}>
+      <svg className="excel-mark" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+        <rect x="1" y="1" width="14" height="14" rx="2" fill="#217346" />
+        <path d="M4.2 11.2 6.7 8 4.2 4.8h2.1L8 7.1l1.7-2.3h2.1L9.3 8l2.5 3.2H9.7L8 8.9l-1.7 2.3H4.2z" fill="#fff" />
+      </svg>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14" />
+      </svg>
+    </button>
+  )
+}
+
+const MATCH_EXCEL_HINT = 'Cam: đóng thầu trong 3 ngày. Xanh: trong 7 ngày.'
+
+export function MscTenderSlice({ view, loading, activeId, onFilter, onExportMatch }) {
+  const exact = view?.matchExact || 0
+  const near = view?.matchNear || 0
+  const [busy, setBusy] = useState('')
+  const [exportNote, setExportNote] = useState('')
+  const runExport = async (level) => {
+    if (!onExportMatch || busy) return
+    setBusy(level)
+    setExportNote('')
+    try {
+      const count = await onExportMatch(level)
+      setExportNote(count ? `Đã tải ${Number(count).toLocaleString('vi-VN')} dòng thuốc.` : 'Không có dòng khớp để xuất.')
+    } catch (error) {
+      setExportNote(error?.message || 'Chưa tải được file Excel.')
+    } finally {
+      setBusy('')
+    }
+  }
+  return (
+    <aside className={`metric-stage tender-board${loading ? ' is-loading' : ''}`} aria-label="Chỉ số gói thầu">
+      <header className="metric-head">
+        <div>
+          <p className="metric-kicker">Gói thầu thuốc</p>
+          <h2>Ba chỉ số đang mời thầu</h2>
+          <p className="metric-lead">12 tháng. Khớp khi hoạt chất, dạng bào chế và hàm lượng trùng danh mục Bảo An. Gói vừa khớp vừa gần khớp vẫn tính là khớp.</p>
+        </div>
+      </header>
+      <div className="tender-grid">
+        <section className={`tender-card is-lead${activeId === 'match_exact' || activeId === 'match_near' ? ' on' : ''}`}>
+          <div className="tender-match-head">
+            <div>
+              <p className="metric-kicker">Ưu tiên</p>
+              <h3>Khớp danh mục Bảo An</h3>
+            </div>
+            {onExportMatch && (
+              <ExcelDownload
+                label={`Tải Excel mọi đầu thuốc khớp và gần khớp. ${MATCH_EXCEL_HINT}`}
+                busy={!!busy}
+                onClick={() => runExport('all')}
+              />
+            )}
+          </div>
+          <div className="tender-match">
+            <div className={`match-stat exact${activeId === 'match_exact' ? ' on' : ''}`}>
+              <button
+                type="button"
+                title={metricHelp({ id: 'match_exact' })}
+                className="match-stat-hit"
+                onClick={() => onFilter?.({ _quick: 'match_exact' }, 'match_exact')}
+              >
+                <span className="match-dot exact" aria-hidden="true">!</span>
+                <strong>{fmtInt(exact)}</strong>
+                <span>Có đầu thuốc khớp!</span>
+              </button>
+              {onExportMatch && (
+                <ExcelDownload
+                  label={`Tải Excel đầu thuốc khớp. ${MATCH_EXCEL_HINT}`}
+                  busy={!!busy}
+                  onClick={() => runExport('exact')}
+                />
+              )}
+            </div>
+            <div className={`match-stat near${activeId === 'match_near' ? ' on' : ''}`}>
+              <button
+                type="button"
+                title={metricHelp({ id: 'match_near' })}
+                className="match-stat-hit"
+                onClick={() => onFilter?.({ _quick: 'match_near' }, 'match_near')}
+              >
+                <span className="match-dot near" aria-hidden="true">!</span>
+                <strong>{fmtInt(near)}</strong>
+                <span>Có đầu thuốc gần khớp</span>
+              </button>
+              {onExportMatch && (
+                <ExcelDownload
+                  label={`Tải Excel đầu thuốc gần khớp. ${MATCH_EXCEL_HINT}`}
+                  busy={!!busy}
+                  onClick={() => runExport('near')}
+                />
+              )}
+            </div>
+          </div>
+          <p className="metric-lead">Đang mời thầu · đã đối chiếu {fmtInt(view?.cached || 0)} hồ sơ. {view?.uncached > 0 ? `Còn ${fmtInt(view.uncached)} gói chưa có danh mục.` : ''} Bấm để lọc bảng.</p>
+          {exportNote && <p className="metric-lead" role="status">{exportNote}</p>}
+        </section>
+        <section className="tender-card">
+          <p className="metric-kicker">Giá trị</p>
+          <h3>Tổng giá gói đang mời thầu</h3>
+          <strong className="tender-figure">{fmtMoney(view?.openValue)}</strong>
+          <p className="metric-lead">{fmtInt(view?.openCount)} gói đang mở trong cửa sổ này.</p>
+        </section>
+        <section className="tender-card">
+          <p className="metric-kicker">Nhịp</p>
+          <h3>Nhịp gói đang mở</h3>
+          <ul className="tender-rhythm">
+            {[
+              ['open_all', 'Đang mở', view?.openCount],
+              ['new_72h', 'Mới 72 giờ', view?.newCount],
+              ['closing_7d', 'Sắp đóng', view?.closingCount],
+              ['reviewing', 'Đang xét', view?.reviewCount],
+            ].map(([id, label, count]) => <li key={id}><button type="button" aria-pressed={activeId === id} className={activeId === id ? 'on' : ''} title={metricHelp({ id, label })} onClick={() => onFilter?.({ _quick: id }, id)}><span>{label}</span><strong>{fmtInt(count)}</strong><span aria-hidden="true">↗</span></button></li>)}
+          </ul>
+        </section>
+      </div>
+    </aside>
+  )
+}
+
+export function MscTenderMetrics({ items, total, cards: cardsProp, activeId, onFilter, loading, slice, onExportMatch }) {
   const cards = useMemo(
     () => (cardsProp?.length ? cardsProp : computeMscTenderCompound(items, total)),
     [cardsProp, items, total],
   )
   const flash = useFlashKey(`${cardsProp ? 'api' : items?.length}|${cards[0]?.mainValue}`)
+  if (slice) {
+    return (
+      <MscTenderSlice
+        view={slice}
+        loading={loading}
+        activeId={activeId}
+        onFilter={onFilter}
+        onExportMatch={onExportMatch}
+      />
+    )
+  }
   const note = cardsProp?.length
     ? (cards[0]?.subtitle || `từ đầu năm ${METRICS_YEAR}`)
     : sampleNote(scopeMscMetricsRows(items), total, { yearFrom: METRICS_YEAR })
@@ -913,7 +1439,7 @@ export function computeMscPriceCompound(items, total, { onExploreProvinces } = {
   ]
 }
 
-export function MscPriceMetrics({ items, total, cards: cardsProp, provincesYoy, activeId, onFilter, loading }) {
+export function MscPriceMetrics({ items, total, cards: cardsProp, provincesYoy, activeId, onFilter, loading, slice }) {
   const [explore, setExplore] = useState(false)
   const scoped = useMemo(() => scopeMscMetricsRows(items), [items])
   const cards = useMemo(() => {
@@ -938,6 +1464,17 @@ export function MscPriceMetrics({ items, total, cards: cardsProp, provincesYoy, 
   const note = cardsProp?.length
     ? (cards[0]?.subtitle || `từ đầu năm ${METRICS_YEAR}`)
     : sampleNote(scoped, total, { yearFrom: METRICS_YEAR })
+  if (slice) {
+    const activeProvince = String(activeId || '').startsWith('prov:') ? String(activeId).slice(5) : ''
+    return (
+      <MscPriceSlice
+        view={slice}
+        loading={loading}
+        activeProvince={activeProvince}
+        onProvince={(name) => onFilter?.({ province: [name] }, `prov:${name}`)}
+      />
+    )
+  }
   return (
     <>
       <CompoundMetricsGrid
@@ -1298,9 +1835,10 @@ export function computeVssCompound(items, total, { onExploreProvinces } = {}) {
 }
 
 export function provinceName(row) {
-  const name = String(row.ten_tinh || '').trim()
+  const raw = String(row.ten_tinh || '').trim()
   const code = String(row.ma_tinh || '').trim()
-  return name || (code ? `Tỉnh mã ${code}` : 'Chưa xác định tỉnh')
+  if (raw && !/^tỉnh mã|^tinh ma/i.test(raw)) return raw
+  return provinceNameFromCode(code) || 'Chưa xác định tỉnh'
 }
 
 export function buildProvinceTable(rows) {
@@ -1374,10 +1912,11 @@ function ProvinceExploreModal({ open, onClose, rows, rankedRows, total, loading,
   </Modal>
 }
 
-export function VssMetrics({ items, total, cards: cardsProp, provinces, activeId, onFilter, loading }) {
+export function VssMetrics({ items, total, cards: cardsProp, provinces, activeId, onFilter, loading, notice, heatmap, onPickProvince, activeCodes }) {
   const [explore, setExplore] = useState(false)
   const scoped = useMemo(() => scopeVssMetricsRows(items), [items])
   const cards = useMemo(() => {
+    if (notice || loading) return cardsProp?.length ? cardsProp : []
     const base = cardsProp?.length
       ? cardsProp
       : computeVssCompound(items, total, { onExploreProvinces: () => setExplore(true) })
@@ -1392,11 +1931,27 @@ export function VssMetrics({ items, total, cards: cardsProp, provinces, activeId
         ),
       }
       : c))
-  }, [cardsProp, items, total])
+  }, [cardsProp, items, total, notice, loading])
   const flash = useFlashKey(`${cardsProp ? 'api' : scoped.length}|${cards[0]?.mainValue}`)
   const note = cardsProp?.length
     ? (cards[0]?.subtitle || `từ đầu năm ${METRICS_YEAR}`)
     : sampleNote(scoped, total, { years: VSS_METRICS_YEARS })
+  if (heatmap || onPickProvince) {
+    return (
+      <>
+        {notice && <p className="info-note">{notice}</p>}
+        <VssHeatmap provinces={heatmap || []} loading={loading} onPick={onPickProvince} activeCodes={activeCodes} />
+      </>
+    )
+  }
+  if (notice) {
+    return (
+      <aside className="filters-stats compound-panel" aria-label="Chỉ số BHYT VSS">
+        <div className="insight-title">BHYT VSS</div>
+        <p className="info-note">{notice}</p>
+      </aside>
+    )
+  }
   return (
     <>
       <CompoundMetricsGrid
@@ -1434,10 +1989,13 @@ export function applyMetricQuick(rows, quick, kind) {
       if (quick === 'open_dxt' || quick === 'open_empty') return stage === 'open'
       if (quick === 'reviewing') return stage === 'review'
       if (quick === 'closing_7d') return stage === 'closing'
-      if (quick === 'new_72h') return stage === 'new'
+      if (quick === 'new_72h') { const pub = parseDateMs(r.published); return isOpen && pub != null && now - pub >= 0 && now - pub < 72 * 3600000 }
+      if (quick === 'open_all') return isOpen
       if (quick === 'open_later') return stage === 'open'
       if (quick === 'big_50t') return isOpen && bp >= 50e9
       if (quick === 'small_10t') return isOpen && bp > 0 && bp < 10e9
+      if (quick === 'match_exact') return isOpen && r.baoan_match === 'exact'
+      if (quick === 'match_near') return isOpen && r.baoan_match === 'near'
       if (quick === 'under_50m') return bp < 50e6
       if (quick === 'over_50m') return bp >= 50e6
       if (quick === 'tier_so') return buyerTier(r.buyer) === 'so'
@@ -1453,6 +2011,10 @@ export function applyMetricQuick(rows, quick, kind) {
       if (quick === 'new_3m') return age != null && age >= 0 && age <= 3 * MONTH_MS
       if (quick === 'new_6m') return age != null && age >= 0 && age <= 6 * MONTH_MS
       if (quick === 'new_12m') return age != null && age >= 0 && age <= 12 * MONTH_MS
+      if (quick === 'expire_6m') {
+        const left = r.monthsLeft != null ? Number(r.monthsLeft) : monthsLeft(r.ngayHetHan)
+        return left != null && left >= 0 && left <= 6
+      }
       return true
     })
   }

@@ -12,7 +12,7 @@ from pathlib import Path
 from .common import (
     DAV_DB, DM93_PATH, VN, fold, load_status, normalize_dosage_form,
     normalize_ingredient_token, normalize_strength, parse_date, split_ingredients,
-    update_status, years_between, now_iso,
+    update_status, years_between, now_iso, read_metadata, configure_sqlite,
 )
 
 _dm93_cache = None
@@ -36,6 +36,7 @@ def connect():
     con = sqlite3.connect(DAV_DB, timeout=30)
     con.row_factory = sqlite3.Row
     con.create_function("fold", 1, fold)
+    configure_sqlite(con)
     return con
 
 
@@ -379,10 +380,13 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
     if tags_set is not None and len(tags_set) == 0:
         con = connect()
         try:
-            total_db = con.execute("SELECT count(*) FROM drugs").fetchone()[0]
+            total_db = read_metadata(con, "dav_total") or 0
         finally:
             con.close()
-        return {"total": 0, "page": max(0, int(page)), "size": max(1, min(5000, int(size))), "items": [], "dbTotal": total_db}
+        return {
+            "total": None, "page": max(0, int(page)), "size": max(1, min(5000, int(size))),
+            "hasMore": False, "items": [], "dbTotal": total_db,
+        }
 
     need_group = any([dosage_n, strength_n])
     # Fast path: SQL prefilter on FTS-ish search column (broad), then precise match on flatten()
@@ -396,10 +400,11 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
             args.append(f"%{word}%")
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    page = max(0, int(page))
+    size = max(1, min(5000, int(size)))
     con = connect()
     try:
-        total_db = con.execute("SELECT count(*) FROM drugs").fetchone()[0]
-        rows = con.execute("SELECT raw FROM drugs" + where, args).fetchall()
+        total_db = read_metadata(con, "dav_total") or 0
     finally:
         con.close()
 
@@ -437,31 +442,30 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
         except ValueError:
             return True
 
-    results = []
-    for (raw,) in rows:
+    def row_matches(raw):
         rec = json.loads(raw)
         flat = flatten(rec)
         # Reliable text match on flattened fields (json_extract paths can miss variants)
         if ten and ten not in fold(flat.get("tenThuoc") or ""):
-            continue
+            return None
         if sdk and sdk not in fold(f"{flat.get('soDangKy') or ''} {flat.get('soDangKyCu') or ''}"):
-            continue
+            return None
         if hc and not all(w in fold(flat.get("hoatChat") or "") for w in hc.split()):
-            continue
+            return None
         if dang and dang not in fold(flat.get("dangBaoChe") or ""):
-            continue
+            return None
         if sx and sx not in fold(flat.get("ctySanXuat") or ""):
-            continue
+            return None
         if dk and dk not in fold(flat.get("ctyDangKy") or ""):
-            continue
+            return None
         if nuoc and nuoc not in fold(flat.get("nuocSanXuat") or ""):
-            continue
+            return None
         if con_hieu_luc and flat["soDangKy"] not in validity:
-            continue
+            return None
         if tags_set is not None and flat.get("tagId") not in tags_set:
-            continue
+            return None
         if ingredient_n and not match_count(flat["ingredientCount"], ingredient_n, ingredient_other):
-            continue
+            return None
         if need_group:
             key = fold(flat["hoatChat"]) or "__empty__"
             g = group_stats.get(key, {"sdk": set(), "forms": set(), "strengths": set()})
@@ -469,27 +473,51 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
             flat["groupFormCount"] = len(g["forms"])
             flat["groupStrengthCount"] = len(g["strengths"])
             if not match_count(flat["groupFormCount"], dosage_n, dosage_other):
-                continue
+                return None
             if not match_count(flat["groupStrengthCount"], strength_n, strength_other):
-                continue
-        results.append(flat)
+                return None
+        return flat
 
-    # Newest issuance first (ngày cấp)
-    results.sort(
-        key=lambda f: str(f.get("ngayCap") or f.get("ngayGiaHan") or f.get("ngayHetHan") or ""),
-        reverse=True,
-    )
-
-    total = len(results)
-    page = max(0, int(page))
-    size = max(1, min(5000, int(size)))
+    # Stored rows leave raw.ngayCap empty (the date lives in ngayCapSoDangKy).
+    # json_extract sort scans every blob; the id primary key is enough for page 0.
+    order_sql = " ORDER BY id DESC"
     start = page * size
-    slice_ = results[start: start + size]
+    target = start + size + 1
+    matched = []
+    batch = 400
+    sql_at = 0
+    con = connect()
+    try:
+        while len(matched) < target:
+            # drugs is (id, raw, search). flatten() needs the stored document; there is no display column to narrow to.
+            rows = con.execute(
+                "SELECT raw FROM drugs" + where + order_sql + " LIMIT ? OFFSET ?",
+                args + [batch, sql_at],
+            ).fetchall()
+            if not rows:
+                break
+            for (raw,) in rows:
+                flat = row_matches(raw)
+                if flat is not None:
+                    matched.append(flat)
+                    if len(matched) >= target:
+                        break
+            if len(rows) < batch:
+                break
+            sql_at += batch
+    finally:
+        con.close()
+
+    has_more = len(matched) > start + size
+    exact_total = not any([
+        q, ten, sdk, hc, dang, sx, dk, nuoc, con_hieu_luc, ingredient_n, need_group,
+    ]) and tags_set is None
     return {
-        "total": total,
+        "total": int(total_db) if exact_total else None,
         "page": page,
         "size": size,
-        "items": slice_,
+        "hasMore": has_more,
+        "items": matched[start:start + size],
         "dbTotal": total_db,
     }
 
@@ -500,7 +528,7 @@ def meta_info() -> dict:
         return info
     con = connect()
     try:
-        info["count"] = con.execute("SELECT count(*) FROM drugs").fetchone()[0]
+        info["count"] = read_metadata(con, "dav_total") or 0
         for key in ("updated", "complete", "skip", "total"):
             row = con.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
             if row:
@@ -533,8 +561,18 @@ def start_crawl(restart: bool = False) -> dict:
             update_status("dav", state="running", progress=1, message="Kết nối DAV…", updated=now_iso())
             _downloader = drug_tool.Downloader(report)
             _downloader.run(restart=restart)
+            try:
+                from .stored_metrics import refresh_dav
+                refresh_dav()
+            except Exception as metric_error:
+                report(f"Đã tải danh mục, chưa làm mới chỉ số: {metric_error}")
             info = meta_info()
-            update_status("dav", state="idle", progress=100, message="Hoàn tất", updated=now_iso(), count=info["count"])
+            count = int(info.get("count") or 0)
+            source = int(info.get("sourceTotal") or 0)
+            note = f"Hoàn tất · {count:,} bản ghi"
+            if source and source != count:
+                note += f" · nguồn {source:,}"
+            update_status("dav", state="idle", progress=100, message=note, updated=now_iso(), count=count)
         except Exception as e:
             update_status("dav", state="error", message=str(e), updated=now_iso())
 

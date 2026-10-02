@@ -20,7 +20,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
             <span className="kicker">Cục Quản lý Dược · dichvucong.dav.gov.vn</span>
             <h1>Tra cứu thuốc DAV</h1>
             <p>
-              Danh mục số đăng ký — tag trạng thái SĐK, khớp danh mục 93 / TT20, nhấp kính lúp để copy tên
+              Danh mục số đăng ký — tag trạng thái SĐK, khớp danh mục 93, nhấp kính lúp để copy tên
               thuốc và mở trang công bố.
             </p>
           </div>
@@ -43,7 +43,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
                 onRetry={controller.retryMetrics}
                 items={controller.metricsItems}
                 cards={controller.metricsCards}
-                total={controller.metricsTotal ?? controller.metricsSample?.length ?? controller.data.total}
+                total={controller.metricsTotal ?? controller.metricsSample?.length ?? controller.data.total ?? 0}
                 activeId={controller.metricActiveId}
                 onFilter={controller.onMetricFilter}
                 loading={

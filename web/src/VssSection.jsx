@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, matchesYear, sortByDateDesc } from './api'
-import { cloudMetrics, cloudVssSearch, supabaseConfigured } from './supabaseCloud'
-import { useAuth } from './auth'
+import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, matchesYear, SHORT_SEARCH_NOTE, skipShortTextSearch, sortByDateDesc } from './api'
+import { cloudSuggest, cloudVssSearch, cloudCount, cloudMap, supabaseConfigured } from './supabaseCloud'
+import { loadSuggestStatic } from './suggestClient'
+import { FilterDraft } from './filterDraft'
 import {
-  DataTable, DetailModal, ErrorNote, Field, FilterModal, HospitalGradeField, Icons, MultiSelectField,
+  DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, Modal, MultiSelectField,
   IngredientText, LoadingOverlay, Pagination, SuggestField, TableToolbar, UpdatedNote,
   applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters, useSectionMeta,
-  useSelection, useLoadProgress, useTt20, } from './components'
-import { ingredientAllowedAtGrade } from './tt20'
-import { loadUserJson, saveUserJson, userKeyPart } from './userPrefs'
-import { VssMetrics, applyMetricQuick, VSS_METRICS_YEARS } from './metrics'
+  useSelection, useLoadProgress, } from './components'
+import { StatCards } from './areaStats'
+import { applyMetricQuick } from './metrics'
 
 const PAGE_SIZE_DEFAULT = 100
-const METRICS_CAP = 80_000
+const VSS_TEXT_KEYS = ['q', 'hoatchat', 'sodk']
 
 const toNum = (v) => {
   if (v == null || v === '') return ''
@@ -29,8 +29,9 @@ const ALL_COLS = [
   { key: 'sodk', label: 'Số ĐK', mono: true, nowrap: true },
   { key: 'ten', label: 'Tên thuốc', width: 160, truncateAt: 72 },
   { key: 'duongdung', label: 'Đường dùng', filter: 'select' },
+  { key: 'dangbaoche', label: 'Dạng bào chế', filter: 'select', truncateAt: 48 },
   { key: 'hamluong', label: 'Hàm lượng', truncateAt: 64 },
-  { key: 'donvitinh', label: 'ĐVT', filter: 'select' },
+  { key: 'donvitinh', label: 'ĐVT', width: 65, filter: 'select' },
   { key: 'soluong', label: 'Số lượng', align: 'right', mono: true, text: (r) => toNum(r.soluong), render: (v) => fmtNum(v) },
   { key: 'gia', label: 'Giá', align: 'right', mono: true, text: (r) => toNum(r.gia), render: (v) => fmtNum(v) },
   { key: 'thanhtien', label: 'Thành tiền', align: 'right', mono: true, text: (r) => toNum(r.thanhtien), render: (v) => fmtNum(v) },
@@ -38,7 +39,7 @@ const ALL_COLS = [
   { key: 'nhasx', label: 'Nhà SX', width: 170, truncateAt: 72 },
   { key: 'nuocsx', label: 'Nước SX', filter: 'select' },
   { key: 'ma_tinh', label: 'Mã tỉnh', mono: true, filter: 'select' },
-  { key: 'ten_tinh', label: 'Tỉnh / TP', filter: 'select' },
+  { key: 'ten_tinh', label: 'Tỉnh / TP', width: 130, filter: 'select' },
   { key: 'ma_cskcb', label: 'Mã CSKCB', mono: true },
   { key: 'tungay_hd', label: 'Từ ngày HĐ', nowrap: true, text: (r) => fmtDate(r.tungay_hd), render: (v) => fmtDate(v) },
   { key: 'denngay_hd', label: 'Đến ngày HĐ', nowrap: true, text: (r) => fmtDate(r.denngay_hd), render: (v) => fmtDate(v) },
@@ -62,7 +63,7 @@ const EMPTY_FILTERS = {
   tuNgay: '', denNgay: '', nam: [], duongdung: [], ma_tinh: [], ten_tinh: [], nuocsx: [], hangBenhVien: [],
 }
 
-function filterStatic(items, f, tt20Index) {
+function filterStatic(items, f) {
   let out = items
   if ((f.q || '').trim()) {
     out = out.filter((r) => containsWords(`${r.ten} ${r.hoatchat} ${r.sodk} ${r.nhasx} ${r.tennhathau} ${r.ten_cskcb} ${r.ten_tinh}`, f.q))
@@ -77,32 +78,63 @@ function filterStatic(items, f, tt20Index) {
   }
   if (f.tuNgay) out = out.filter((r) => String(r.tungay_hd || '') >= f.tuNgay)
   if (f.denNgay) out = out.filter((r) => String(r.denngay_hd || '') <= `${f.denNgay} 23:59:59`)
-  const grades = Array.isArray(f.hangBenhVien) ? f.hangBenhVien : (f.hangBenhVien ? [f.hangBenhVien] : [])
-  if (grades.length) {
-    out = out.filter((r) => grades.some((g) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, g)))
-  }
   return sortByDateDesc(out, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd', 'created_date'])
 }
 
+function VssFieldGrid({ draft, setF, placeOpts, fieldSuggest, onCommit }) {
+  return (
+    <div
+      className="filter-grid tight cols-4"
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' || e.nativeEvent?.isComposing) return
+        if (e.target?.tagName === 'BUTTON') return
+        if (e.target?.closest?.('.multi-select')) return
+        onCommit()
+      }}
+    >
+      <SuggestField label="Hoạt chất" value={draft.hoatchat} onChange={(v) => setF('hoatchat', v)} onSearch={(v) => onCommit({ hoatchat: v })} suggest={fieldSuggest('hoatchat')} />
+      <SuggestField label="Số ĐK" value={draft.sodk} onChange={(v) => setF('sodk', v)} onSearch={(v) => onCommit({ sodk: v })} suggest={fieldSuggest('sodk')} />
+      <MultiSelectField
+        label="Nhóm thầu"
+        value={draft.nhomthau}
+        onChange={(v) => setF('nhomthau', v)}
+        options={['N1', 'N2', 'N3', 'N4', 'N5']}
+      />
+      <MultiSelectField label="Đường dùng" value={draft.duongdung} onChange={(v) => setF('duongdung', v)} suggest={fieldSuggest('duongdung')} placeholder="Chọn đường dùng…" />
+      <MultiSelectField label="Tỉnh / TP" value={draft.ten_tinh} onChange={(v) => setF('ten_tinh', v)} options={placeOpts.ten_tinh} placeholder="Chọn tỉnh…" />
+      <MultiSelectField
+        label="Năm hiệu lực"
+        value={draft.nam}
+        onChange={(v) => setF('nam', v)}
+        options={Array.from({ length: 4 }, (_, i) => String(new Date().getFullYear() - i))}
+        placeholder="Chọn năm…"
+      />
+      <Field label="HĐ từ ngày"><input type="date" value={draft.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
+      <Field label="HĐ đến ngày"><input type="date" value={draft.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
+      <MultiSelectField label="Nước sản xuất" value={draft.nuocsx} onChange={(v) => setF('nuocsx', v)} suggest={fieldSuggest('nuocsx')} placeholder="Chọn nước…" />
+      <MultiSelectField label="Loại thầu" value={draft.loai_thau} onChange={(v) => setF('loai_thau', v)} suggest={fieldSuggest('loai_thau')} placeholder="vd: thau_tinh…" />
+      <MultiSelectField label="Mã tỉnh" value={draft.ma_tinh} onChange={(v) => setF('ma_tinh', v)} options={placeOpts.ma_tinh} placeholder="Chọn mã tỉnh…" />
+    </div>
+  )
+}
+
 export default function VssSection({ localMode, embedded = false, filtersInModal = false }) {
-  const { user } = useAuth()
-  const userId = userKeyPart(user)
-  const { index: tt20Index } = useTt20()
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(false)
   const [filterModalOpen, setFilterModalOpen] = useState(false)
+  const [compactFilters, setCompactFilters] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 900px)').matches)
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
   const [page, setPage] = useState(0)
   const [data, setData] = useState({ total: 0, items: [] })
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [exportAllOpen, setExportAllOpen] = useState(false)
   const [exportPct, setExportPct] = useState(0)
   const [err, setErr] = useState('')
   const [infoNote, setInfoNote] = useState('')
   const [detail, setDetail] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
-  const [prefsReady, setPrefsReady] = useState(false)
   const [loadPct, setLoadPct] = useState(null)
   const [metricsTotal, setMetricsTotal] = useState(null)
   const [metricsSample, setMetricsSample] = useState(null)
@@ -112,32 +144,33 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const [tableReady, setTableReady] = useState(false)
   const [metricActiveId, setMetricActiveId] = useState(null)
   const [metricQuick, setMetricQuick] = useState(null)
+  const [cardKey, setCardKey] = useState('')
+  const [cardStats, setCardStats] = useState(null)
+  const [cardError, setCardError] = useState('')
+  const modalFilters = filtersInModal || compactFilters
   const sim = useLoadProgress(loading, 'Đang lọc BHYT VSS', loadPct)
   const sel = useSelection()
   const reqSeq = useRef(0)
   const sawTableLoad = useRef(false)
   useEffect(() => () => { reqSeq.current += 1 }, [])
+  useEffect(() => {
+    const media = window.matchMedia?.('(max-width: 900px)')
+    if (!media) return undefined
+    const apply = () => setCompactFilters(media.matches)
+    apply()
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [])
   const meta = useSectionMeta('vss', localMode, null, refreshKey)
 
-  useEffect(() => {
-    const saved = loadUserJson(userId, 'vss', 'session', null)
-    if (saved && typeof saved === 'object') {
-      if (saved.filters) setFilters({ ...EMPTY_FILTERS, ...saved.filters })
-      if (saved.columnFilters) setColumnFilters(saved.columnFilters)
-    }
-    setPrefsReady(true)
-  }, [userId])
-
-  useEffect(() => {
-    if (!prefsReady) return
-    saveUserJson(userId, 'vss', 'session', { filters, columnFilters })
-  }, [userId, prefsReady, filters, columnFilters])
 
   const cols = ALL_COLS
 
   const filtersRef = useRef(filters)
   const columnFiltersRef = useRef(columnFilters)
   const pageSizeRef = useRef(pageSize)
+  const pageRef = useRef(0)
+  const cursorRef = useRef(null)
   filtersRef.current = filters
   columnFiltersRef.current = columnFilters
   pageSizeRef.current = pageSize
@@ -151,39 +184,43 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     const id = ++reqSeq.current
     const stale = () => id !== reqSeq.current
     const size = resolvePageSize(pageSizeRef.current)
+    const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
+    setCardKey(JSON.stringify({
+      hoatchat: active.hoatchat || '',
+      ma_tinh: active.ma_tinh || [],
+      ten_tinh: active.ten_tinh || [],
+      nhomthau: active.nhomthau || [],
+      q: active.q || '',
+    }))
+    if (skipShortTextSearch(active, VSS_TEXT_KEYS, { ...EMPTY_FILTERS, loai: 'Tân dược' })) {
+      setInfoNote(SHORT_SEARCH_NOTE)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setErr('')
     setInfoNote('')
-    const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
     try {
       const useRemote = localMode || supabaseConfigured
       if (useRemote) {
-        const needGrade = Array.isArray(active.hangBenhVien)
-          ? active.hangBenhVien.length > 0
-          : !!active.hangBenhVien
+        const sequential = p === pageRef.current + 1
+        const cursor = !localMode && sequential ? cursorRef.current : null
         const searchFn = localMode
           ? (page, sz) => api.vssSearch({ filters: active, page, size: sz })
-          : (page, sz) => cloudVssSearch({ filters: active, page, size: sz })
-
-        if (needGrade) {
-          const allRaw = await fetchAllPages(searchFn, {
-            size: Math.max(size, 400),
-            onProgress: (pct) => { if (!stale()) setLoadPct(pct) },
-          })
-          if (stale()) return
-          let items = allRaw
-          const grades = Array.isArray(active.hangBenhVien)
-            ? active.hangBenhVien
-            : (active.hangBenhVien ? [active.hangBenhVien] : [])
-          items = items.filter((r) => grades.some((g) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, g)))
-          items = sortByDateDesc(items, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd'])
-          setData({ total: items.length, items, page: 0, size: items.length || size })
-          setPage(0)
-        } else {
-          const res = await searchFn(p, size)
-          if (stale()) return
-          setData(res)
-          setPage(p)
+          : (page, sz, nextCursor) => cloudVssSearch({ filters: active, page, size: sz, cursor: nextCursor })
+        const res = await searchFn(p, size, cursor)
+        if (stale()) return
+        pageRef.current = p
+        cursorRef.current = res.nextCursor || null
+        setData(res)
+        setPage(p)
+        if (!localMode && res.total == null) {
+          cloudCount('vss', active)
+            .then((total) => {
+              if (stale() || total == null) return
+              setData((prev) => ({ ...prev, total }))
+            })
+            .catch(() => {})
         }
         return
       }
@@ -198,95 +235,77 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         setRefreshKey((k) => k + 1)
       }
     }
-  }, [localMode, mergedFilters, tt20Index, embedded])
+  }, [localMode, mergedFilters, embedded])
 
   // Metrics: cloud aggregate after first table paint; local page-backfill
   useEffect(() => {
-    if (!prefsReady || embedded) return
+    if (embedded) return
     if (loading) sawTableLoad.current = true
     else if (sawTableLoad.current) setTableReady(true)
-  }, [prefsReady, embedded, loading])
+  }, [embedded, loading])
 
   useEffect(() => {
-    if (!prefsReady || embedded || !tableReady) return undefined
-    if (!(localMode || supabaseConfigured)) return undefined
-    let cancelled = false
-    setMetricsLoading(true)
-    const finish = () => { if (!cancelled) setMetricsLoading(false) }
-    if (!localMode) {
-      cloudMetrics('vss')
-        .then((payload) => {
-          if (cancelled || !payload) return
-          setMetricsCards(payload.cards || [])
-          setMetricsTotal(payload.total ?? payload.sampleSize ?? null)
-          setMetricsProvinces(payload.provinces || null)
-          setMetricsSample(null)
-        })
-        .catch(() => { if (!cancelled) { setMetricsCards(null); setMetricsSample([]) } })
-        .finally(finish)
-      return () => { cancelled = true }
-    }
-    const base = { loai: 'Tân dược', nam: VSS_METRICS_YEARS.map(String) }
-    const metricsFn = async (page, size) => {
-      const result = await api.vssSearch({ filters: base, page, size })
-      if (!cancelled) setMetricsTotal(result.total)
-      return result
-    }
-    fetchAllPages(metricsFn, { size: 500, cap: METRICS_CAP, shouldCancel: () => cancelled })
-      .then((all) => { if (!cancelled) { setMetricsSample(all); setMetricsCards(null) } })
-      .catch(() => { if (!cancelled) setMetricsSample([]) })
-      .finally(finish)
-    return () => { cancelled = true }
-  }, [prefsReady, localMode, embedded, tableReady])
-
-  useEffect(() => {
-    if (!prefsReady) return
     search(0)
-  }, [prefsReady, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const setF = (k, v) => setFilters((f) => ({ ...f, [k]: v }))
+  useEffect(() => {
+    if (embedded || !cardKey) return undefined
+    let cancelled = false
+    const filters = JSON.parse(cardKey)
+    setCardError('')
+    const load = localMode ? api.metricsMap : cloudMap
+    load({
+      source: 'vss',
+      months: 12,
+      dots: false,
+      ingredients: false,
+      filters,
+    })
+      .then((payload) => { if (!cancelled) setCardStats(payload?.summary && payload.summary.value != null ? payload.summary : null) })
+      .catch((err) => { if (!cancelled) setCardError(String(err?.message || err || 'Chưa tính được số liệu.')) })
+    return () => { cancelled = true }
+  }, [localMode, embedded, cardKey])
+
+  const draftRef = useRef(null)
+  const applyDraft = useCallback((override) => {
+    const next = draftRef.current?.commit(override) || { ...filtersRef.current, ...(override || {}) }
+    filtersRef.current = { ...next, loai: 'Tân dược' }
+    setFilters(filtersRef.current)
+    search(0)
+  }, [search])
+  const clearDraft = useCallback(() => {
+    draftRef.current?.reset(EMPTY_FILTERS)
+    filtersRef.current = EMPTY_FILTERS
+    setFilters(EMPTY_FILTERS)
+    setColumnFilters({})
+    search(0, {}, EMPTY_FILTERS)
+  }, [search])
   const setCF = (k, v) => setColumnFilters((f) => ({ ...f, [k]: v }))
   const runSearch = useCallback((override) => search(0, undefined, override || null), [search])
-  const onEnter = (e) => {
-    if (e.key === 'Enter' && !e.nativeEvent?.isComposing) runSearch()
-  }
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
-  const detailActive = ['duongdung', 'ma_tinh', 'ten_tinh', 'nuocsx', 'hangBenhVien', 'loai_thau', 'nhomthau', 'hoatchat', 'sodk', 'tuNgay', 'denNgay', 'nam']
-    .filter((k) => {
-      const v = filters[k]
-      if (Array.isArray(v)) return v.length > 0
-      return String(v ?? '').trim() !== ''
-    }).length
+
+  const [placeOpts, setPlaceOpts] = useState({ ten_tinh: [], ma_tinh: [] })
+  useEffect(() => {
+    loadSuggestStatic()
+      .then((doc) => setPlaceOpts({
+        ten_tinh: doc?.vss?.ten_tinh || [],
+        ma_tinh: doc?.vss?.ma_tinh || [],
+      }))
+      .catch(() => {})
+  }, [])
 
   const fieldSuggest = useCallback((fieldKey) => async (q) => {
     const needle = String(q || '').trim()
+    if (needle.length < 2) return []
     try {
-      let items = []
-      if (localMode || supabaseConfigured) {
-        const filters = needle
-          ? { ...mergedFilters(), [fieldKey]: needle, q: '' }
-          : { ...mergedFilters(), q: '' }
-        const res = localMode
-          ? await api.vssSearch({ filters, page: 0, size: needle ? 40 : 80 })
-          : await cloudVssSearch({ filters, page: 0, size: needle ? 40 : 80 })
-        items = res?.items || []
+      if (localMode) {
+        const res = await api.suggest('vss', fieldKey, needle)
+        return (res?.items || []).filter(Boolean).slice(0, 8)
       }
-      const seen = new Set()
-      const out = []
-      for (const r of items) {
-        const t = String(
-          fieldKey === 'q'
-            ? (r.hoatchat || r.ten || r.sodk || '')
-            : (r[fieldKey] || ''),
-        ).trim()
-        if (!t || seen.has(t)) continue
-        seen.add(t)
-        out.push(t)
-        if (out.length >= (needle ? 8 : 12)) break
-      }
-      return out
+      if (!supabaseConfigured) return []
+      return cloudSuggest('vss', fieldKey, needle)
     } catch { return [] }
-  }, [localMode, mergedFilters])
+  }, [localMode])
 
   const rows = useMemo(() => {
     let list = applyColumnFilters(data.items, cols, columnFilters)
@@ -320,21 +339,19 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const fetchAll = useCallback(async () => {
     const searchFn = localMode
       ? (p, size) => api.vssSearch({ filters: mergedFilters(), page: p, size })
-      : (p, size) => cloudVssSearch({ filters: mergedFilters(), page: p, size })
+      : (p, size, cursor) => cloudVssSearch({ filters: mergedFilters(), page: p, size, cursor })
     if (!localMode && !supabaseConfigured) return []
-    const all = await fetchAllPages(searchFn, { onProgress: setExportPct })
-    if (filtersRef.current.hangBenhVien) {
-      return all.filter((r) => ingredientAllowedAtGrade(tt20Index, r.hoatchat, filtersRef.current.hangBenhVien))
-    }
-    return all
-  }, [localMode, mergedFilters, tt20Index, embedded])
+    return fetchAllPages(searchFn, { onProgress: setExportPct })
+  }, [localMode, mergedFilters, embedded])
 
-  const doExport = async () => {
+  const runExport = async (selectedRows) => {
+    setExportAllOpen(false)
+    setErr('')
     setExporting(true)
     setExportPct(5)
     try {
       const n = await exportSelectionOrAll({
-        columns: cols, selected: sel.selected, fetchAll, filename: 'VSS_BHYT_trung_thau', sheetName: 'VSS', columnFilters,
+        columns: cols, selected: selectedRows, fetchAll, filename: 'VSS_BHYT_trung_thau', sheetName: 'VSS', columnFilters,
       })
       if (!n) setErr('Không có dòng nào để xuất.')
     } catch (e) {
@@ -344,34 +361,14 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     }
   }
 
-  /** Shared fields keep single-view and pane filters consistent. */
-  const modalFilters = (
-    <div className="filter-grid">
-      <MultiSelectField
-        label="Nhóm thầu"
-        value={filters.nhomthau}
-        onChange={(v) => setF('nhomthau', v)}
-        options={['N1', 'N2', 'N3', 'N4', 'N5']}
-      />
-      <HospitalGradeField value={filters.hangBenhVien} onChange={(v) => setF('hangBenhVien', v)} />
-      <SuggestField label="Hoạt chất" value={filters.hoatchat} onChange={(v) => setF('hoatchat', v)} onSearch={(v) => runSearch({ hoatchat: v })} suggest={fieldSuggest('hoatchat')} />
-      <SuggestField label="Số ĐK" value={filters.sodk} onChange={(v) => setF('sodk', v)} onSearch={(v) => runSearch({ sodk: v })} suggest={fieldSuggest('sodk')} />
-      <MultiSelectField label="Loại thầu" value={filters.loai_thau} onChange={(v) => setF('loai_thau', v)} suggest={fieldSuggest('loai_thau')} placeholder="vd: thau_tinh…" />
-      <Field label="HĐ từ ngày"><input type="date" value={filters.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
-      <Field label="HĐ đến ngày"><input type="date" value={filters.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
-      <MultiSelectField
-        label="Năm hiệu lực"
-        value={filters.nam}
-        onChange={(v) => setF('nam', v)}
-        options={Array.from({ length: 4 }, (_, i) => String(new Date().getFullYear() - i))}
-        placeholder="Chọn năm…"
-      />
-      <MultiSelectField label="Đường dùng" value={filters.duongdung} onChange={(v) => setF('duongdung', v)} suggest={fieldSuggest('duongdung')} placeholder="Chọn đường dùng…" />
-      <MultiSelectField label="Tỉnh / TP" value={filters.ten_tinh} onChange={(v) => setF('ten_tinh', v)} suggest={fieldSuggest('ten_tinh')} placeholder="Chọn tỉnh…" />
-      <MultiSelectField label="Mã tỉnh" value={filters.ma_tinh} onChange={(v) => setF('ma_tinh', v)} suggest={fieldSuggest('ma_tinh')} placeholder="Chọn mã tỉnh…" />
-      <MultiSelectField label="Nước sản xuất" value={filters.nuocsx} onChange={(v) => setF('nuocsx', v)} suggest={fieldSuggest('nuocsx')} placeholder="Chọn nước…" />
-    </div>
-  )
+  const doExport = () => {
+    if (sel.size > 0) {
+      runExport(sel.selected)
+      return
+    }
+    setErr('')
+    setExportAllOpen(true)
+  }
 
   return (
     <div className={`section${embedded ? ' embedded' : ''}`}>
@@ -380,7 +377,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           <div>
             <span className="kicker">Bảo hiểm xã hội Việt Nam · Kết quả đấu thầu thuốc</span>
             <h1>Thuốc trúng thầu BHYT (VSS)</h1>
-            <p>Danh mục kết quả lựa chọn nhà thầu thuốc BHYT (Tân dược) — lọc theo nhóm thầu, hạng bệnh viện TT20, SĐK và thời hạn hợp đồng.</p>
+            <p>Danh mục kết quả lựa chọn nhà thầu thuốc BHYT (Tân dược) — lọc theo nhóm thầu, SĐK và thời hạn hợp đồng.</p>
           </div>
           <UpdatedNote updated={meta.updated} count={meta.count} />
         </header>
@@ -388,37 +385,61 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
       <div className="panel">
         <div className="filters">
-          <div className={`filters-split${embedded ? ' no-stats' : ''}`}>
-            <div className="filters-left">
-              {filtersInModal ? (
-                <div className="filter-keyword">
-                  <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" />
-                </div>
-              ) : (
-                <>
-                  <div className="filter-keyword">
-                    <SuggestField label="Từ khóa" value={filters.q} onChange={(v) => setF('q', v)} onSearch={(v) => runSearch({ q: v })} suggest={fieldSuggest('q')} placeholder="Tên · hoạt chất · SĐK · nhà thầu…" />
-                  </div>
-                  {modalFilters}
-                </>
-              )}
-              <div className="filter-actions">
-                {filtersInModal && (
-                  <button
-                    type="button"
-                    className={`btn ghost${detailActive ? ' on' : ''}`}
-                    onClick={() => setFilterModalOpen(true)}
-                  >
-                    {Icons.filter} Bộ lọc chi tiết
-                    {detailActive > 0 && <span className="pill">{detailActive}</span>}
-                  </button>
-                )}
-                <button type="button" className="btn" onClick={() => runSearch()}>{Icons.search} Tìm kiếm</button>
-                <button type="button" className="btn secondary" onClick={() => { setFilters(EMPTY_FILTERS); setColumnFilters({}) }}>Xóa lọc</button>
-              </div>
-            </div>
+          <div className={embedded ? 'vss-board' : 'vss-workspace'}>
+            <FilterDraft ref={draftRef} applied={filters}>
+              {(draft, setF) => {
+                const detailActive = ['duongdung', 'ma_tinh', 'ten_tinh', 'nuocsx', 'loai_thau', 'nhomthau', 'hoatchat', 'sodk', 'tuNgay', 'denNgay', 'nam']
+                  .filter((k) => {
+                    const v = draft[k]
+                    if (Array.isArray(v)) return v.length > 0
+                    return String(v ?? '').trim() !== ''
+                  }).length
+                return (
+                  <>
+                    <div className="filters-left compact-fields">
+                      {!modalFilters && (
+                        <VssFieldGrid draft={draft} setF={setF} placeOpts={placeOpts} fieldSuggest={fieldSuggest} onCommit={applyDraft} />
+                      )}
+                      <div className="filter-actions">
+                        {modalFilters && (
+                          <button
+                            type="button"
+                            className={`btn ghost${detailActive ? ' on' : ''}`}
+                            onClick={() => setFilterModalOpen(true)}
+                          >
+                            {Icons.filter} Bộ lọc chi tiết
+                            {detailActive > 0 && <span className="pill">{detailActive}</span>}
+                          </button>
+                        )}
+                        <button type="button" className="btn" onClick={() => applyDraft()}>{Icons.search} Tìm kiếm</button>
+                        <button type="button" className="btn secondary" onClick={clearDraft}>Xóa lọc</button>
+                      </div>
+                    </div>
+                    <FilterModal
+                      open={modalFilters && filterModalOpen}
+                      onClose={() => setFilterModalOpen(false)}
+                      onApply={() => applyDraft()}
+                    >
+                      <VssFieldGrid draft={draft} setF={setF} placeOpts={placeOpts} fieldSuggest={fieldSuggest} onCommit={applyDraft} />
+                    </FilterModal>
+                  </>
+                )
+              }}
+            </FilterDraft>
             {!embedded && (
-              <VssMetrics items={metricsItems} cards={metricsCards} provinces={metricsProvinces} total={metricsTotal ?? metricsSample?.length ?? data.total} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} />
+              <aside className="vss-side" aria-label="Chỉ số BHYT VSS">
+                {cardError && !cardStats
+                  ? <p className="info-note" role="status">{cardError}</p>
+                  : (
+                    <StatCards
+                      stats={cardStats}
+                      pending={!cardStats}
+                      months={12}
+                      showGroups={false}
+                      hideHeader
+                    />
+                  )}
+              </aside>
             )}
           </div>
         </div>
@@ -470,7 +491,8 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         <Pagination
           page={page}
           size={pageSizeNum}
-          total={data.total || 0}
+          total={data.total}
+          hasMore={data.hasMore}
           shown={rows.length}
           onPage={(p) => search(p)}
           pageSize={pageSize}
@@ -479,13 +501,21 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
         />
       </div>
 
-      <FilterModal
-        open={filtersInModal && filterModalOpen}
-        onClose={() => setFilterModalOpen(false)}
-        onApply={() => runSearch()}
+      <Modal
+        open={exportAllOpen}
+        onClose={() => setExportAllOpen(false)}
+        title="Xuất Excel"
+        width={460}
+        footer={(
+          <>
+            <div className="spacer" />
+            <button type="button" className="btn secondary" onClick={() => setExportAllOpen(false)}>Không</button>
+            <button type="button" className="btn" onClick={() => runExport(new Map())}>Xuất toàn bộ</button>
+          </>
+        )}
       >
-        {modalFilters}
-      </FilterModal>
+        <p style={{ margin: 0 }}>Bạn chưa chọn dòng nào. Bạn muốn xuất toàn bộ dữ liệu vừa tìm kiếm? File gồm sheet VSS và sheet Heatmap theo bộ lọc đang xem.</p>
+      </Modal>
 
       <DetailModal
         row={detail}

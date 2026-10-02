@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_TAG_CONFIGS, TAG_XANH, defaultSelectedTags, loadTagConfigs,
-  persistSelectedTags, saveTagLabel,
+  saveTagLabel,
 } from './tagConfig'
 
 /**
@@ -53,7 +53,6 @@ export function TagFilterDropdown({
 
   const commit = (ids) => {
     onChange(ids)
-    persistSelectedTags(ids, userId)
   }
 
   const toggle = (id) => {
@@ -220,12 +219,10 @@ export function useTagFilterState(userId) {
   const setTags = (ids) => {
     setSelectedTags(ids)
     setDraftTags(ids)
-    persistSelectedTags(ids, userId)
   }
 
   const commitDraft = () => {
     setSelectedTags(draftTags)
-    persistSelectedTags(draftTags, userId)
     return draftTags
   }
 

@@ -41,11 +41,6 @@ export const DEFAULT_TAG_CONFIGS = [
 ]
 
 const LS_LABELS = 'baoan.tagLabels.v1'
-const LS_SELECTED = 'baoan.tagSelected.v1'
-
-function selectedKey(userId) {
-  return userId ? `baoan.tagSelected.${userId}.v1` : LS_SELECTED
-}
 
 function labelsKey(userId) {
   return userId ? `baoan.tagLabels.${userId}.v1` : LS_LABELS
@@ -67,25 +62,8 @@ export function saveTagLabel(id, label, userId) {
   localStorage.setItem(labelsKey(userId), JSON.stringify(labels))
 }
 
-export function defaultSelectedTags(userId) {
-  try {
-    const raw = localStorage.getItem(selectedKey(userId))
-      || (!userId ? null : localStorage.getItem(LS_SELECTED))
-    if (raw) {
-      const arr = JSON.parse(raw)
-      // Legacy: only-green or empty → treat as "all tags" so search isn't silently limited
-      if (Array.isArray(arr) && arr.length) {
-        const all = DEFAULT_TAG_CONFIGS.map((t) => t.id)
-        if (arr.length === 1 && arr[0] === TAG_XANH) return all
-        return arr
-      }
-    }
-  } catch { /* ignore */ }
+export function defaultSelectedTags() {
   return DEFAULT_TAG_CONFIGS.filter((t) => t.defaultChecked).map((t) => t.id)
-}
-
-export function persistSelectedTags(ids, userId) {
-  try { localStorage.setItem(selectedKey(userId), JSON.stringify(ids)) } catch { /* ignore */ }
 }
 
 export function tagById(id, configs = DEFAULT_TAG_CONFIGS) {
