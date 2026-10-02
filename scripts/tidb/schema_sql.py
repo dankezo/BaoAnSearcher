@@ -10,6 +10,7 @@ SCHEMA_FILES = (
     ROOT / "tidb" / "002_perf_schema.sql",
     ROOT / "tidb" / "003_msc_fast_lookup.sql",
     ROOT / "tidb" / "004_data_registry_meta.sql",
+    ROOT / "tidb" / "005_msc_price_metric_rollup.sql",
 )
 
 

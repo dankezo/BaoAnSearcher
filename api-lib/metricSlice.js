@@ -20,22 +20,15 @@ function iso(date) {
   return `${y}-${m}-${d}`
 }
 
-function mondayKey(raw) {
-  const match = String(raw || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!match) return ''
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
-  const day = date.getDay()
-  const delta = day === 0 ? -6 : 1 - day
-  date.setDate(date.getDate() + delta)
-  return iso(date)
-}
-
-function addDays(key, days) {
-  const match = String(key).match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!match) return key
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
-  date.setDate(date.getDate() + days)
-  return iso(date)
+function monthlyKeys(from, to) {
+  const keys = []
+  const cursor = new Date(`${from.slice(0, 7)}-01T00:00:00`)
+  const last = new Date(`${to.slice(0, 7)}-01T00:00:00`)
+  while (cursor <= last) {
+    keys.push(iso(cursor).slice(0, 7))
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+  return keys
 }
 
 async function rowsOf(query, sql, args) {
@@ -69,9 +62,11 @@ export async function vssSlice(query, filters = {}, months = 12) {
   return { section: 'vss', months: payload.months || months, provinces, totalValue }
 }
 
-function priceWhere(filters, to) {
-  const clauses = ['published IS NOT NULL', 'published <= ?']
-  const args = [to]
+function priceWhere(filters, from, to) {
+  // Metric comparisons only need the current 12 months plus the matching
+  // previous period. Never read multi-year history for a filtered metric.
+  const clauses = ['published IS NOT NULL', 'published >= ?', 'published <= ?']
+  const args = [from, to]
   const like = [
     ['ingredient_f', filters.ingredient],
     ['name_f', filters.name],
@@ -91,13 +86,52 @@ function priceWhere(filters, to) {
   return { clauses, args }
 }
 
+function hasActivePriceFilters(filters = {}) {
+  return Object.entries(filters).some(([key, value]) => {
+    if (key === 'metricMonths' || key === 'metricQuick') return false
+    if (Array.isArray(value)) return value.some((item) => String(item || '').trim())
+    return String(value || '').trim() !== ''
+  })
+}
+
+async function mscPriceMetricRows(query, fromYm, toYm) {
+  const rows = await rowsOf(
+    query,
+    `SELECT ym, province, group_name, revenue, quantity AS qty, cnt
+       FROM agg_msc_price_monthly
+      WHERE ym >= ? AND ym <= ?
+      ORDER BY ym`,
+    [fromYm, toYm],
+  )
+  return rows.map((row) => ({ ...row, published: `${row.ym}-01` }))
+}
+
 export async function mscPriceSlice(query, filters = {}, months = 12) {
   const window = mapWindow(months)
   const to = iso(window.now)
-  const where = priceWhere(filters, to)
-  const rows = await rowsOf(
-    query,
-    `SELECT ${hint('msc_prices')}
+  const curFrom = iso(window.curFrom)
+  const prevFrom = iso(window.prevFrom)
+  let rows = null
+  let source = 'tiflash'
+
+  // The initial page has no filters. It uses the materialized monthly rollup,
+  // so opening MSC never runs an aggregation over the fact table.
+  if (!hasActivePriceFilters(filters)) {
+    try {
+      rows = await mscPriceMetricRows(query, prevFrom.slice(0, 7), to.slice(0, 7))
+      if (rows.length) source = 'rollup'
+      else rows = null
+    } catch {
+      // Migration may still be rolling out. The bounded TiFlash fallback keeps
+      // the existing page functional while the next sync materializes it.
+      rows = null
+    }
+  }
+  if (!rows) {
+    const where = priceWhere(filters, prevFrom, to)
+    rows = await rowsOf(
+      query,
+      `SELECT ${hint('msc_prices')}
       COALESCE(province, '') AS province,
       COALESCE(group_name, '') AS group_name,
       DATE_FORMAT(published, '%Y-%m-%d') AS published,
@@ -107,35 +141,21 @@ export async function mscPriceSlice(query, filters = {}, months = 12) {
     FROM msc_prices
     WHERE ${where.clauses.join(' AND ')}
     GROUP BY province, group_name, DATE_FORMAT(published, '%Y-%m-%d')`,
-    where.args,
-  )
-  const curFrom = iso(window.curFrom)
-  const prevFrom = iso(window.prevFrom)
+      where.args,
+    )
+  }
   const prevEnd = iso(window.prevEnd)
   const series = new Map()
-  const history = new Map()
   const provinces = new Map()
   const groups = [0, 0, 0, 0, 0]
   let prevRevenue = 0
-  let records = 0
   let previousRecords = 0
-  let minDate = ''
-  let maxDate = ''
+  let currentRecords = 0
   for (const row of rows) {
     const day = String(row.published || '').slice(0, 10)
     if (!day) continue
-    records += num(row.cnt)
-    if (!minDate || day < minDate) minDate = day
-    if (!maxDate || day > maxDate) maxDate = day
     const revenue = num(row.revenue)
     const qty = num(row.qty)
-    const week = mondayKey(day)
-    if (week && day <= to) {
-      const bucket = history.get(week) || { qty: 0, revenue: 0 }
-      bucket.qty += qty
-      bucket.revenue += revenue
-      history.set(week, bucket)
-    }
     const current = day >= curFrom && day <= to
     const previous = day >= prevFrom && day <= prevEnd
     if (previous) previousRecords += num(row.cnt)
@@ -143,6 +163,7 @@ export async function mscPriceSlice(query, filters = {}, months = 12) {
     const name = String(row.province || '').trim() || 'Chưa xác định tỉnh'
     const prov = provinces.get(name) || { name, value: 0, prev: 0 }
     if (current) {
+      currentRecords += num(row.cnt)
       prov.value += revenue
       const month = day.slice(0, 7)
       const point = series.get(month) || { key: month, label: `T${Number(day.slice(5, 7))}`, qty: 0, revenue: 0 }
@@ -156,24 +177,6 @@ export async function mscPriceSlice(query, filters = {}, months = 12) {
       prevRevenue += revenue
     }
     provinces.set(name, prov)
-  }
-  const filled = [...history.keys()].filter((key) => history.get(key).revenue || history.get(key).qty).sort()
-  const trend = []
-  if (filled.length) {
-    let cursor = filled[0]
-    const last = mondayKey(to) || filled[filled.length - 1]
-    while (cursor <= last) {
-      const bucket = history.get(cursor) || { qty: 0, revenue: 0 }
-      const [y, m, d] = cursor.split('-')
-      trend.push({
-        key: cursor,
-        label: `${Number(d)}/${Number(m)}`,
-        qty: bucket.qty,
-        revenue: bucket.revenue,
-        year: y,
-      })
-      cursor = addDays(cursor, 7)
-    }
   }
   const ranked = [...provinces.values()].map((row) => {
     let growth = 0
@@ -189,14 +192,20 @@ export async function mscPriceSlice(query, filters = {}, months = 12) {
     return b.value - a.value
   })
   const byValue = [...provinces.values()].sort((a, b) => b.value - a.value)
-  const points = [...series.values()].sort((a, b) => a.key.localeCompare(b.key))
+  const points = monthlyKeys(curFrom, to).map((key) => series.get(key) || {
+    key,
+    label: `T${Number(key.slice(5, 7))}`,
+    qty: 0,
+    revenue: 0,
+  })
   const revNow = points.reduce((sum, point) => sum + point.revenue, 0)
   const qtyNow = points.reduce((sum, point) => sum + point.qty, 0)
   const yoy = prevRevenue > 0 ? ((revNow - prevRevenue) / prevRevenue) * 100 : (revNow > 0 ? null : 0)
   return {
     section: 'msc_prices',
+    source,
     months: window.months,
-    series: trend,
+    series: points,
     topGrowth: ranked.slice(0, 3),
     topProvinces: byValue.slice(0, 6).map((row) => ({
       name: row.name,
@@ -210,9 +219,9 @@ export async function mscPriceSlice(query, filters = {}, months = 12) {
     prevRevenue,
     yoy,
     coverage: {
-      from: minDate || null,
-      to: maxDate || null,
-      records,
+      from: prevFrom,
+      to,
+      records: currentRecords,
       previousRecords,
     },
   }

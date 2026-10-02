@@ -66,7 +66,10 @@ class SchemaTests(unittest.TestCase):
         joined = "\n".join(statement for _name, statement in statements)
         self.assertIn("CREATE TABLE IF NOT EXISTS vss_bids", joined)
         self.assertIn("CREATE TABLE IF NOT EXISTS agg_vss_monthly", joined)
-        self.assertEqual(joined.count("SET TIFLASH REPLICA 1"), 4)
+        self.assertIn("CREATE TABLE IF NOT EXISTS agg_msc_price_monthly", joined)
+        # 002 enables all fact tables and 003 reasserts the MSC replica after
+        # its generated lookup columns are added.
+        self.assertEqual(joined.count("SET TIFLASH REPLICA 1"), 5)
         creates = [statement for _name, statement in statements if statement.startswith("CREATE TABLE IF NOT EXISTS vss_bids")]
         self.assertEqual(len(creates), 1)
         for _name, statement in statements:

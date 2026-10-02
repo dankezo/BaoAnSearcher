@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Apply tidb/001 then tidb/002. Default is a dry run and does not connect.
+"""Apply idempotent TiDB migrations. Default is a dry run and does not connect.
 
   python scripts/tidb/apply_schema.py
   python scripts/tidb/apply_schema.py --yes-remote
@@ -25,9 +25,9 @@ def describe() -> list[tuple[str, str]]:
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Apply TiDB schema 001 through 004.")
+    parser = argparse.ArgumentParser(description="Apply TiDB schema 001 through 005.")
     parser.add_argument("--yes-remote", action="store_true", help="Execute on the configured cluster.")
-    parser.add_argument("--only", choices=("001", "002", "003", "004"), help="Apply one idempotent migration only.")
+    parser.add_argument("--only", choices=("001", "002", "003", "004", "005"), help="Apply one idempotent migration only.")
     args = parser.parse_args()
     statements = describe()
     if args.only:
@@ -38,7 +38,7 @@ def main() -> None:
     tiflash = sum(1 for _name, statement in statements if "TIFLASH" in statement.upper())
     print(f"TiFlash statements: {tiflash}")
     if not args.yes_remote:
-        suffix = f" {args.only}" if args.only else " 001 through 004"
+        suffix = f" {args.only}" if args.only else " 001 through 005"
         print(f"TiDB unchanged. Pass --yes-remote to apply{suffix}.")
         return
     cfg = require_config()

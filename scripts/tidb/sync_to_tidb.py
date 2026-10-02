@@ -227,6 +227,37 @@ def _write_meta(conn, key_name: str, table: str) -> None:
     print(f"  {key_name}={total:,}")
 
 
+def refresh_msc_price_metric_rollup(conn) -> None:
+    """Refresh the small monthly metric table after an MSC price sync.
+
+    This is deliberately part of the ingestion job, never the web request
+    path.  The transaction makes readers observe either the previous complete
+    snapshot or the new complete snapshot, never an empty intermediate table.
+    """
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM agg_msc_price_monthly")
+        cur.execute(
+            """
+            INSERT INTO agg_msc_price_monthly
+                (ym, province, group_name, revenue, quantity, cnt)
+            SELECT DATE_FORMAT(published, '%Y-%m') AS ym,
+                   COALESCE(province, ''),
+                   COALESCE(group_name, ''),
+                   SUM(COALESCE(unit_price, 0) * COALESCE(quantity, 0)),
+                   SUM(COALESCE(quantity, 0)),
+                   COUNT(*)
+              FROM msc_prices
+             WHERE published IS NOT NULL
+             GROUP BY DATE_FORMAT(published, '%Y-%m'),
+                      COALESCE(province, ''), COALESCE(group_name, '')
+            """
+        )
+        cur.execute("SELECT COUNT(*) FROM agg_msc_price_monthly")
+        rows = int(cur.fetchone()[0])
+    conn.commit()
+    print(f"msc_price_metric_rollup refreshed: {rows:,} rows")
+
+
 def sync_vss(conn, state: dict, from_start: bool) -> int:
     stamp = file_stamp(VSS_DB)
     entry = {"stamp": stamp, "sent": 0} if from_start or stamp is None else resume_cursor(state, "vss_bids", stamp)
@@ -473,6 +504,7 @@ def run_remote(only: set[str], from_start: bool, prune: bool, prune_only: bool) 
                 if not from_start:
                     raise RuntimeError("--prune chỉ an toàn sau --from-start để có snapshot MSC đầy đủ.")
                 prune_msc_prices(conn)
+            refresh_msc_price_metric_rollup(conn)
         if "tenders" in only:
             _sync_msc(conn, state, from_start, "tenders", "msc_tenders", MSC_TENDER_COLUMNS, build_msc_tender_row)
         if "rollup" in only:

@@ -11,6 +11,7 @@ import {
   vssRollupSql,
   vssTiflashSql,
 } from '../api-lib/metricsRollup.js'
+import { mscPriceSlice } from '../api-lib/metricSlice.js'
 
 const FACTS = ['vss_bids', 'dav_drugs', 'msc_prices', 'msc_tenders']
 
@@ -88,4 +89,26 @@ test('an empty rollup falls back to TiFlash SQL', async () => {
   assert.equal(payload.source, 'tiflash')
   assert.ok(calls.every((sql) => sql.includes('READ_FROM_STORAGE(TIFLASH[dav_drugs])')))
   assert.ok(calls.every((sql) => !sql.includes('vss_bids')))
+})
+
+test('MSC price default metric reads the monthly rollup and returns twelve monthly points', async () => {
+  const calls = []
+  const payload = await mscPriceSlice(async (sql) => {
+    calls.push(sql)
+    assert.match(sql, /FROM agg_msc_price_monthly/)
+    return {
+      rows: [
+        { ym: '2025-11', province: 'Hà Nội', group_name: 'Nhóm 1', revenue: '10', qty: '2', cnt: 1 },
+        { ym: '2026-10', province: 'Hà Nội', group_name: 'Nhóm 1', revenue: '20', qty: '3', cnt: 2 },
+      ],
+    }
+  }, {}, 12)
+  assert.equal(payload.source, 'rollup')
+  assert.equal(payload.series.length, 12)
+  assert.equal(payload.series[0].key, '2025-11')
+  assert.equal(payload.series.at(-1).key, '2026-10')
+  assert.equal(payload.revenue, 30)
+  assert.equal(payload.quantity, 5)
+  assert.equal(calls.length, 1)
+  assert.ok(calls.every((sql) => !sql.includes('FROM msc_prices')))
 })

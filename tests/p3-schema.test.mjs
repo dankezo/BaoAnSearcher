@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const sql = readFileSync(new URL('../tidb/002_perf_schema.sql', import.meta.url), 'utf8')
+const mscMetricSql = readFileSync(new URL('../tidb/005_msc_price_metric_rollup.sql', import.meta.url), 'utf8')
 
 test('P3 schema keeps typed values, raw text, fold columns, rollup, and TiFlash', () => {
   for (const needle of [
@@ -31,4 +32,12 @@ test('P3 schema keeps typed values, raw text, fold columns, rollup, and TiFlash'
   }
   assert.equal(sql.includes('CREATE TABLE msc_records'), false)
   assert.equal(sql.includes('ALTER TABLE msc_records'), false)
+})
+
+test('MSC price metric rollup has a compact month and dimension key', () => {
+  for (const needle of [
+    'CREATE TABLE IF NOT EXISTS agg_msc_price_monthly',
+    'PRIMARY KEY (ym, province, group_name)',
+    'idx_agg_msc_price_monthly_ym',
+  ]) assert.ok(mscMetricSql.includes(needle), needle)
 })
