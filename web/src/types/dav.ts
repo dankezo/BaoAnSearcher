@@ -14,6 +14,7 @@ export interface DrugItem {
   ngayGiaHan?: string | null
   ngayHetHan?: string | null
   hoatChat?: string | null
+  drugGroup?: string | null
   hamLuong?: string | null
   dangBaoChe?: string | null
   dongGoi?: string | null
@@ -34,6 +35,7 @@ export interface DavFilters {
   tenThuoc: string
   soDangKy: string
   hoatChat: string
+  drugGroup: string[]
   dangBaoChe: string
   sanXuat: string
   dangKy: string

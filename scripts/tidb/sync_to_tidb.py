@@ -258,6 +258,38 @@ def refresh_msc_price_metric_rollup(conn) -> None:
     print(f"msc_price_metric_rollup refreshed: {rows:,} rows")
 
 
+def refresh_dav_registration_counts(conn) -> None:
+    """Materialize distinct SĐK per folded active ingredient for the DAV filter."""
+    with conn.cursor() as cur:
+        cur.execute("UPDATE dav_drugs SET registration_count = NULL")
+        cur.execute(
+            """
+            UPDATE dav_drugs AS d
+            JOIN (
+                SELECT hoat_chat_f,
+                       COUNT(DISTINCT NULLIF(TRIM(so_dang_ky), '')) AS registration_count
+                  FROM dav_drugs
+                 WHERE NULLIF(TRIM(COALESCE(hoat_chat_f, '')), '') IS NOT NULL
+                 GROUP BY hoat_chat_f
+            ) AS grouped ON grouped.hoat_chat_f = d.hoat_chat_f
+               SET d.registration_count = grouped.registration_count
+            """
+        )
+        cur.execute("DELETE FROM suggest_values WHERE section = 'dav' AND field = 'drugGroup'")
+        cur.execute(
+            """
+            INSERT INTO suggest_values (section, field, value, cnt)
+            SELECT 'dav', 'drugGroup', drug_group, COUNT(*)
+              FROM dav_drugs
+             WHERE NULLIF(TRIM(COALESCE(drug_group, '')), '') IS NOT NULL
+             GROUP BY drug_group
+            ON DUPLICATE KEY UPDATE cnt = VALUES(cnt)
+            """
+        )
+    conn.commit()
+    print("dav registration_count refreshed")
+
+
 def sync_vss(conn, state: dict, from_start: bool) -> int:
     stamp = file_stamp(VSS_DB)
     entry = {"stamp": stamp, "sent": 0} if from_start or stamp is None else resume_cursor(state, "vss_bids", stamp)
@@ -350,6 +382,7 @@ def sync_dav(conn, state: dict, from_start: bool) -> int:
     finally:
         con.close()
     _write_meta(conn, "dav_total", "dav_drugs")
+    refresh_dav_registration_counts(conn)
     print(f"dav done {sent:,}")
     return sent
 
@@ -434,38 +467,41 @@ def sync_jsonl(conn, state: dict, from_start: bool, key: str, path: Path, column
     return sent
 
 
-def prune_msc_prices(conn) -> int:
-    """Delete TiDB MSC price IDs absent from a completed authoritative snapshot."""
+def _price_snapshot_watermark(conn) -> str:
+    """A small DB-clock safety margin before the first full-snapshot upsert."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT DATE_SUB(CURRENT_TIMESTAMP(), INTERVAL 2 SECOND)")
+        return str(cur.fetchone()[0])
+
+
+def prune_msc_prices(conn, seen_since: str) -> int:
+    """Delete stale MSC rows with the ingestion watermark, in bounded batches.
+
+    TiDB temporary tables have a quota well below a full 550k-row snapshot.
+    `updated_at` is explicitly touched by every MSC upsert, so the watermark
+    provides the same authoritative-snapshot guarantee without a giant
+    staging table or a single destructive transaction.
+    """
     if not MSC_DB.exists():
         raise RuntimeError("Không có SQLite MSC để xác nhận snapshot trước khi dọn TiDB.")
-    local = connect_ro(MSC_DB)
-    try:
+    if not seen_since:
+        raise RuntimeError("Thiếu mốc snapshot MSC; từ chối dọn TiDB.")
+    removed = 0
+    while True:
         with conn.cursor() as cur:
-            cur.execute("CREATE TEMPORARY TABLE sync_msc_price_ids (source_id VARCHAR(128) PRIMARY KEY)")
-            sent = 0
-            source = local.execute(
-                "SELECT source_id FROM records WHERE kind='prices' "
-                "AND json_extract(normalized, '$.source_label')='API Mua sắm công' "
-                "AND NOT EXISTS (SELECT 1 FROM excel_matches m WHERE m.excel_id=records.source_id)"
-            )
-            while rows := source.fetchmany(BATCH):
-                cur.executemany("INSERT INTO sync_msc_price_ids (source_id) VALUES (%s)", rows)
-                sent += len(rows)
             cur.execute(
-                "DELETE p FROM msc_prices AS p "
-                "LEFT JOIN sync_msc_price_ids AS s ON s.source_id=p.source_id "
-                "WHERE s.source_id IS NULL"
+                "DELETE FROM msc_prices "
+                "WHERE source_id NOT LIKE 'price:%' OR updated_at < %s "
+                "LIMIT 10000",
+                (seen_since,),
             )
-            removed = cur.rowcount
-            cur.execute("DROP TEMPORARY TABLE sync_msc_price_ids")
+            batch = cur.rowcount
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        local.close()
+        removed += batch
+        if not batch:
+            break
     _write_meta(conn, "msc_prices_total", "msc_prices")
-    print(f"msc_prices prune: source {sent:,}, removed {removed:,}")
+    print(f"msc_prices prune: watermark {seen_since}, removed {removed:,}")
     return removed
 
 
@@ -476,7 +512,7 @@ def _assert_completed_price_snapshot() -> None:
         not state.get("done")
         or state.get("stamp") != file_stamp(MSC_DB)
         or expected is None
-        or int(state.get("sent") or 0) < int(expected)
+        or not state.get("prune_after")
     ):
         raise RuntimeError("Không có snapshot MSC hoàn tất, cùng phiên nguồn hiện tại; từ chối dọn TiDB.")
 
@@ -492,18 +528,22 @@ def run_remote(only: set[str], from_start: bool, prune: bool, prune_only: bool) 
             if only != {"prices"}:
                 raise RuntimeError("--prune-only yêu cầu --only prices.")
             _assert_completed_price_snapshot()
-            prune_msc_prices(conn)
+            prune_msc_prices(conn, str((load_state().get("msc_prices") or {}).get("prune_after") or ""))
             return
         if "vss" in only:
             sync_vss(conn, state, from_start)
         if "dav" in only:
             sync_dav(conn, state, from_start)
         if "prices" in only:
+            snapshot_watermark = _price_snapshot_watermark(conn) if from_start else ""
             _sync_msc(conn, state, from_start, "prices", "msc_prices", MSC_PRICE_COLUMNS, build_msc_price_row)
             if prune:
                 if not from_start:
                     raise RuntimeError("--prune chỉ an toàn sau --from-start để có snapshot MSC đầy đủ.")
-                prune_msc_prices(conn)
+                entry = state.get("msc_prices") or {}
+                entry["prune_after"] = snapshot_watermark
+                _remember(state, "msc_prices", entry)
+                prune_msc_prices(conn, snapshot_watermark)
             refresh_msc_price_metric_rollup(conn)
         if "tenders" in only:
             _sync_msc(conn, state, from_start, "tenders", "msc_tenders", MSC_TENDER_COLUMNS, build_msc_tender_row)

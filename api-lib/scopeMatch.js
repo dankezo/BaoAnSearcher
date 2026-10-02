@@ -68,6 +68,7 @@ export function publicLines(lots, catalog = baoanProducts()) {
       price: lot.pricePlan,
       group: lot.groupMedicine || lot.group || '',
       match: classified.level || '',
+      formCompatible: Boolean(classified.formCompatible),
       hits: classified.hits || [],
     })
   }

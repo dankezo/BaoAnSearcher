@@ -1274,8 +1274,12 @@ export const DataTable = memo(function DataTable({
     virtualizerRef.current?.measure()
   }, [narrow, scrollMargin])
   const virtualRows = rows.length ? virtualizer.getVirtualItems() : []
-  const padTop = virtualRows.length ? Math.max(0, virtualRows[0].start - scrollMargin) : 0
-  const padBottom = virtualRows.length
+  // The default result page is 100 rows. Render it directly so variable-height
+  // price rows cannot change a virtual scroll estimate; larger user-selected
+  // pages retain virtualization and their short DOM window.
+  const shouldVirtualize = rows.length > 100
+  const padTop = shouldVirtualize && virtualRows.length ? Math.max(0, virtualRows[0].start - scrollMargin) : 0
+  const padBottom = shouldVirtualize && virtualRows.length
     ? Math.max(0, virtualizer.getTotalSize() - (virtualRows[virtualRows.length - 1].end - scrollMargin))
     : 0
 
@@ -1407,7 +1411,9 @@ export const DataTable = memo(function DataTable({
               <td colSpan={colSpan} style={{ height: padTop, padding: 0, border: 0 }} />
             </tr>
           )}
-          {!narrow && virtualRows.map((vi) => renderRow(rows[vi.index], vi.index, true))}
+          {!narrow && (shouldVirtualize
+            ? virtualRows.map((vi) => renderRow(rows[vi.index], vi.index, true))
+            : rows.map((row, index) => renderRow(row, index, false)))}
           {padBottom > 0 && !narrow && (
             <tr className="virt-spacer" aria-hidden="true">
               <td colSpan={colSpan} style={{ height: padBottom, padding: 0, border: 0 }} />
@@ -1421,7 +1427,7 @@ export const DataTable = memo(function DataTable({
 
       <div className="result-cards" aria-label="Kết quả dạng thẻ">
         {narrow && padTop > 0 && <div aria-hidden="true" style={{ height: padTop }} />}
-        {narrow && virtualRows.map((vi) => {
+        {narrow && (shouldVirtualize ? virtualRows : rows.map((_, index) => ({ index }))).map((vi) => {
           const i = vi.index
           const row = rows[i]
           const k = keys[i]
@@ -1437,7 +1443,7 @@ export const DataTable = memo(function DataTable({
               key={k}
               type="button"
               data-index={i}
-              ref={virtualizer.measureElement}
+              ref={shouldVirtualize ? virtualizer.measureElement : undefined}
               className={`result-card${selected?.has(k) ? ' selected' : ''}`}
               onClick={() => onRowDoubleClick?.(row)}
             >

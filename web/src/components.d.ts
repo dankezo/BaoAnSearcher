@@ -26,7 +26,7 @@ export function CountSelect(props: {
   label: string
   value: string
   otherValue: string
-  options: number[]
+  options: Array<number | string>
   onChange: (value: string) => void
   onOther: (value: string) => void
 }): ReactElement

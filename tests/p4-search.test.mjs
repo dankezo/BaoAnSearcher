@@ -72,6 +72,25 @@ test('an empty DAV tag list returns no rows', () => {
   assert.equal(built.empty, true)
 })
 
+test('DAV group and SĐK-density filters use materialized columns', () => {
+  const built = buildSearchSql({
+    kind: 'dav',
+    filters: { drugGroup: ['Thuốc kê đơn'], ingredientCount: '2' },
+    dialect: 'tidb',
+  })
+  assert.match(built.sql, /drug_group_f LIKE \?/)
+  assert.match(built.sql, /registration_count = \?/)
+  assert.ok(built.args.includes('%thuoc ke don%'))
+  assert.ok(built.args.includes(2))
+  assert.equal(placeholders(built.sql), built.args.length)
+})
+
+test('DAV SĐK-density ranges stay materialized', () => {
+  const built = buildSearchSql({ kind: 'dav', filters: { ingredientCount: '1-2' }, dialect: 'tidb' })
+  assert.match(built.sql, /registration_count BETWEEN \? AND \?/)
+  assert.deepEqual(built.args, [1, 2])
+})
+
 test('tender label is derived from displayed line matches, not a stale crawl label', () => {
   // The cache may say exact from an earlier catalogue version.  A green
   // package is valid only when at least one line remains exact right now.

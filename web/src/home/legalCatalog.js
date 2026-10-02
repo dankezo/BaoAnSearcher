@@ -21,7 +21,7 @@ export const LEGAL_CORE = [
     title: 'Thông tư 40/2025/TT-BYT',
     issued: '2025-10-25',
     status: 'active',
-    excerpt: 'Quy định đấu thầu thuốc tại cơ sở y tế công lập: phân nhóm 1–5, nguyên tắc gộp phần thầu và điều khoản chuyển tiếp. Cần đọc phụ lục và thời điểm áp dụng trước khi sửa hồ sơ.',
+    excerpt: 'Quy định đấu thầu thuốc tại cơ sở y tế công lập. Phụ lục I nêu các dạng có thể dự thầu cùng nhau, gồm nhóm viên/viên nén/bao phim và viên nang, cùng các trường hợp bao tan, giải phóng có kiểm soát, hòa tan nhanh, viên sủi. Công cụ chỉ gắn “gần khớp – cần đối chiếu KHLCNT/E-HSMT”, không tự kết luận khớp chính xác.',
   },
   {
     id: 'nd-214-2025',

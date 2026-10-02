@@ -214,6 +214,7 @@ export const SUGGEST_FIELDS = {
       sanXuat: 'cty_san_xuat',
       dangKy: 'cty_dang_ky',
       nuocSanXuat: 'nuoc_san_xuat',
+      drugGroup: 'drug_group',
       q: 'ten_thuoc',
     },
   },

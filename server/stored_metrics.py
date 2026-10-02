@@ -45,6 +45,7 @@ DAV_SUGGEST = {
     "tenThuoc": "tenThuoc",
     "soDangKy": "soDangKy",
     "hoatChat": "hoatChat",
+    "drugGroup": "phanLoai",
     "dangBaoChe": "dangBaoChe",
     "sanXuat": "ctySanXuat",
     "dangKy": "ctyDangKy",
@@ -376,9 +377,9 @@ def refresh_dav() -> dict:
                     "key": "density", "scope": "fixed", "title": "Mật độ SĐK/HC",
                     "mainValue": _fmt_int(blue), "unit": "hoạt chất 1–2 SĐK", "subtitle": note,
                     "subMetrics": [
-                        {"id": "sdk_1_2", "label": "1–2 SĐK", "count": _fmt_int(blue), "tone": "ok", "patch": {"ingredientCount": "1"}},
-                        {"id": "sdk_3_5", "label": "3–5 SĐK", "count": _fmt_int(mid), "tone": "warn", "patch": {"ingredientCount": "3"}},
-                        {"id": "sdk_red", "label": ">5 SĐK", "count": _fmt_int(red), "tone": "danger", "patch": {"ingredientCount": "5"}},
+                        {"id": "sdk_1_2", "label": "1–2 SĐK", "count": _fmt_int(blue), "tone": "ok", "patch": {"ingredientCount": "1-2"}},
+                        {"id": "sdk_3_5", "label": "3–5 SĐK", "count": _fmt_int(mid), "tone": "warn", "patch": {"ingredientCount": "3-5"}},
+                        {"id": "sdk_red", "label": ">5 SĐK", "count": _fmt_int(red), "tone": "danger", "patch": {"ingredientCount": "6+"}},
                     ],
                 },
                 {

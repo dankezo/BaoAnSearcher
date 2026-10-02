@@ -88,7 +88,10 @@ def flatten(record: dict) -> dict:
 
     ingredients = split_ingredients(hc)
     phan_loai = record.get("phanLoaiThuocEnum")
-    pl_label = {1: "Không kê đơn", 2: "Kê đơn", 3: "Hạn chế", 4: "Kiểm soát đặc biệt"}.get(phan_loai, str(phan_loai or ""))
+    pl_label = {1: "Không kê đơn", 2: "Kê đơn", 3: "Hạn chế", 4: "Kiểm soát đặc biệt", 5: "Khác (mã nguồn 5)"}.get(phan_loai, str(phan_loai or ""))
+    # DAV exposes ``nhomThuoc`` in the shape but it is empty in the live
+    # catalog.  The usable official classification is phanLoaiThuocEnum.
+    nhom_thuoc = tt.get("nhomThuoc") or record.get("nhomThuoc") or pl_label
 
     # Packaging / release facility often embedded in manufacturer name
     sx_ten = sx.get("tenCongTySanXuat") or record.get("tenCongTySanXuat") or ""
@@ -112,6 +115,7 @@ def flatten(record: dict) -> dict:
         "ngayGiaHan": ngay_gh or "",
         "ngayHetHan": ngay_hh or "",
         "hoatChat": hc,
+        "nhomThuoc": nhom_thuoc,
         "hamLuong": hl,
         "dangBaoChe": dang,
         "dongGoi": tt.get("dongGoi") or record.get("dongGoi") or "",
@@ -354,6 +358,7 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
     ten = fold(filters.get("tenThuoc") or "")
     sdk = fold(filters.get("soDangKy") or "")
     hc = fold(filters.get("hoatChat") or "")
+    nhom_thuoc = [fold(value) for value in (filters.get("drugGroup") or []) if fold(value)]
     dang = fold(filters.get("dangBaoChe") or "")
     sx = fold(filters.get("sanXuat") or "")
     dk = fold(filters.get("dangKy") or "")
@@ -388,7 +393,9 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
             "hasMore": False, "items": [], "dbTotal": total_db,
         }
 
-    need_group = any([dosage_n, strength_n])
+    # `ingredientCount` is intentionally the number of distinct SĐK carrying
+    # the same active ingredient, not the count of ingredients in one product.
+    need_group = any([ingredient_n, dosage_n, strength_n])
     # Fast path: SQL prefilter on FTS-ish search column (broad), then precise match on flatten()
     clauses, args = [], []
     for word in q.split():
@@ -431,6 +438,12 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
     def match_count(val, choice, other):
         if not choice:
             return True
+        if choice == "1-2":
+            return 1 <= val <= 2
+        if choice == "3-5":
+            return 3 <= val <= 5
+        if choice == "6+":
+            return val >= 6
         if choice == "other":
             try:
                 n = int(other)
@@ -452,6 +465,8 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
             return None
         if hc and not all(w in fold(flat.get("hoatChat") or "") for w in hc.split()):
             return None
+        if nhom_thuoc and not any(value in fold(flat.get("nhomThuoc") or "") for value in nhom_thuoc):
+            return None
         if dang and dang not in fold(flat.get("dangBaoChe") or ""):
             return None
         if sx and sx not in fold(flat.get("ctySanXuat") or ""):
@@ -464,14 +479,14 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
             return None
         if tags_set is not None and flat.get("tagId") not in tags_set:
             return None
-        if ingredient_n and not match_count(flat["ingredientCount"], ingredient_n, ingredient_other):
-            return None
         if need_group:
             key = fold(flat["hoatChat"]) or "__empty__"
             g = group_stats.get(key, {"sdk": set(), "forms": set(), "strengths": set()})
             flat["groupSdkCount"] = len(g["sdk"])
             flat["groupFormCount"] = len(g["forms"])
             flat["groupStrengthCount"] = len(g["strengths"])
+            if not match_count(flat["groupSdkCount"], ingredient_n, ingredient_other):
+                return None
             if not match_count(flat["groupFormCount"], dosage_n, dosage_other):
                 return None
             if not match_count(flat["groupStrengthCount"], strength_n, strength_other):

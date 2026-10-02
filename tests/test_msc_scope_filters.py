@@ -77,7 +77,7 @@ class TenderFiltersTest(unittest.TestCase):
     def test_public_line_names_the_baoan_hit(self):
         fake = ({
             'stems': ['paracetamol'],
-            'form': 'vien',
+            'form': 'vien nen',
             'strength': {(500.0, 'mg')},
             'card': {'brand': 'ParaBA', 'inn': 'Paracetamol', 'strength': '500mg', 'form': 'Viên nén', 'reg': 'VD-1'},
         },)

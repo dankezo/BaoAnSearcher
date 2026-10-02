@@ -11,6 +11,7 @@ SCHEMA_FILES = (
     ROOT / "tidb" / "003_msc_fast_lookup.sql",
     ROOT / "tidb" / "004_data_registry_meta.sql",
     ROOT / "tidb" / "005_msc_price_metric_rollup.sql",
+    ROOT / "tidb" / "006_dav_groups_and_msc_identity.sql",
 )
 
 

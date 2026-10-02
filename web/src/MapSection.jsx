@@ -847,12 +847,14 @@ export default function MapSection({ localMode = true }) {
             }
             title={selectedDot?.kind === 'package'
               ? (selectedDot.scopeLines?.length ? 'Phạm vi gói thầu' : `Hoạt chất · ${selectedDot.name || selectedDot.buyer || ''}`)
-              : (selectedDot ? `Hoạt chất · ${selectedDot.name || selectedDot.buyer || ''}` : data?.ingredientTitle)}
+              : (selectedDot ? `Hoạt chất giao dịch · ${selectedDot.name || selectedDot.buyer || ''}` : data?.ingredientTitle)}
             note={selectedDot
               ? (selectedDot.kind === 'investor'
                 ? 'Theo nhà đầu tư đang chọn.'
                 : selectedDot.kind === 'facility'
-                  ? 'Theo cơ sở y tế đang chọn.'
+                  ? 'Các hoạt chất có giao dịch tại cơ sở y tế đang chọn.'
+                  : selectedDot.kind === 'price_buyer'
+                    ? 'Các hoạt chất có đơn giá trúng tại cơ sở / chủ đầu tư đang chọn.'
                   : selectedDot.scopeLines?.length
                     ? `${selectedDot.scopeLines.length.toLocaleString('vi-VN')} dòng · cùng danh sách phạm vi như MSC gói thầu.`
                     : 'Theo gói thầu đang chọn (đơn giá trúng).')

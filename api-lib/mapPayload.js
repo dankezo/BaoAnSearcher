@@ -547,6 +547,7 @@ async function mscPricePayload(query, filters, window, withDots, withIngredients
       buyers = []
     }
   }
+  if (withDots && buyers.length) await attachPriceBuyerIngredients(query, current, buyers)
   const packageAreas = {}
   for (const buyer of buyers) {
     const list = packageAreas[buyer.provinceCode] || []
@@ -631,6 +632,52 @@ async function mscPricePayload(query, filters, window, withDots, withIngredients
     packageAreas,
     packageTotal: buyers.length,
     trendLabel: 'Giá trị đơn giá mỗi tháng',
+  }
+}
+
+/** Compact ingredient ranking for a selected MSC-price buyer.  It uses the
+ * exact same range and filters as its map marker, avoiding misleading
+ * cross-period ingredients in the right-hand panel. */
+async function attachPriceBuyerIngredients(query, where, buyers) {
+  const pairs = buyers.slice(0, 120).map((buyer) => [buyer.provinceCode, buyer.buyer]).filter(([, buyer]) => buyer)
+  if (!pairs.length) return
+  const pairWhere = pairs.map(() => "(COALESCE(province, '') = ? AND COALESCE(buyer, '') = ?)").join(' OR ')
+  try {
+    const raw = await rowsOf(
+      query,
+      `SELECT province, buyer, name, value, quantity FROM (
+  SELECT ${hint('msc_prices')}
+    COALESCE(province, '') AS province,
+    COALESCE(buyer, '') AS buyer,
+    COALESCE(ingredient, '') AS name,
+    SUM(COALESCE(unit_price, 0) * COALESCE(quantity, 0)) AS value,
+    SUM(COALESCE(quantity, 0)) AS quantity,
+    ROW_NUMBER() OVER (
+      PARTITION BY COALESCE(province, ''), COALESCE(buyer, '')
+      ORDER BY SUM(COALESCE(unit_price, 0) * COALESCE(quantity, 0)) DESC
+    ) AS rn
+  FROM msc_prices
+  WHERE ${where.clauses.join(' AND ')}
+    AND (${pairWhere})
+    AND COALESCE(ingredient, '') <> ''
+  GROUP BY COALESCE(province, ''), COALESCE(buyer, ''), COALESCE(ingredient, '')
+) ranked WHERE rn <= 15`,
+      [...where.args, ...pairs.flat()],
+    )
+    const grouped = new Map()
+    for (const row of raw) {
+      const code = resolveProvince(row.province).code
+      const buyer = String(row.buyer || '').trim()
+      const name = String(row.name || '').trim()
+      if (!code || !buyer || !name) continue
+      const key = `${code}\u001f${buyer}`
+      const list = grouped.get(key) || []
+      list.push({ name, value: num(row.value), quantity: num(row.quantity), baoanHits: [] })
+      grouped.set(key, list)
+    }
+    for (const buyer of buyers) buyer.ingredients = grouped.get(`${buyer.provinceCode}\u001f${buyer.buyer}`) || []
+  } catch {
+    /* The marker remains usable if the optional rank cannot be calculated. */
   }
 }
 

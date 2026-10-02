@@ -57,6 +57,7 @@ export function DavFilterSection({
     draft.tenThuoc,
     draft.soDangKy,
     draft.hoatChat,
+    draft.drugGroup,
     draft.dangBaoChe,
     draft.sanXuat,
     draft.dangKy,
@@ -74,6 +75,13 @@ export function DavFilterSection({
         onChange={(v) => setLocal('hoatChat', v)}
         onSearch={(v) => commit({ hoatChat: v })}
         suggest={fieldSuggest('hoatChat')}
+      />
+      <MultiSelectField
+        label="Phân loại thuốc"
+        value={draft.drugGroup}
+        onChange={(v) => setLocal('drugGroup', v)}
+        suggest={fieldSuggest('drugGroup')}
+        placeholder="Chọn phân loại…"
       />
       <SuggestField
         label="Tên thuốc"
@@ -118,10 +126,10 @@ export function DavFilterSection({
         suggest={fieldSuggest('dangKy')}
       />
       <CountSelect
-        label="Số hoạt chất"
+        label="Số SĐK cùng hoạt chất"
         value={draft.ingredientCount}
         otherValue={draft.ingredientCountOther}
-        options={[1, 2, 3, 4, 5]}
+        options={['1-2', '3-5', '6+', 1, 2, 3, 4, 5]}
         onChange={(v) => setLocal('ingredientCount', v)}
         onOther={(v) => setLocal('ingredientCountOther', v)}
       />

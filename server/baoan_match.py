@@ -16,7 +16,7 @@ from functools import lru_cache
 
 import sqlite3
 
-from .common import DATA_DIR, DAV_DB, fold, normalize_dosage_form
+from .common import DATA_DIR, DAV_DB, fold
 
 _CATALOG = DATA_DIR / "baoan_products.json"
 _STRENGTH = re.compile(
@@ -76,7 +76,43 @@ def _present(stem: str, blob: str, tokens: set[str]) -> bool:
 
 
 def _family(text: str) -> str:
-    return normalize_dosage_form(text) or fold(text)
+    """Keep the Python fallback identical to lib/regulatory/baoanMatch.js."""
+    token = re.sub(r"[^a-z0-9 ]+", " ", fold(text))
+    token = re.sub(r"\s+", " ", token).strip()
+    if not token:
+        return ""
+    if "bao tan" in token or "enteric" in token:
+        return "vien bao tan o ruot"
+    if any(word in token for word in ("giai phong", "kiem soat", "retard")) or re.search(r"\b(?:xr|sr|mr)\b", token):
+        return "vien giai phong co kiem soat"
+    if any(word in token for word in ("hoa tan nhanh", "ra nhanh", "phan tan")):
+        return "vien hoa tan nhanh"
+    if "suoi" in token or "efferv" in token:
+        return "vien sui"
+    if "nang" in token or "capsule" in token:
+        return "vien nang"
+    if "bao phim" in token:
+        return "vien nen bao phim"
+    if "nen" in token or "tablet" in token:
+        return "vien nen"
+    if "vien" in token:
+        return "vien"
+    return token
+
+
+def _legally_compatible_form(left: str, right: str) -> bool:
+    """Appendix I of TT 40/2025: a review-only, never-exact form signal."""
+    if not left or not right or left == right:
+        return False
+    conventional = {"vien", "vien nen", "vien nen bao phim", "vien nang"}
+    appendix_groups = (
+        conventional,
+        conventional | {"vien bao tan o ruot"},
+        conventional | {"vien giai phong co kiem soat"},
+        conventional | {"vien hoa tan nhanh"},
+        conventional | {"vien sui", "vien hoa tan nhanh"},
+    )
+    return any(left in group and right in group for group in appendix_groups)
 
 
 def _tender_group(text: str) -> str:
@@ -145,12 +181,12 @@ def classify_lot(lot: dict) -> tuple[str | None, list[dict]]:
             exact.append(item["card"])
             continue
         overlap = len(strength & item["strength"]) if strength and item["strength"] else 0
-        near.append((all_inns, form_ok, overlap, item["card"]))
+        near.append((all_inns, form_ok, _legally_compatible_form(form, item["form"]), overlap, item["card"]))
     if exact:
         return "exact", exact[:6]
     if near:
-        near.sort(key=lambda row: row[:3], reverse=True)
-        return "near", [row[3] for row in near[:4]]
+        near.sort(key=lambda row: row[:4], reverse=True)
+        return "near", [row[4] for row in near[:4]]
     return None, []
 
 
@@ -185,6 +221,12 @@ def public_lines(lots) -> list[dict]:
         if not isinstance(lot, dict):
             continue
         level, hits = classify_lot(lot)
+        _blob, form, _strength = _lot_blob(lot)
+        form_compatible = any(
+            _present(item["stems"][0], _blob, set(_TOKEN.findall(_blob)))
+            and _legally_compatible_form(form, item["form"])
+            for item in catalog()
+        )
         rows.append({
             "code": lot.get("medicineCode") or "",
             "name": lot.get("tenHoatChat") or lot.get("lotName") or "",
@@ -196,6 +238,7 @@ def public_lines(lots) -> list[dict]:
             "price": lot.get("pricePlan"),
             "group": lot.get("groupMedicine") or "",
             "match": level or "",
+            "formCompatible": form_compatible,
             "hits": hits,
         })
     return rows

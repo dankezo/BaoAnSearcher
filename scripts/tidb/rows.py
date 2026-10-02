@@ -37,7 +37,7 @@ DAV_COLUMNS = (
     "ham_luong", "dang_bao_che", "dong_goi", "han_dung",
     "cty_san_xuat", "nuoc_san_xuat", "cty_dang_ky", "nuoc_dang_ky",
     "so_quyet_dinh", "tieu_chuan", "ky_cap_nam", "con_hieu_luc", "ingredient_count",
-    "tag_id", "hoat_chat_f", "ten_thuoc_f",
+    "tag_id", "drug_group", "drug_group_f", "registration_count", "hoat_chat_f", "ten_thuoc_f",
 )
 MSC_PRICE_COLUMNS = (
     "source_id", "search",
@@ -78,7 +78,7 @@ CLIP = {
     "hoat_chat": 512, "hoat_chat_f": 512, "ham_luong": 255, "ngay_cap_raw": 32, "ngay_gia_han_raw": 32,
     "ngay_het_han_raw": 32, "dang_bao_che": 255, "dong_goi": 255, "han_dung": 128,
     "cty_san_xuat": 512, "nuoc_san_xuat": 128, "cty_dang_ky": 512, "nuoc_dang_ky": 128,
-    "so_quyet_dinh": 128, "tieu_chuan": 128, "ky_cap_nam": 32, "tag_id": 64,
+    "so_quyet_dinh": 128, "tieu_chuan": 128, "ky_cap_nam": 32, "tag_id": 64, "drug_group": 255, "drug_group_f": 255,
     "name": 512, "name_f": 512, "ingredient": 512, "ingredient_f": 512,
     "strength": 255, "registration": 128, "unit_price_raw": 64, "quantity_raw": 64,
     "unit": 64, "route": 255, "dosage_form": 255, "group_name": 128, "medicine_type": 128, "manufacturer": 512,
@@ -269,7 +269,7 @@ def build_dav_row(flat: dict):
     else:
         con_hl = 1 if flag else 0
     search = fold(" ".join(str(flat.get(key) or "") for key in (
-        "tenThuoc", "soDangKy", "hoatChat", "hamLuong", "dangBaoChe",
+        "tenThuoc", "soDangKy", "hoatChat", "nhomThuoc", "hamLuong", "dangBaoChe",
         "ctySanXuat", "ctyDangKy", "nuocSanXuat",
     )))
     return {
@@ -299,6 +299,11 @@ def build_dav_row(flat: dict):
         "con_hieu_luc": con_hl,
         "ingredient_count": flat.get("ingredientCount") if isinstance(flat.get("ingredientCount"), int) else None,
         "tag_id": clip("tag_id", tag),
+        "drug_group": clip("drug_group", flat.get("nhomThuoc")),
+        "drug_group_f": clip("drug_group_f", fold_key(flat.get("nhomThuoc")) if flat.get("nhomThuoc") else None),
+        # Filled in one set-based statement after a DAV sync.  A row builder
+        # cannot know every registration sharing this active ingredient.
+        "registration_count": None,
         "hoat_chat_f": clip("hoat_chat_f", fold(hoat) if hoat else None),
         "ten_thuoc_f": clip("ten_thuoc_f", fold(ten) if ten else None),
     }
@@ -310,7 +315,38 @@ def _msc_search(item: dict, search_text: str | None) -> str:
     return fold(json.dumps(item, ensure_ascii=False))[:60000]
 
 
-def build_msc_price_row(item: dict, source_id: str, search_text: str | None, collected_at):
+def msc_price_identity(row: dict) -> str:
+    """Stable business identity for a winning-price line.
+
+    MSC's crawler source_id is deliberately random on some export paths.  It
+    must never be the TiDB primary key, otherwise the same line is inserted on
+    every crawl.  This identity keeps legitimately different tenders, buyers,
+    prices, or quantities separate while collapsing byte-for-byte business
+    duplicates.
+    """
+    fields = (
+        "name", "ingredient", "strength", "registration", "unit_price", "quantity",
+        "unit", "route", "dosage_form", "group_name", "medicine_type", "manufacturer",
+        "country", "buyer", "province", "tender_no", "published", "winner",
+    )
+    values = []
+    for field in fields:
+        value = row.get(field)
+        if isinstance(value, Decimal):
+            value = format(value, "f")
+        values.append(fold_key(value) if value is not None else "")
+    return hashlib.sha256("\x1f".join(values).encode("utf-8")).hexdigest()
+
+
+def msc_price_source_id(item: dict, source_id: str, search_text: str | None, collected_at) -> str | None:
+    """Return the deterministic TiDB key without changing the source record."""
+    row = build_msc_price_row(item, source_id, search_text, collected_at, _stable_id=False)
+    if not row:
+        return None
+    return f"price:{msc_price_identity(row)}"
+
+
+def build_msc_price_row(item: dict, source_id: str, search_text: str | None, collected_at, *, _stable_id: bool = True):
     sid = clip("source_id", source_id)
     if not sid:
         return None
@@ -320,7 +356,7 @@ def build_msc_price_row(item: dict, source_id: str, search_text: str | None, col
     name = item.get("name")
     ingredient = item.get("ingredient")
     province = item.get("province")
-    return {
+    row = {
         "source_id": sid,
         "search": _msc_search(item, search_text),
         "name": clip("name", name),
@@ -350,6 +386,9 @@ def build_msc_price_row(item: dict, source_id: str, search_text: str | None, col
         "ingredient_f": clip("ingredient_f", fold_key(ingredient) if ingredient else None),
         "province_f": clip("province_f", fold_key(province) if province else None),
     }
+    if _stable_id:
+        row["source_id"] = f"price:{msc_price_identity(row)}"
+    return row
 
 
 def build_msc_tender_row(item: dict, source_id: str, search_text: str | None, collected_at):
@@ -435,6 +474,11 @@ def upsert_sql(table: str, columns: tuple[str, ...], nrows: int) -> str:
     one = "(" + ", ".join(["%s"] * len(columns)) + ")"
     values = ", ".join([one] * nrows)
     updates = ", ".join(f"{column}=VALUES({column})" for column in columns if column not in keys)
+    # A full MSC snapshot needs a durable, queryable watermark for safe stale
+    # row pruning.  Do this in SQL so an unchanged source row is still marked
+    # as seen by this ingestion run.
+    if table == "msc_prices":
+        updates += ", updated_at=CURRENT_TIMESTAMP"
     return (
         f"INSERT INTO {table} ({col_sql}) VALUES {values} "
         f"ON DUPLICATE KEY UPDATE {updates}"

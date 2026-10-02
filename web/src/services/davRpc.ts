@@ -14,6 +14,7 @@ export function buildDavRpcParams(filters: Partial<DavFilters> = {}, page: unkno
     sanXuat: nullableText(f.sanXuat),
     dangKy: nullableText(f.dangKy),
     nuocSanXuat: f.nuocSanXuat?.map(nullableText).filter((v): v is string => v !== null) ?? null,
+    drugGroup: f.drugGroup?.map(nullableText).filter((v): v is string => v !== null) ?? null,
     tags: f.tags?.map(nullableText).filter((v): v is string => v !== null) ?? null,
     ingredientCount: nullableText(f.ingredientCount),
     ingredientCountOther: nullableText(f.ingredientCountOther),

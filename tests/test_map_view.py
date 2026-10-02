@@ -169,14 +169,14 @@ class MapViewTest(unittest.TestCase):
         fake = (
             {
                 "stems": ["paracetamol"],
-                "form": "vien",
+                "form": "vien nen",
                 "strength": baoan_match._strengths("500 mg"),
                 "group": "",
                 "card": {"brand": "Hapacol", "strength": "500 mg", "form": "Viên nén", "reg": "VD-111"},
             },
             {
                 "stems": ["paracetamol"],
-                "form": "vien",
+                "form": "vien nen",
                 "strength": baoan_match._strengths("80 mg"),
                 "group": "",
                 "card": {"brand": "Efferalgan", "strength": "80 mg", "form": "Viên sủi", "reg": "VD-222"},
@@ -195,7 +195,7 @@ class MapViewTest(unittest.TestCase):
         fake = (
             {
                 "stems": ["ofloxacin"],
-                "form": "vien",
+                "form": "vien nen bao phim",
                 "strength": baoan_match._strengths("300 mg"),
                 "group": "",
                 "card": {"brand": "Oflozylkab", "strength": "300 mg", "form": "Viên nén bao phim", "reg": "VD-893"},

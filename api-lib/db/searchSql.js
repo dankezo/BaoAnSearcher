@@ -22,6 +22,7 @@ const FOLD_COL = {
   hoatchat: 'hoatchat_f',
   ten_tinh: 'ten_tinh_f',
   hoat_chat: 'hoat_chat_f',
+  drug_group: 'drug_group_f',
   ten_thuoc: 'ten_thuoc_f',
   name: 'name_f',
   ingredient: 'ingredient_f',
@@ -193,10 +194,23 @@ function whereFor(kind, filters, dialect) {
     likeAny(rest, args, 'ten_thuoc', f.tenThuoc, dialect)
     likeAny(rest, args, 'so_dang_ky', f.soDangKy, dialect)
     likeAny(rest, args, 'hoat_chat', f.hoatChat, dialect)
+    likeAny(rest, args, 'drug_group', f.drugGroup, dialect)
     likeAny(rest, args, 'dang_bao_che', f.dangBaoChe, dialect)
     likeAny(rest, args, 'cty_san_xuat', f.sanXuat, dialect)
     likeAny(rest, args, 'cty_dang_ky', f.dangKy, dialect)
     likeAny(rest, args, 'nuoc_san_xuat', f.nuocSanXuat, dialect)
+    const registrationCount = String(f.ingredientCount === 'other' ? f.ingredientCountOther : f.ingredientCount || '').trim()
+    if (registrationCount === '1-2' || registrationCount === '3-5') {
+      const [min, max] = registrationCount.split('-').map(Number)
+      indexed.push('registration_count BETWEEN ? AND ?')
+      args.push(min, max)
+    } else if (registrationCount === '6+') {
+      indexed.push('registration_count >= ?')
+      args.push(6)
+    } else if (/^\d+$/.test(registrationCount)) {
+      indexed.push('registration_count = ?')
+      args.push(Number(registrationCount))
+    }
   } else if (kind === 'msc_prices' || kind === 'msc_tenders' || kind === 'prices' || kind === 'tenders') {
     const tenders = kind === 'msc_tenders' || kind === 'tenders'
     if (tenders && dialect === 'tidb') {
