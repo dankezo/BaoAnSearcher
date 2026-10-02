@@ -18,7 +18,6 @@ export function DavDataTable({
     filtersRow,
     setFiltersRow,
     activeCF,
-    setColumnFilters,
     search,
     runSearch,
     err,
@@ -29,6 +28,8 @@ export function DavDataTable({
     pageSizeNum,
     columnFilters,
     setCF,
+    searchColumn,
+    clearColumnFilters,
     fieldSuggest,
     setDetail,
     loading,
@@ -51,10 +52,7 @@ export function DavDataTable({
         filtersVisible={filtersRow}
         onToggleFilters={() => setFiltersRow((v) => !v)}
         activeColumnFilters={activeCF}
-        onClearColumnFilters={() => {
-          setColumnFilters({})
-          search(0, {})
-        }}
+        onClearColumnFilters={clearColumnFilters}
       >
         <details className="dav-column-picker">
           <summary className="btn ghost sm">{Icons.columns} Ẩn/hiện cột</summary>
@@ -111,7 +109,7 @@ export function DavDataTable({
         columnFilters={columnFilters}
         onColumnFilter={setCF}
         filtersVisible={filtersRow}
-        onFilterEnter={() => search(0)}
+        onFilterEnter={searchColumn}
         onFilterSuggest={async (key, q) => {
           const mapKey = SERVER_MAP[key as keyof DrugItem] || key
           return fieldSuggest(mapKey)(q)

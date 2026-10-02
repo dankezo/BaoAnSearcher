@@ -295,7 +295,22 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
 
   const setF = <K extends keyof DavFilters>(key: K, val: DavFilters[K]) =>
     setFilters((f) => ({ ...f, [key]: val }))
-  const setCF = (key: string, val: string) => setColumnFilters((f) => ({ ...f, [key]: val }))
+  const setCF = (key: string, val: string) => {
+    const next = { ...columnFiltersRef.current, [key]: val }
+    columnFiltersRef.current = next
+    setColumnFilters(next)
+  }
+  const searchColumn = useCallback((key?: string, value?: string) => {
+    const next = key ? { ...columnFiltersRef.current, [key]: value || '' } : columnFiltersRef.current
+    columnFiltersRef.current = next
+    setColumnFilters(next)
+    search(0, next)
+  }, [search])
+  const clearColumnFilters = useCallback(() => {
+    columnFiltersRef.current = {}
+    setColumnFilters({})
+    search(0, {})
+  }, [search])
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
   const advancedActive = [
     filters.tenThuoc,
@@ -460,6 +475,8 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
     search,
     setF,
     setCF,
+    searchColumn,
+    clearColumnFilters,
     activeCF,
     advancedActive,
     fieldSuggest,
