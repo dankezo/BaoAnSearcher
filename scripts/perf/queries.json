@@ -1,0 +1,299 @@
+{
+  "version": 1,
+  "suite": "baoan-p0-baseline",
+  "note": "30 truy vấn đúng shape API hiện tại. q đi qua fold + LIKE '%từ%'. Không chứa secret.",
+  "warmup": 1,
+  "repeats": 5,
+  "queries": [
+    {
+      "id": "vss-substring-cillin",
+      "title": "VSS tìm giữa từ cillin trong Tân dược",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "q": "cillin", "loai": "Tân dược" }
+    },
+    {
+      "id": "vss-substring-uroxim",
+      "title": "VSS tìm giữa từ uroxim trong Tân dược",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "q": "uroxim", "loai": "Tân dược" }
+    },
+    {
+      "id": "vss-substring-amoxicillin",
+      "title": "VSS cụm amoxicillin, Tân dược",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "q": "amoxicillin", "loai": "Tân dược" }
+    },
+    {
+      "id": "vss-hoatchat-paracetamol",
+      "title": "VSS lọc cột hoạt chất paracetamol",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "hoatchat": "paracetamol", "loai": "Tân dược" }
+    },
+    {
+      "id": "vss-sodk-fragment",
+      "title": "VSS lọc số đăng ký theo đoạn vd-",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "sodk": "vd-", "loai": "Tân dược" }
+    },
+    {
+      "id": "vss-loai-nam-2025",
+      "title": "VSS Tân dược năm 2025",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "loai": "Tân dược", "nam": 2025 }
+    },
+    {
+      "id": "vss-loai-nam-tinh-79",
+      "title": "VSS Tân dược 2025, mã tỉnh 79",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "loai": "Tân dược", "nam": 2025, "ma_tinh": "79" }
+    },
+    {
+      "id": "vss-nhom-n1-nam",
+      "title": "VSS nhóm thầu N1, Tân dược, năm 2025",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "loai": "Tân dược", "nam": 2025, "nhomthau": "N1" }
+    },
+    {
+      "id": "vss-date-range-2025",
+      "title": "VSS khoảng ngày hợp đồng 2025",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "loai": "Tân dược", "tuNgay": "2025-01-01", "denNgay": "2025-12-31" }
+    },
+    {
+      "id": "vss-complex-filter",
+      "title": "VSS lọc kết hợp từ khóa, năm, tỉnh, nhóm",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "q": "cef", "loai": "Tân dược", "nam": 2025, "ma_tinh": "79", "nhomthau": "N1" }
+    },
+    {
+      "id": "vss-duongdung",
+      "title": "VSS lọc đường dùng uống, Tân dược",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "loai": "Tân dược", "duongdung": "uống" }
+    },
+    {
+      "id": "vss-nuocsx",
+      "title": "VSS lọc nước sản xuất Việt Nam",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 100,
+      "filters": { "loai": "Tân dược", "nuocsx": "Việt Nam" }
+    },
+    {
+      "id": "vss-deep-page-20",
+      "title": "VSS trang sâu offset 2000",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 20,
+      "size": 100,
+      "filters": { "loai": "Tân dược", "nam": 2025 }
+    },
+    {
+      "id": "vss-export-chunk-500",
+      "title": "VSS một chunk xuất 500 dòng",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "vss",
+      "page": 0,
+      "size": 500,
+      "filters": { "loai": "Tân dược", "nam": 2025 }
+    },
+    {
+      "id": "dav-substring-cillin",
+      "title": "DAV tìm giữa từ cillin",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "dav",
+      "page": 0,
+      "size": 100,
+      "filters": { "q": "cillin" }
+    },
+    {
+      "id": "dav-substring-paracetamol",
+      "title": "DAV tìm paracetamol",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "dav",
+      "page": 0,
+      "size": 100,
+      "filters": { "q": "paracetamol" }
+    },
+    {
+      "id": "dav-hoatchat-cefuroxim",
+      "title": "DAV lọc hoạt chất cefuroxim",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "dav",
+      "page": 0,
+      "size": 100,
+      "filters": { "hoatChat": "cefuroxim" }
+    },
+    {
+      "id": "dav-sodk",
+      "title": "DAV lọc số đăng ký theo đoạn vd-",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "dav",
+      "page": 0,
+      "size": 100,
+      "filters": { "soDangKy": "vd-" }
+    },
+    {
+      "id": "dav-ten-dangbaoche",
+      "title": "DAV tên thuốc + dạng bào chế viên",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "dav",
+      "page": 0,
+      "size": 100,
+      "filters": { "tenThuoc": "amox", "dangBaoChe": "vien" }
+    },
+    {
+      "id": "dav-deep-page-10",
+      "title": "DAV trang sâu offset 1000",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "dav",
+      "page": 10,
+      "size": 100,
+      "filters": { "q": "cillin" }
+    },
+    {
+      "id": "msc-prices-substring",
+      "title": "MSC đơn giá tìm giữa từ cillin",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "msc_prices",
+      "page": 0,
+      "size": 100,
+      "filters": { "q": "cillin" }
+    },
+    {
+      "id": "msc-prices-province",
+      "title": "MSC đơn giá theo tỉnh",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "msc_prices",
+      "page": 0,
+      "size": 100,
+      "filters": { "province": "Hồ Chí Minh" }
+    },
+    {
+      "id": "msc-prices-ingredient-province",
+      "title": "MSC đơn giá hoạt chất và tỉnh",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "msc_prices",
+      "page": 0,
+      "size": 100,
+      "filters": { "ingredient": "cefuroxim", "province": "Hà Nội" }
+    },
+    {
+      "id": "msc-prices-deep-page-20",
+      "title": "MSC đơn giá trang sâu offset 2000",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "msc_prices",
+      "page": 20,
+      "size": 100,
+      "filters": { "q": "a" }
+    },
+    {
+      "id": "msc-tenders-substring",
+      "title": "MSC hồ sơ tìm thuốc",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "msc_tenders",
+      "page": 0,
+      "size": 100,
+      "filters": { "q": "thuoc" }
+    },
+    {
+      "id": "msc-tenders-province",
+      "title": "MSC hồ sơ theo tỉnh",
+      "endpoint": "POST /api/tender/search",
+      "op": "search",
+      "kind": "msc_tenders",
+      "page": 0,
+      "size": 100,
+      "filters": { "province": "Hồ Chí Minh" }
+    },
+    {
+      "id": "meta-vss",
+      "title": "Meta tổng catalog VSS",
+      "endpoint": "POST /api/tender/meta",
+      "op": "meta",
+      "section": "vss"
+    },
+    {
+      "id": "meta-msc",
+      "title": "Meta tổng catalog MSC",
+      "endpoint": "POST /api/tender/meta",
+      "op": "meta",
+      "section": "msc"
+    },
+    {
+      "id": "metrics-vss-cache",
+      "title": "Metric VSS đọc cache app_meta",
+      "endpoint": "POST /api/tender/metrics",
+      "op": "metrics-cache",
+      "section": "vss"
+    },
+    {
+      "id": "metrics-vss-cold",
+      "title": "Metric VSS tính lạnh trên fact table",
+      "endpoint": "POST /api/tender/metrics",
+      "op": "metrics-cold",
+      "section": "vss",
+      "repeats": 2,
+      "timeoutMs": 240000
+    }
+  ]
+}

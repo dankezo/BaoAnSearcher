@@ -93,7 +93,11 @@ def import_xlsx(path,db=None):
                 if not any(v not in (None,'') for v in values):continue
                 if len(values)!=26:raise ValueError(f'{sheet.title}, dòng {row[0].row}: thiếu cột.')
                 if any(cell.data_type in ('f','e') for cell in row):raise ValueError(f'{sheet.title}, dòng {row[0].row}: chứa công thức hoặc lỗi Excel, chưa nhập.')
-                if not values[1] or not values[17]:raise ValueError(f'{sheet.title}, dòng {row[0].row}: thiếu tên thuốc hoặc mã TBMT.')
+                # Official exports can omit a trade name or TBMT. Preserve those
+                # observations; fingerprint() already excludes incomplete identities
+                # from automatic API matching. Never invent the missing fields.
+                if not any(values[j] for j in (1,2,4,17)):
+                    raise ValueError(f'{sheet.title}, dòng {row[0].row}: thiếu toàn bộ thông tin nhận diện thuốc/gói thầu.')
                 ident='xlsx:'+digest(values[1:])
                 if ident not in groups:
                     raw=dict(zip(RAW_FIELDS,values[1:]));raw.update(id=ident,tab='THUOC_TAN_DUOC')

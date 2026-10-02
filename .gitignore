@@ -31,6 +31,13 @@ test zone/procurement/vendor/
 # Empty / unrelated
 be432a96ed36e48d05f44bf375864355f62263f9/
 
+# Local deployment metadata and generated business artefacts.  Keep these on
+# the workstation; source code, migrations, and documentation remain tracked.
+.vercel/
+outputs/
+supabase/.temp/
+test zone/Cục Quản lý Dược - Bộ Y tế_files/
+
 # Node / Python
 node_modules/
 web/dist/

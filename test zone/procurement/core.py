@@ -80,6 +80,11 @@ def province(value):
         return '; '.join(dict.fromkeys(flat(x.get('provName')) for x in value if isinstance(x,dict) and x.get('provName')))
     return flat(value)
 
+def district_name(value):
+    items = value if isinstance(value, list) else ([value] if isinstance(value, dict) else [])
+    names = [flat(item.get('districtName')) for item in items if isinstance(item, dict) and item.get('districtName')]
+    return '; '.join(dict.fromkeys(names))
+
 def tender_link(raw):
     ident=raw.get('notifyId') or raw.get('id')
     if not ident: return BASE+'/web/guest/contractor-selection?render=index'
@@ -102,9 +107,10 @@ def normalize_price(raw):
         'medicine_type':{'0':'Generic','1':'Biệt dược gốc','2':'Thuốc dược liệu'}.get(str(raw.get('medicines')),flat(raw.get('medicines'))),
         'manufacturer':flat(raw.get('tenCoSoSanXuat')), 'country':flat(raw.get('nuocSanXuat')),
         'route':flat(raw.get('duongDung')), 'dosage_form':flat(raw.get('dangBaoChe')),
-        'packaging':flat(raw.get('quyCachDongGoi')), 'winner':flat(raw.get('winningName')),
+        'packaging':flat(raw.get('quyCachDongGoi')),         'winner':flat(raw.get('winningName')),
         'winner_code':flat(raw.get('winningCode')), 'buyer':flat(raw.get('tenCdtBmt')),
         'buyer_code':flat(raw.get('maCdt')), 'province':province(raw.get('diaDiem')),
+        'district':district_name(raw.get('diaDiem')),
         'tender_no':tender_key(raw.get('maTbmt')), 'published':flat(raw.get('ngayDangTaiKqlcnt')),
         'decision':flat(raw.get('soQuyetDinh')), 'decision_date':flat(raw.get('ngayBanHanhQuyetDinh')),
         'source_url':BASE+'/web/guest/winning-bid-data',
@@ -118,8 +124,13 @@ def normalize_tender(raw):
     inferred=bool(re.search(r'\b(thuoc|duoc|vacc?in|sinh pham)\b',fold(name)))
     if not is_medicine and not inferred: return None
     return {'tender_no':tender_key(raw.get('notifyNo') or raw.get('notifyNoStand')),
-        'name':name,'buyer':flat(raw.get('investorName') or raw.get('procuringName')),
+        'name':name,'buyer':flat(raw.get('investorName') or raw.get('procuringName') or raw.get('procuringEntityName')),
         'buyer_code':flat(raw.get('investorCode')),'province':province(raw.get('locations')),
+        'district':district_name(raw.get('locations')),
+        'procuring_entity':flat(raw.get('procuringEntityName')),
+        'winner':flat(raw.get('winningContractorName') or raw.get('contractorName')),
+        'winner_code':flat(raw.get('winningCode')),
+        'winning_price':number(raw.get('bidWinningPrice')),
         'published':flat(raw.get('publicDate')),'close_date':flat(raw.get('bidCloseDate')),
         'status_code':flat(raw.get('statusForNotify')), 'source_status':flat(raw.get('status')),
         'bid_price':number(raw.get('bidPrice')),'bid_form':flat(raw.get('bidForm')),
@@ -138,7 +149,13 @@ def connect(db=None):
     con.row_factory=sqlite3.Row
     con.create_function('fold',1,fold)
     con.create_function('tender_state',1,lambda obj:tender_state(json.loads(obj))[0])
-    con.execute('PRAGMA journal_mode=WAL')
+    try:
+        if not con.execute('PRAGMA query_only').fetchone()[0]:
+            con.execute('PRAGMA journal_mode=WAL')
+    except sqlite3.Error:
+        pass
+    con.execute('PRAGMA cache_size=-65536')
+    con.execute('PRAGMA temp_store=MEMORY')
     con.executescript('''
     CREATE TABLE IF NOT EXISTS records(
       kind TEXT NOT NULL, source_id TEXT NOT NULL, tender_no TEXT NOT NULL,

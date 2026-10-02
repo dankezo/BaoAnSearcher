@@ -141,11 +141,12 @@ class Downloader:
 
     def _run(self, size, restart, delay):
         with connect() as con:
-            if restart:
+            # A finished catalog used to stop "Tải" immediately, so new SĐK never arrived.
+            # Continue an unfinished scan; otherwise scan from the first page and upsert.
+            if restart or meta(con, 'complete', False):
                 put(con, 'skip', 0); put(con, 'complete', False); put(con, 'fingerprint', None); con.commit()
+                self.report('Đang quét lại danh mục từ đầu để lấy số đăng ký mới…')
             skip = meta(con, 'skip', 0)
-            if meta(con, 'complete', False):
-                self.report('Lượt tải đã hoàn tất. Chọn Cập nhật từ đầu để quét lại.'); return
             opener, headers = self.session()
             while not self.stop.is_set():
                 payload = {'SoDangKyThuoc': {}, 'KichHoat': True, 'skipCount': skip, 'maxResultCount': size, 'sorting': None}

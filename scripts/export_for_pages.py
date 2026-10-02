@@ -35,13 +35,14 @@ def main():
         # Also dump more pages if needed
         items = list(res["items"])
         page = 1
-        while len(items) < min(limit, res["total"]) and page < 200:
+        while len(items) < limit and res.get("hasMore") and page < 200:
             more = dav.search_drugs({}, page=page, size=min(200, limit - len(items)))
+            res = more
             if not more["items"]:
                 break
             items.extend(more["items"])
             page += 1
-        write_gz("dav", {"total": res["total"], "exported": len(items), "items": items})
+        write_gz("dav", {"total": dav.meta_info().get("count"), "exported": len(items), "items": items})
     except Exception as e:
         print("DAV skip:", e)
 

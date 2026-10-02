@@ -30,17 +30,16 @@ def dump_dav(limit=15000):
     print("DAV…")
     items = []
     page = 0
-    total = None
     while len(items) < limit:
         res = dav.search_drugs({}, page=page, size=min(200, limit - len(items)))
-        total = res["total"]
         if not res["items"]:
             break
         items.extend(res["items"])
         page += 1
-        if page > 500:
+        if res.get("hasMore") is False or page > 500:
             break
-    return write_gz("dav", {"total": total, "exported": len(items), "items": items, "updated": dav.meta_info()})
+    info = dav.meta_info()
+    return write_gz("dav", {"total": info.get("count"), "exported": len(items), "items": items, "updated": info})
 
 
 def dump_msc(limit_p=8000, limit_t=5000):
@@ -48,8 +47,9 @@ def dump_msc(limit_p=8000, limit_t=5000):
     prices = msc.search("prices", {}, page=0, size=min(limit_p, 200))
     items = list(prices["items"])
     page = 1
-    while len(items) < min(limit_p, prices["total"]):
+    while len(items) < limit_p and prices.get("hasMore"):
         more = msc.search("prices", {}, page=page, size=200)
+        prices = more
         if not more["items"]:
             break
         items.extend(more["items"])
@@ -61,8 +61,9 @@ def dump_msc(limit_p=8000, limit_t=5000):
     tenders = msc.search("tenders", {}, page=0, size=min(limit_t, 200))
     titems = list(tenders["items"])
     page = 1
-    while len(titems) < min(limit_t, tenders["total"]):
+    while len(titems) < limit_t and tenders.get("hasMore"):
         more = msc.search("tenders", {}, page=page, size=200)
+        tenders = more
         if not more["items"]:
             break
         titems.extend(more["items"])
@@ -77,15 +78,16 @@ def dump_vss(limit=20000):
     res = vss.search_bids({}, page=0, size=min(200, limit))
     items = list(res["items"])
     page = 1
-    while len(items) < min(limit, res["total"]):
+    while len(items) < limit and res.get("hasMore"):
         more = vss.search_bids({}, page=page, size=200)
+        res = more
         if not more["items"]:
             break
         items.extend(more["items"])
         page += 1
         if page > 200:
             break
-    write_gz("vss", {"total": res["total"], "exported": len(items), "items": items, "meta": vss.meta_info()})
+    write_gz("vss", {"total": vss.meta_info().get("count"), "exported": len(items), "items": items, "meta": vss.meta_info()})
 
 
 def rebuild_docs():

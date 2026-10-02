@@ -11,10 +11,11 @@ import time
 import uuid
 from datetime import date,timedelta
 from pathlib import Path
-from core import ROOT, BASE, TENDER_API, connect, save_records, now, search, tender_key
+from core import ROOT, BASE, TENDER_API, PRICE_API, connect, save_records, now, search, tender_key
 
 sys.path.insert(0,str(ROOT/'vendor'))
 URL=BASE+'/web/guest/contractor-selection?p_p_id=egpportalcontractorselectionv2_WAR_egpportalcontractorselectionv2&p_p_lifecycle=0&p_p_state=normal&p_p_mode=view&_egpportalcontractorselectionv2_WAR_egpportalcontractorselectionv2_render=index&indexSelect=-1'
+PRICE_URL=BASE+'/web/guest/winning-bid-data'
 COMPONENT="Array.from(document.querySelectorAll('[id]')).map(e=>e.__vue__).find(v=>v && typeof v.axiosSearch==='function')"
 
 class Stopped(Exception):pass
@@ -44,9 +45,110 @@ def browser_channel():
     except OSError:pass
     return [preferred,'chrome' if preferred=='msedge' else 'msedge']
 
+def _login_fields(page):
+    """Username and password locators, including a login form inside a frame."""
+    for frame in page.frames:
+        try:
+            user = frame.locator("#username, input[name='username']").first
+            if user.count() and user.is_visible():
+                pwd = frame.locator("#password, input[name='password']").first
+                return user, pwd if pwd.count() else None
+        except Exception:
+            pass
+        try:
+            pwd = frame.locator("input[type='password']").first
+            if not (pwd.count() and pwd.is_visible()):
+                continue
+            user = None
+            labeled = frame.get_by_label("Tên đăng nhập")
+            if labeled.count() and labeled.first.is_visible():
+                user = labeled.first
+            else:
+                texts = frame.locator("input[type='text'], input[type='email']")
+                for i in range(min(texts.count(), 6)):
+                    item = texts.nth(i)
+                    if item.is_visible():
+                        user = item
+                        break
+            return user, pwd
+        except Exception:
+            continue
+    return None, None
+
+
+def _write_field(locator, value):
+    try:
+        locator.click(timeout=2000)
+        locator.fill(value, timeout=2000)
+        if locator.input_value(timeout=1000) == value:
+            return True
+    except Exception:
+        pass
+    try:
+        locator.evaluate(
+            """(el, value) => {
+                el.removeAttribute('readonly');
+                el.readOnly = false;
+                const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement : HTMLInputElement;
+                Object.getOwnPropertyDescriptor(proto.prototype, 'value').set.call(el, value);
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+            }""",
+            value,
+        )
+        return locator.input_value(timeout=1000) == value
+    except Exception:
+        return False
+
+
+def refill_msc_login_if_blank(page, username, password):
+    """The login page often reloads after it first appears. Fill again when the boxes are empty."""
+    username = (username or "").strip()
+    password = password or ""
+    user, pwd = _login_fields(page)
+    if user is None and pwd is None:
+        return False
+    ok = True
+    try:
+        if username and user is not None and user.input_value(timeout=500) != username:
+            ok = _write_field(user, username) and ok
+        if password and pwd is not None and len(pwd.input_value(timeout=500)) != len(password):
+            ok = _write_field(pwd, password) and ok
+    except Exception:
+        return False
+    return ok
+
+
+def fill_msc_login(page, username, password, report=None):
+    """Type the saved account into the Keycloak form. The user still confirms captcha."""
+    username = (username or "").strip()
+    password = password or ""
+    if not username and not password:
+        if report:
+            report("Chưa có tài khoản MSC đã lưu. Điền tay trên cửa sổ đăng nhập.")
+        return False
+    for _ in range(40):
+        if refill_msc_login_if_blank(page, username, password):
+            user, pwd = _login_fields(page)
+            try:
+                user_ok = not username or (user is not None and user.input_value(timeout=500) == username)
+                pass_ok = not password or (pwd is not None and len(pwd.input_value(timeout=500)) == len(password))
+            except Exception:
+                user_ok = pass_ok = False
+            if user_ok and pass_ok:
+                if report:
+                    report("Đã điền tài khoản MSC. Xác nhận captcha rồi bấm Đăng nhập.")
+                return True
+        page.wait_for_timeout(500)
+    if report:
+        report("Form đăng nhập chưa nhận tài khoản. App sẽ điền lại khi ô hiện ra.")
+    return False
+
+
 class SiteBrowser:
-    def __init__(self,stop,report,retry):
-        self.stop=stop;self.report=report;self.retry=retry;self.browser=None;self.runtime=None;self.page=None
+    def __init__(self,stop,report,retry,creds=None):
+        self.stop=stop;self.report=report;self.retry=retry;self.creds=creds or {}
+        self.browser=None;self.runtime=None;self.page=None
 
     def check(self):
         if self.stop.is_set():raise Stopped()
@@ -68,14 +170,20 @@ class SiteBrowser:
         self.page.wait_for_timeout(2000)
         signed=self.page.evaluate("Boolean(window.Liferay?.ThemeDisplay?.isSignedIn())")
         if not signed:
-            self.report('Đăng nhập trong cửa sổ trình duyệt vừa mở. App sẽ tự tiếp tục khi nhận được phiên đăng nhập.')
-            self.page.goto(BASE+'/c/portal/login',wait_until='domcontentloaded',timeout=60000)
+            self.report('Đăng nhập trong cửa sổ trình duyệt vừa mở. App sẽ tự điền tài khoản đã lưu.')
+            user, pwd = _login_fields(self.page)
+            if user is None and pwd is None:
+                self.page.goto(BASE+'/c/portal/login',wait_until='domcontentloaded',timeout=60000)
+            username = self.creds.get("username")
+            password = self.creds.get("password")
+            fill_msc_login(self.page, username, password, self.report)
             while True:
                 self.check()
                 if self.page.is_closed():raise RuntimeError('Trình duyệt đã đóng. Bấm tải tiếp để mở lại.')
                 try:
                     if self.page.evaluate("Boolean(window.Liferay?.ThemeDisplay?.isSignedIn())"):break
                 except Exception:pass
+                refill_msc_login_if_blank(self.page, username, password)
                 self.page.wait_for_timeout(1000)
         self.page.goto(URL,wait_until='domcontentloaded',timeout=60000)
         self.page.wait_for_function('Boolean('+COMPONENT+')',timeout=60000)
@@ -104,12 +212,79 @@ class SiteBrowser:
                 while not self.retry.wait(.5):self.check()
                 self.open()
 
+    def open_price(self):
+        """Open the price page in the authenticated visible browser session."""
+        self.check(); self.open()
+        if not self.page.url.startswith(PRICE_URL):
+            self.page.goto(PRICE_URL,wait_until='domcontentloaded',timeout=60000)
+            self.page.wait_for_timeout(1200)
+
+    def _price_post(self,url,body):
+        """Call MSC from the logged-in browser, keeping cookies inside Playwright."""
+        self.open_price()
+        for attempt in range(6):
+            self.check()
+            try:
+                result=self.page.evaluate("""async ({url, body}) => {
+                    const response = await fetch(url, {
+                      method: 'POST', credentials: 'include',
+                      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+                    });
+                    const text = await response.text();
+                    let data = null; try { data = JSON.parse(text); } catch (_) {}
+                    return {status: response.status, data};
+                }""",{'url':url,'body':body})
+                if result.get('status')==200 and isinstance(result.get('data'),dict):
+                    return result['data']
+            except Stopped: raise
+            except Exception: pass
+            wait=min(20,2**(attempt+1))
+            self.report(f'Nguồn đơn giá đang bận; trình duyệt sẽ tự thử lại sau {wait} giây…')
+            if self.stop.wait(wait): raise Stopped()
+            if attempt==2:
+                try:self.page.reload(wait_until='domcontentloaded',timeout=60000)
+                except Exception:pass
+        raise RuntimeError('Nguồn đơn giá chưa phản hồi sau nhiều lần thử. Tiến độ đã lưu; bấm tải tiếp để dùng lại phiên trình duyệt.')
+
+    def fetch_price(self,start,end,medicine,page,size=50):
+        from sync import payload as price_payload
+        result=self._price_post(PRICE_API,price_payload(start,end,medicine,page,size))
+        data=result.get('page')
+        if not isinstance(data,dict) or not isinstance(data.get('content'),list) or not isinstance(data.get('totalElements'),int):
+            raise RuntimeError('Nguồn đơn giá trả dữ liệu không hợp lệ; chưa tăng tiến độ.')
+        return data
+
+    def fetch_price_export(self,start,end,medicine):
+        from sync import payload as price_payload
+        result=self._price_post(PRICE_API+'/export',price_payload(start,end,medicine,0,10000))
+        rows=result.get('resultList')
+        if not isinstance(rows,list):
+            raise RuntimeError('Export đơn giá trả dữ liệu không hợp lệ; chưa xác nhận hoàn tất.')
+        return rows
+
     def close(self):
         try:
             if self.browser:self.browser.close()
             if self.runtime:self.runtime.stop()
         except Exception:pass
         self.browser=self.runtime=self.page=None
+
+
+class BrowserPriceApi:
+    """Downloader adapter: all price calls originate from the signed-in browser."""
+    def __init__(self,browser):self.browser=browser
+    def fetch(self,start,end,medicine,page,size=50):
+        return self.browser.fetch_price(start,end,medicine,page,size)
+    def fetch_export(self,start,end,medicine):
+        return self.browser.fetch_price_export(start,end,medicine)
+
+
+def run_price_pages(adapter,date_from,date_to,pages=20,full_scan=False):
+    """Stable browser-backed price crawl. Full scans use the authenticated Export endpoint."""
+    from sync import Downloader
+    loader=Downloader(report=adapter.report,api=BrowserPriceApi(adapter),delay=.75,page_size=50)
+    loader.stop=adapter.stop
+    loader.run(date_from,date_to,refresh=True,max_pages=None if full_scan else pages,full_scan=full_scan)
 
 def run_pages(adapter,pages,stop,report,db=None,resume=False,recheck=True):
     if not 1<=pages<=200:raise ValueError('Số trang phải từ 1 đến 200.')
@@ -176,30 +351,48 @@ class BrowserUpdater:
                 (ROOT/'data'/'update_status.json').write_text(json.dumps({'time':now(),'message':message},ensure_ascii=False),encoding='utf-8')
             except OSError:pass
         self.report=status;self.finished=finished;self.stop=threading.Event();self.retry=threading.Event()
-        self.jobs=queue.Queue();self.busy=False
+        self.creds={"username":"","password":""};self.after=None
+        self.jobs=queue.Queue();self.busy=False;self.last_error=None
         self.thread=threading.Thread(target=self.work,daemon=True);self.thread.start()
 
-    def start(self,pages,resume=False,recheck=True,prices=False):
+    def start(self,pages,resume=False,recheck=True,prices=False,username="",password="",after=None):
         if self.busy:raise ValueError('Một lượt cập nhật đang chạy.')
-        self.busy=True;self.stop.clear();self.jobs.put((pages,resume,recheck,prices))
+        self.busy=True;self.stop.clear();self.after=after;self.last_error=None
+        self.creds["username"]=username or ""
+        self.creds["password"]=password or ""
+        self.jobs.put(('tenders',pages,resume,recheck,prices))
+
+    def start_prices(self,date_from,date_to,pages=20,full_scan=False,username="",password=""):
+        if self.busy:raise ValueError('Một lượt cập nhật đang chạy.')
+        self.busy=True;self.stop.clear();self.after=None;self.last_error=None
+        self.creds['username']=username or '';self.creds['password']=password or ''
+        self.jobs.put(('prices',date_from,date_to,pages,full_scan))
 
     def work(self):
-        adapter=SiteBrowser(self.stop,self.report,self.retry)
+        adapter=SiteBrowser(self.stop,self.report,self.retry,self.creds)
         try:
             while True:
                 job=self.jobs.get()
                 if job is None:break
                 try:
-                    run_pages(adapter,job[0],self.stop,self.report,resume=job[1],recheck=job[2])
-                    if job[3] and not self.stop.is_set():
-                        from sync import Downloader
-                        loader=Downloader(report=self.report);loader.stop=self.stop
-                        self.report('Đang cập nhật đơn giá thuốc trong 30 ngày gần nhất…')
-                        loader.run((date.today()-timedelta(days=29)).isoformat(),date.today().isoformat(),True)
-                except Stopped:self.report('Đã dừng và lưu tiến độ. Chọn cùng số trang, rồi bấm “Tải tiếp lượt dở”.')
+                    if job[0]=='prices':
+                        mode='Quét tổng thể đơn giá bằng trình duyệt…' if job[4] else f'Đang cập nhật {job[3]} trang đơn giá bằng trình duyệt…'
+                        self.report(mode)
+                        run_price_pages(adapter,job[1],job[2],job[3],job[4])
+                    else:
+                        run_pages(adapter,job[1],self.stop,self.report,resume=job[2],recheck=job[3])
+                        if self.after and not self.stop.is_set():
+                            self.report('Đang tải hồ sơ các gói đang mở trong cùng phiên đăng nhập…')
+                            self.after(adapter.page, self.report, self.stop)
+                        if job[4] and not self.stop.is_set():
+                            run_price_pages(adapter,(date.today()-timedelta(days=29)).isoformat(),date.today().isoformat(),20)
+                except Stopped:
+                    self.last_error='Đã dừng và lưu tiến độ. Có thể bấm lại để tải tiếp.'
+                    self.report(self.last_error)
                 except Exception as e:
                     # Never display browser exception messages: they can contain token URLs.
-                    self.report(str(e) if isinstance(e,(ValueError,RuntimeError)) else 'Chưa kết nối được nguồn ('+type(e).__name__+'). Kiểm tra trình duyệt rồi tải tiếp lượt dở.')
+                    self.last_error=str(e) if isinstance(e,(ValueError,RuntimeError)) else 'Chưa kết nối được nguồn ('+type(e).__name__+'). Kiểm tra trình duyệt rồi tải tiếp lượt dở.'
+                    self.report(self.last_error)
                 finally:self.busy=False;self.finished()
         finally:adapter.close()
 
