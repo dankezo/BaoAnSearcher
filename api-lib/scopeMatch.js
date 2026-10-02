@@ -74,13 +74,28 @@ export function publicLines(lots, catalog = baoanProducts()) {
   return lines
 }
 
+/**
+ * A cached tender-level label is only a crawl-time hint.  The catalogue can
+ * change after the crawl, so every consumer must derive the displayed label
+ * from the same line results it shows to the user.  One exact line wins;
+ * otherwise a near line makes the package near.
+ */
+export function packageMatchFromLines(lines) {
+  if ((lines || []).some((line) => line?.match === 'exact')) return 'exact'
+  if ((lines || []).some((line) => line?.match === 'near')) return 'near'
+  return ''
+}
+
 export function attachScope(items) {
   const catalog = baoanProducts()
   for (const item of items || []) {
     const row = scopeFor(item)
     const lots = row?.lots || []
-    item.baoan_match = row?.match || ''
-    if (row?.match) item.scope_lines = publicLines(lots, catalog)
+    const lines = lots.length ? publicLines(lots, catalog) : []
+    // Do not use row.match here: it was written when the tender was crawled
+    // and can disagree with the per-line result after catalog updates.
+    item.baoan_match = packageMatchFromLines(lines)
+    if (lots.length) item.scope_lines = lines
     if (lots.length) {
       item.ingredient = [...new Set(lots.map((lot) => lot.tenHoatChat || lot.lotName || '').filter(Boolean))].join('; ')
       item.dosage_form = [...new Set(lots.map((lot) => lot.dangBaoChe || '').filter(Boolean))].join('; ')
@@ -105,8 +120,9 @@ export function scopeTenderNos(filters = {}) {
   if (!ingredient && !form && !level) return null
   const nos = []
   for (const row of rows()) {
-    if (level && row.match !== level) continue
     if ((ingredient || form) && !(row.lots || []).some((lot) => lotMatches(lot, ingredient, form))) continue
+    const lines = publicLines(row.lots || [])
+    if (level && packageMatchFromLines(lines) !== level) continue
     if (row.tender_no) nos.push(String(row.tender_no))
   }
   return [...new Set(nos)]

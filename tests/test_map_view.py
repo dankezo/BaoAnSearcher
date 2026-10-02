@@ -81,7 +81,10 @@ class MapViewTest(unittest.TestCase):
         self.assertTrue(lists["areas"]["Đông Nam Bộ"])
 
     def test_price_strip_reports_yoy_groups_and_top_provinces(self):
-        now = datetime.now().replace(day=15, hour=12, minute=0, second=0, microsecond=0)
+        # Keep the fixture inside the current clock day.  A noon timestamp can
+        # be in the future when this test runs in the morning and is rightly
+        # excluded by the production time-window query.
+        now = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         previous = now.replace(year=now.year - 1)
         rows = [
             {"ingredient": "Paracetamol", "province": "Hà Nội", "quantity": 10, "unit_price": 1000,
@@ -103,11 +106,11 @@ class MapViewTest(unittest.TestCase):
         self.assertEqual([row["name"] for row in payload["topProvinces"][:2]], ["Hà Nội", "Đà Nẵng"])
         self.assertEqual(payload["topGrowth"][0]["name"], "Hà Nội")
         self.assertAlmostEqual(payload["topGrowth"][0]["growth"], 150.0)
-        by_week = {row["key"]: row["revenue"] for row in payload["series"]}
-        self.assertEqual(payload["series"][0]["key"], metric_slice._monday(previous).strftime("%Y-%m-%d"))
-        self.assertEqual(payload["series"][-1]["key"], metric_slice._monday(datetime.now()).strftime("%Y-%m-%d"))
-        self.assertEqual(by_week[metric_slice._monday(previous).strftime("%Y-%m-%d")], 4000)
-        self.assertEqual(by_week[metric_slice._monday(now).strftime("%Y-%m-%d")], 13000)
+        by_month = {row["key"]: row["revenue"] for row in payload["series"]}
+        _months, current_now, current_from, _prev_from, _prev_end = metric_slice._window(12)
+        self.assertEqual(payload["series"][0]["key"], current_from.strftime("%Y-%m"))
+        self.assertEqual(payload["series"][-1]["key"], current_now.strftime("%Y-%m"))
+        self.assertEqual(by_month[now.strftime("%Y-%m")], 13000)
 
     def test_msc_open_trend_counts_packages_opened_each_month(self):
         from server.map_view import _package_provinces, _rollup, msc_trend_label

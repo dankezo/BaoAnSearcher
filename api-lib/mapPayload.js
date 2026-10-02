@@ -1,6 +1,6 @@
 import { fold } from './turso.js'
 import { groupDigit } from './metricsRollup.js'
-import { matchingTenderNos, publicLines, scopeFor } from './scopeMatch.js'
+import { matchingTenderNos, packageMatchFromLines, publicLines, scopeFor } from './scopeMatch.js'
 import { VN_PROVINCES, provinceNameFromCode } from './vnProvinces.js'
 
 const REGION_ORDER = [
@@ -942,7 +942,7 @@ FROM msc_tenders`,
     if (!place.code || !byCode.has(place.code)) continue
     const scope = scopeFor({ tender_no: tenderNo, source_id: row.source_id, source_url: row.source_url })
     const scopeLines = scope ? publicLines(scope.lots || []) : []
-    const level = scope && (scope.match === 'exact' || scope.match === 'near') ? scope.match : ''
+    const level = packageMatchFromLines(scopeLines)
     const value = num(row.bid_price)
     const slot = byCode.get(place.code)
     slot.value += value

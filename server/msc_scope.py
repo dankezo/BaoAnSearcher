@@ -54,13 +54,22 @@ def _connect():
 
 
 def load_cache() -> dict[str, str]:
-    """notify id and tender number → exact|near|none."""
+    """notify id and tender number → current exact|near|none.
+
+    The persisted ``scope_match.match`` is a crawl-time snapshot.  Recompute
+    from cached lots so a later catalogue correction cannot leave a package
+    green while every displayed line is only a near match.
+    """
     if not MSC_DB.exists():
         return {}
     con = _connect()
     try:
         out = {}
-        for nid, tender_no, level in con.execute("SELECT m.notify_id, m.tender_no, m.match FROM scope_match m JOIN scope_lots l ON l.notify_id=m.notify_id"):
+        for nid, tender_no, raw_lots in con.execute("SELECT m.notify_id, m.tender_no, l.lots FROM scope_match m JOIN scope_lots l ON l.notify_id=m.notify_id"):
+            try:
+                level = match_lots(json.loads(raw_lots))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                level = ""
             if nid:
                 out[f"id:{nid}"] = level
             if tender_no:
@@ -94,7 +103,7 @@ def present(items: list[dict]) -> list[dict]:
     """Replace raw lots with the popup table. Keep scope_lots off the wire."""
     from .baoan_match import public_lines
     for item in items:
-        if item.get("baoan_match"):
+        if item.get("scope_lots"):
             item["scope_lines"] = public_lines(item.get("scope_lots") or [])
         item.pop("scope_lots", None)
     return items

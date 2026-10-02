@@ -2,7 +2,7 @@ import { mapPayload, mapWindow } from './mapPayload.js'
 import { groupDigit } from './metricsRollup.js'
 import { baoanProducts } from './baoanCatalog.js'
 import { fold } from './turso.js'
-import { matchRows, publicLines, scopeFor } from './scopeMatch.js'
+import { matchRows, packageMatchFromLines, publicLines, scopeFor } from './scopeMatch.js'
 
 function hint(table) {
   return `/*+ READ_FROM_STORAGE(TIFLASH[${table}]) */`
@@ -294,9 +294,10 @@ export async function mscTenderSlice(query, filters = {}, months = 12) {
       if (days >= 0 && days < 7) closingCount += 1
     }
     const scope = scopeFor(row)
-    if (scope && ['exact', 'near', 'none'].includes(scope.match)) cached += 1
-    if (scope?.match === 'exact') exact += 1
-    else if (scope?.match === 'near') near += 1
+    if (scope) cached += 1
+    const level = scope ? packageMatchFromLines(publicLines(scope.lots || [], baoanProducts())) : ''
+    if (level === 'exact') exact += 1
+    else if (level === 'near') near += 1
   }
   return {
     section: 'msc_tenders',
@@ -329,9 +330,10 @@ export async function mscMatchReport(query, filters = {}, level = 'all') {
   for (const row of rows) {
     if (!isOpen(row, today)) continue
     const scope = scopeFor(row)
-    if (!scope || (scope.match !== 'exact' && scope.match !== 'near')) continue
-    row.baoan_match = scope.match
+    if (!scope) continue
     row.scope_lines = publicLines(scope.lots || [], baoanProducts())
+    row.baoan_match = packageMatchFromLines(row.scope_lines)
+    if (!row.baoan_match) continue
     open.push(row)
   }
   return { rows: matchRows(open, level) }

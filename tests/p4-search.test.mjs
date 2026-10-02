@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildSearchSql } from '../api-lib/db/searchSql.js'
+import { packageMatchFromLines } from '../api-lib/scopeMatch.js'
 
 function placeholders(sql) {
   return (sql.match(/\?/g) || []).length
@@ -69,4 +70,12 @@ test('a usable cursor drops OFFSET and follows each dialect null order', () => {
 test('an empty DAV tag list returns no rows', () => {
   const built = buildSearchSql({ kind: 'dav', filters: { tags: [] }, dialect: 'tidb' })
   assert.equal(built.empty, true)
+})
+
+test('tender label is derived from displayed line matches, not a stale crawl label', () => {
+  // The cache may say exact from an earlier catalogue version.  A green
+  // package is valid only when at least one line remains exact right now.
+  assert.equal(packageMatchFromLines([{ match: 'near' }, { match: 'near' }]), 'near')
+  assert.equal(packageMatchFromLines([{ match: '' }, { match: 'exact' }, { match: 'near' }]), 'exact')
+  assert.equal(packageMatchFromLines([{ match: '' }]), '')
 })

@@ -43,6 +43,20 @@ class TenderFiltersTest(unittest.TestCase):
                 self.assertEqual(con.execute('SELECT count(*) FROM scope_match').fetchone()[0], 0)
                 con.close()
 
+    def test_scope_cache_recomputes_a_stale_package_label_from_its_lots(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'msc.db'
+            with patch.object(msc_scope, 'MSC_DB', path):
+                con = msc_scope._connect()
+                con.execute("INSERT INTO scope_match VALUES (?,?,?,?)", ('n1', 'IB1', 'exact', '2026-01-01'))
+                con.execute("INSERT INTO scope_lots VALUES (?,?,?)", ('n1', json.dumps([{'lotName': 'Paracetamol'}]), '2026-01-01'))
+                con.commit()
+                con.close()
+                with patch.object(msc_scope, 'match_lots', return_value='near'):
+                    cache = msc_scope.load_cache()
+        self.assertEqual(cache['id:n1'], 'near')
+        self.assertEqual(cache['no:IB1'], 'near')
+
     def test_quick_filter_applies_before_pagination(self):
         now = datetime.now()
         with tempfile.TemporaryDirectory() as folder:
