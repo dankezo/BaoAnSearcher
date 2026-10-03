@@ -353,6 +353,7 @@ export default function MapSection({ localMode = true }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [facilityIngredients, setFacilityIngredients] = useState(null)
   const [pct, setPct] = useState(6)
   const [overlayOn, setOverlayOn] = useState(true)
   const [place, setPlace] = useState(null)
@@ -635,6 +636,32 @@ export default function MapSection({ localMode = true }) {
     ]
     return pools.find((dot) => dot.id === pick.id) || null
   }, [data, pick])
+  useEffect(() => {
+    let cancelled = false
+    if (!localMode || selectedDot?.kind !== 'facility') {
+      setFacilityIngredients(null)
+      return undefined
+    }
+    setFacilityIngredients({ dotId: selectedDot.id, loading: true, ingredients: [] })
+    api.mapFacilityIngredients({
+      dotId: selectedDot.id,
+      months: 12,
+      filters: {
+        hoatchat: query.hoatchat,
+        region: query.region,
+        province: query.province,
+        group: query.group,
+        q: query.q,
+      },
+    })
+      .then((payload) => {
+        if (!cancelled) setFacilityIngredients({ dotId: selectedDot.id, loading: false, ingredients: payload?.ingredients || [] })
+      })
+      .catch(() => {
+        if (!cancelled) setFacilityIngredients({ dotId: selectedDot.id, loading: false, ingredients: [] })
+      })
+    return () => { cancelled = true }
+  }, [localMode, selectedDot?.id, selectedDot?.kind, query.hoatchat, query.region, query.province, query.group, query.q])
   const cardStats = selectedRegion
     ? (data?.regions || []).find((row) => row.name === selectedRegion)
     : selectedCode
@@ -850,7 +877,9 @@ export default function MapSection({ localMode = true }) {
           <IngredientRank
             rows={
               selectedDot
-                ? (selectedDot.ingredients || [])
+                ? (selectedDot.kind === 'facility' && facilityIngredients?.dotId === selectedDot.id
+                  ? (facilityIngredients.ingredients || [])
+                  : (selectedDot.ingredients || []))
                 : selectedCode
                   ? (data?.ingredientAreas?.[selectedCode] || [])
                   : selectedRegion

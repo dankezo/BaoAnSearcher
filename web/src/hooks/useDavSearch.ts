@@ -317,6 +317,7 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
     filters.soDangKy,
     filters.hoatChat,
     filters.drugGroup,
+    filters.tenderGroup,
     filters.dangBaoChe,
     filters.sanXuat,
     filters.dangKy,

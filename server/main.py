@@ -216,6 +216,16 @@ def metrics_map(body: dict[str, Any]):
         raise HTTPException(500, str(e))
 
 
+@app.post("/api/metrics/map/facility-ingredients")
+def metrics_map_facility_ingredients(body: dict[str, Any]):
+    """Lazy VSS facility details; keeps the first map response lightweight."""
+    from .map_view import vss_facility_ingredients
+    try:
+        return vss_facility_ingredients(body or {})
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.post("/api/msc/scope/refresh")
 def msc_scope_refresh():
     from .msc_scope import refresh_async

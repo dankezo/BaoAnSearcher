@@ -33,7 +33,14 @@ MSC_COLUMNS = (
 
 
 def tidb_configured() -> bool:
-    return bool(os.environ.get("TIDB_HOST") and os.environ.get("TIDB_USER") and os.environ.get("TIDB_DATABASE"))
+    # The desktop API is the local working copy.  It must not turn a page
+    # render into several wide TiDB scans merely because global TiDB
+    # credentials are present for the production synchronizer.  Opt in to
+    # remote reads explicitly when diagnosing production data.
+    return (
+        str(os.environ.get("PORTFOLIO_BACKEND") or "").strip().lower() == "tidb"
+        and bool(os.environ.get("TIDB_HOST") and os.environ.get("TIDB_USER") and os.environ.get("TIDB_DATABASE"))
+    )
 
 
 def backend_name() -> str:

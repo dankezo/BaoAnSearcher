@@ -58,6 +58,7 @@ export function DavFilterSection({
     draft.soDangKy,
     draft.hoatChat,
     draft.drugGroup,
+    draft.tenderGroup,
     draft.dangBaoChe,
     draft.sanXuat,
     draft.dangKy,
@@ -83,6 +84,16 @@ export function DavFilterSection({
         suggest={fieldSuggest('drugGroup')}
         placeholder="Chọn phân loại…"
       />
+      {localMode && (
+        <MultiSelectField
+          label="Nhóm thầu (VSS theo SĐK)"
+          hint="Dữ liệu thầu, không phải phân loại DAV"
+          value={draft.tenderGroup}
+          onChange={(v) => setLocal('tenderGroup', v)}
+          options={['Nhóm 1', 'Nhóm 2', 'Nhóm 3', 'Nhóm 4', 'Nhóm 5']}
+          placeholder="Chọn nhóm thầu…"
+        />
+      )}
       <SuggestField
         label="Tên thuốc"
         value={draft.tenThuoc}

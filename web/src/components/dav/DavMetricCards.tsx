@@ -79,7 +79,14 @@ export function DavMetricCards({ items, cards, total, activeId, onFilter, loadin
                   }))}
                 />
               )}
-              {card.key !== 'tags' && <p>{card.subtitle || '--'}</p>}
+              {card.key !== 'tags' && (
+                <p>
+                  {card.key === 'density' && total > 0
+                    ? `Tổng ${Number(total).toLocaleString('vi-VN')} SĐK · `
+                    : ''}
+                  {card.subtitle || '--'}
+                </p>
+              )}
               <div className="dav-metric-badges">
                 {card.subMetrics.map((item) => (
                   <button

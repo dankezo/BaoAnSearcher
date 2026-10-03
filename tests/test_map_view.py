@@ -170,6 +170,7 @@ class MapViewTest(unittest.TestCase):
             {
                 "stems": ["paracetamol"],
                 "form": "vien nen",
+                "route": "uong",
                 "strength": baoan_match._strengths("500 mg"),
                 "group": "",
                 "card": {"brand": "Hapacol", "strength": "500 mg", "form": "Viên nén", "reg": "VD-111"},
@@ -177,6 +178,7 @@ class MapViewTest(unittest.TestCase):
             {
                 "stems": ["paracetamol"],
                 "form": "vien nen",
+                "route": "",
                 "strength": baoan_match._strengths("80 mg"),
                 "group": "",
                 "card": {"brand": "Efferalgan", "strength": "80 mg", "form": "Viên sủi", "reg": "VD-222"},
@@ -185,7 +187,7 @@ class MapViewTest(unittest.TestCase):
         with patch.object(baoan_match, "catalog", return_value=fake):
             inn_only = rank_ingredients([("Paracetamol", 10, 1)])
             self.assertEqual(inn_only[0]["baoanHits"], [])
-            lot = {"tenHoatChat": "Paracetamol", "nongDo": "500mg", "dangBaoChe": "Viên nén"}
+            lot = {"tenHoatChat": "Paracetamol", "nongDo": "500mg", "dangBaoChe": "Viên nén", "duongDung": "Uống"}
             exact = rank_ingredients([("Paracetamol", 10, 1, lot)])
         self.assertEqual(exact[0]["baoanHits"][0]["reg"], "VD-111")
         self.assertEqual(len(exact[0]["baoanHits"]), 1)
@@ -196,6 +198,7 @@ class MapViewTest(unittest.TestCase):
             {
                 "stems": ["ofloxacin"],
                 "form": "vien nen bao phim",
+                "route": "",
                 "strength": baoan_match._strengths("300 mg"),
                 "group": "",
                 "card": {"brand": "Oflozylkab", "strength": "300 mg", "form": "Viên nén bao phim", "reg": "VD-893"},
@@ -215,6 +218,22 @@ class MapViewTest(unittest.TestCase):
         self.assertEqual(hit["baoanHits"][0]["brand"], "Oflozylkab")
         self.assertEqual(hit["baoanHits"][0]["reg"], "VD-893")
         self.assertNotIn("Ofloxacin", [row["name"] for row in capped])
+
+    def test_ingredient_rows_keep_near_catalog_hits_for_the_map(self):
+        from server import baoan_match
+        fake = ({
+            "stems": ["paracetamol"],
+            "form": "vien nen",
+            "route": "uong",
+            "strength": baoan_match._strengths("500 mg"),
+            "group": "",
+            "card": {"brand": "Hapacol", "strength": "500 mg", "form": "Viên nén", "reg": "VD-111"},
+        },)
+        lot = {"tenHoatChat": "Paracetamol", "nongDo": "400 mg", "dangBaoChe": "Viên nén", "duongDung": "Uống"}
+        with patch.object(baoan_match, "catalog", return_value=fake):
+            ranked = rank_ingredients([("Paracetamol", 10, 1, lot)])
+        self.assertEqual(ranked[0]["match"], "near")
+        self.assertEqual(ranked[0]["baoanHits"][0]["reg"], "VD-111")
 
     def test_scope_line_maps_to_full_ingredient_row(self):
         from server.map_view import _ingredient_from_scope_line

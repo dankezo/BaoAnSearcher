@@ -14,7 +14,7 @@ import json
 import sqlite3
 import time
 
-from .baoan_match import exact_hits, msc_price_lot, public_lines
+from .baoan_match import classify_lot, msc_price_lot, public_lines
 from .common import MSC_DB, VSS_DB, fold
 from .metric_slice import (
     PROVINCES,
@@ -208,12 +208,25 @@ def _pair_row(item) -> tuple[str, float, float, dict | None]:
     return name, value, quantity, lot
 
 
-def _merge_exact(slot: dict, lot: dict | None) -> None:
+def _merge_match(slot: dict, lot: dict | None) -> None:
     if not lot:
+        return
+    level, hits = classify_lot(lot)
+    if level not in {"exact", "near"}:
+        return
+    # When one ingredient appears in multiple tender lines, a confirmed match
+    # wins.  The cards then always correspond to the visible colour.
+    if level == "exact" and slot.get("match") != "exact":
+        slot["match"] = "exact"
+        slot["baoanHits"] = []
+        slot["_hit_keys"] = set()
+    elif not slot.get("match"):
+        slot["match"] = level
+    if slot.get("match") != level:
         return
     seen = slot.setdefault("_hit_keys", set())
     bucket = slot.setdefault("baoanHits", [])
-    for card in exact_hits(lot):
+    for card in hits:
         key = str(card.get("reg") or card.get("brand") or "")
         if not key or key in seen:
             continue
@@ -234,10 +247,10 @@ def rank_ingredients(pairs, limit: int = 60, *, keep_matches: bool = False) -> l
         if not label:
             continue
         key = fold(label)
-        slot = buckets.setdefault(key, {"name": label, "value": 0.0, "quantity": 0.0})
+        slot = buckets.setdefault(key, {"name": label, "value": 0.0, "quantity": 0.0, "match": "", "baoanHits": []})
         slot["value"] += float(value or 0)
         slot["quantity"] += float(quantity or 0)
-        _merge_exact(slot, lot)
+        _merge_match(slot, lot)
     ranked = sorted(buckets.values(), key=lambda row: (row["value"], row["quantity"]), reverse=True)
     if not keep_matches:
         ranked = ranked[:limit]
@@ -247,7 +260,7 @@ def rank_ingredients(pairs, limit: int = 60, *, keep_matches: bool = False) -> l
     if not keep_matches:
         return ranked
     head = ranked[:limit]
-    extras = [row for row in ranked[limit:] if row.get("baoanHits")]
+    extras = [row for row in ranked[limit:] if row.get("match")]
     return head + extras[:24]
 
 
@@ -423,7 +436,10 @@ def _vss_rows(filters: dict):
 
 
 def _vss_where(filters: dict, start, end):
-    clauses = ["coalesce(tungay_hd,'') >= ?", "coalesce(tungay_hd,'') <= ?"]
+    # ``tungay_hd`` is the leading column of idx_bids_effective_province.
+    # Nulls never belong to a dated metric window, so COALESCE would only
+    # prevent SQLite from using that index.
+    clauses = ["tungay_hd >= ?", "tungay_hd <= ?"]
     args: list = [start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d 23:59:59")]
     token = fold(filters.get("hoatchat") or "")
     if token:
@@ -485,47 +501,23 @@ def _vss_facilities(filters: dict, start, end, limit: int = 220, with_dots: bool
     con = sqlite3.connect(f"file:{VSS_DB}?mode=ro", uri=True)
     try:
         con.create_function("fold", 1, fold)
-        counts = {
-            (str(code).zfill(2) if str(code).isdigit() else str(code)): int(count or 0)
-            for code, count in con.execute(
-                f"""
-                SELECT coalesce(ma_tinh,''),
-                       count(DISTINCT coalesce(json_extract(raw,'$.ma_cskcb'), json_extract(raw,'$.ten_cskcb')))
-                FROM bids
-                {where}
-                GROUP BY 1
-                """,
-                args,
-            )
-        }
+        counts = {}
         dots = []
         by_province = []
         if with_dots:
-            dots = con.execute(
-                f"""
-                SELECT coalesce(json_extract(raw,'$.ma_cskcb'), ''),
-                       max(coalesce(json_extract(raw,'$.ten_cskcb'), '')),
-                       coalesce(ma_tinh, ''),
-                       max(coalesce(json_extract(raw,'$.ten_tinh'), '')),
-                       sum(coalesce(cast(json_extract(raw,'$.thanhtien') AS real), 0)),
-                       count(*)
-                FROM bids
-                {where}
-                GROUP BY 1, 3
-                ORDER BY 5 DESC
-                LIMIT ?
-                """,
-                [*args, limit],
-            ).fetchall()
+            # One grouped pass supplies both the national dots and the top
+            # facilities for each province.  The former implementation made
+            # three independent full VSS aggregates for exactly this data.
             by_province = con.execute(
                 f"""
-                SELECT fac, name, code, province, value, lots FROM (
+                SELECT fac, name, code, province, value, lots, facility_count FROM (
                     SELECT coalesce(json_extract(raw,'$.ma_cskcb'), '') AS fac,
                            max(coalesce(json_extract(raw,'$.ten_cskcb'), '')) AS name,
                            coalesce(ma_tinh, '') AS code,
                            max(coalesce(json_extract(raw,'$.ten_tinh'), '')) AS province,
                            sum(coalesce(cast(json_extract(raw,'$.thanhtien') AS real), 0)) AS value,
                            count(*) AS lots,
+                           count(*) OVER (PARTITION BY coalesce(ma_tinh, '')) AS facility_count,
                            row_number() OVER (
                                PARTITION BY coalesce(ma_tinh, '')
                                ORDER BY sum(coalesce(cast(json_extract(raw,'$.thanhtien') AS real), 0)) DESC
@@ -537,6 +529,12 @@ def _vss_facilities(filters: dict, start, end, limit: int = 220, with_dots: bool
                 """,
                 args,
             ).fetchall()
+            for _fac, _name, code, _province, _value, _lots, facility_count in by_province:
+                key = str(code or "")
+                key = key.zfill(2) if key.isdigit() else key
+                counts[key] = max(counts.get(key, 0), int(facility_count or 0))
+            dots = [row[:6] for row in sorted(by_province, key=lambda row: float(row[4] or 0), reverse=True)[:limit]]
+            by_province = [row[:6] for row in by_province]
     finally:
         con.close()
     return counts, dots, by_province
@@ -629,8 +627,10 @@ def _build_vss(filters: dict, months: int, *, with_dots: bool = True, with_ingre
             "status": "",
             "statusLabel": "Cơ sở y tế",
         })
-    if with_ingredients:
-        _attach_vss_ingredients(dots, filters, cur_from, now)
+    # Do not aggregate every facility's ingredient list during the map load.
+    # That query groups the entire VSS fact table for hundreds of dots and was
+    # the reason a simple map view could take tens of seconds.  The selected
+    # facility is loaded on demand by ``vss_facility_ingredients`` below.
     area_dots = {}
     for dot in dots:
         if dot["id"] in area_ids:
@@ -687,6 +687,38 @@ def _attach_vss_ingredients(dots, filters, start, end):
         grouped.setdefault(dot_id, []).append((name, value, qty))
     for dot in dots:
         dot["ingredients"] = rank_ingredients(grouped.get(dot["id"]) or [], 15)
+
+
+def vss_facility_ingredients(body: dict) -> dict:
+    """Return the small right-panel list for one selected VSS facility only."""
+    dot_id = str(body.get("dotId") or "")
+    if ":" not in dot_id or not VSS_DB.exists():
+        return {"dotId": dot_id, "ingredients": []}
+    raw_code, facility = dot_id.split(":", 1)
+    code = raw_code.zfill(2) if raw_code.isdigit() else raw_code
+    if not facility.strip():
+        return {"dotId": dot_id, "ingredients": []}
+    filters = body.get("filters") if isinstance(body.get("filters"), dict) else {}
+    months, now, start, _prev_from, _prev_end = _window(int(body.get("months") or 12))
+    where, args = _vss_where(filters, start, now)
+    where += " AND coalesce(ma_tinh, '') IN (?, ?) AND coalesce(json_extract(raw,'$.ma_cskcb'), '') = ?"
+    args.extend([code, str(int(code)) if code.isdigit() else code, facility])
+    con = sqlite3.connect(f"file:{VSS_DB}?mode=ro", uri=True)
+    try:
+        con.create_function("fold", 1, fold)
+        rows = con.execute(
+            f"""
+            SELECT coalesce(hoatchat, ''),
+                   sum(coalesce(cast(json_extract(raw,'$.thanhtien') AS real), 0)),
+                   sum(coalesce(cast(json_extract(raw,'$.soluong') AS real), 0))
+            FROM bids {where}
+            GROUP BY fold(coalesce(hoatchat, ''))
+            """,
+            args,
+        ).fetchall()
+    finally:
+        con.close()
+    return {"dotId": dot_id, "ingredients": rank_ingredients(rows, 15), "months": months}
 
 
 def _scope_lots_index() -> tuple[dict, dict]:
@@ -748,14 +780,14 @@ def _ingredients_from_price_rows(pairs: list) -> list[dict]:
         label = " ".join(str(name or "").split())
         if not label:
             continue
-        hits = exact_hits(lot) if lot else []
+        level, hits = classify_lot(lot) if lot else (None, [])
         lines.append({
             "name": label,
             "strength": str((lot or {}).get("nongDo") or "").strip(),
             "form": str((lot or {}).get("dangBaoChe") or "").strip(),
             "value": float(value or 0),
             "quantity": float(quantity or 0),
-            "match": "exact" if hits else "",
+            "match": level or "",
             "baoanHits": hits,
         })
     lines.sort(key=lambda row: (row["value"], row["quantity"]), reverse=True)

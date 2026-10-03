@@ -105,6 +105,10 @@ def connect():
     con.execute("CREATE INDEX IF NOT EXISTS idx_bids_search ON bids(search)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_bids_sodk ON bids(sodk)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_bids_ten ON bids(ten)")
+    # Map queries always begin with the VSS effective-date window.  Keeping
+    # the province beside it avoids a full scan of the archive on every map
+    # load while leaving the existing import format untouched.
+    con.execute("CREATE INDEX IF NOT EXISTS idx_bids_effective_province ON bids(tungay_hd, ma_tinh)")
     return con
 
 
@@ -1138,25 +1142,25 @@ def crawl_vss(
             if stopped:
                 update_status(
                     "vss", state="idle", progress=100,
-                    message=f"Đã dừng · đã lưu +{total_ins}", updated=now_iso(), count=info["count"],
+                    message=f"Đã dừng · đã lưu +{total_ins}", updated=now_iso(), count=info["count"], added=total_ins,
                 )
             elif failed_days:
                 update_status(
                     "vss", state="error", progress=int(100 * completed_days / max(1, len(days_list))),
                     message=f"Chưa tải đủ: {completed_days}/{len(days_list)} ngày, {len(failed_days)} ngày lỗi · đã lưu +{total_ins}",
-                    failed_days=failed_days, updated=now_iso(), count=info["count"],
+                    failed_days=failed_days, updated=now_iso(), count=info["count"], added=total_ins,
                 )
             else:
                 update_status(
                     "vss", state="idle", progress=100,
-                    message=f"Crawl export xong +{total_ins}", failed_days=[], updated=now_iso(), count=info["count"],
+                    message=f"Crawl export xong +{total_ins}", failed_days=[], updated=now_iso(), count=info["count"], added=total_ins,
                 )
         except Exception as e:
             if _crawl_stop.is_set():
                 info = meta_info()
                 update_status(
                     "vss", state="idle", progress=100,
-                    message=f"Đã dừng · đã lưu +{total_ins}", updated=now_iso(), count=info["count"],
+                    message=f"Đã dừng · đã lưu +{total_ins}", updated=now_iso(), count=info["count"], added=total_ins,
                 )
             else:
                 update_status("vss", state="error", message=str(e), updated=now_iso())

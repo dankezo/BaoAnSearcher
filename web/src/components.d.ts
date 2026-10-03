@@ -19,7 +19,8 @@ export function MultiSelectField(props: {
   hint?: string
   value: string[]
   onChange: (value: string[]) => void
-  suggest: (q: string) => Promise<string[]>
+  suggest?: (q: string) => Promise<string[]>
+  options?: Array<string | { value: string; label: string }>
   placeholder?: string
 }): ReactElement
 export function CountSelect(props: {

@@ -114,6 +114,9 @@ function StatusCard({ index, title, source, status, recordLabel = 'Bản ghi', r
           </dd>
         </div>
       </dl>
+      {Number.isFinite(Number(status?.added)) && (
+        <div className="muted small">Mới trong lượt này: <strong>+{Number(status.added).toLocaleString('vi-VN')}</strong> bản ghi</div>
+      )}
 
       {(running || (pct > 0 && pct < 100)) && (
         <div className="progress-line">

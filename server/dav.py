@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .common import (
-    DAV_DB, DM93_PATH, VN, fold, load_status, normalize_dosage_form,
+    DAV_DB, VSS_DB, DM93_PATH, VN, fold, load_status, normalize_dosage_form,
     normalize_ingredient_token, normalize_strength, parse_date, split_ingredients,
     update_status, years_between, now_iso, read_metadata, configure_sqlite,
 )
@@ -20,6 +20,48 @@ _dm93_index_cache = None
 _validity_cache = None  # set of soDangKy that pass validity pipeline
 _downloader = None
 _download_thread = None
+
+
+def _sdk_key(value) -> str:
+    return re.sub(r"[^a-z0-9]", "", fold(value))
+
+
+def _tender_group(value) -> str:
+    """Return one tender group digit without confusing it with drug class."""
+    text = fold(value)
+    found = re.search(r"(?:nhom|group|n)?\s*([1-5])\b", text)
+    return found.group(1) if found else ""
+
+
+def vss_groups_for_registrations(registrations) -> dict[str, set[str]]:
+    """Read tender groups by SĐK through VSS's indexed ``sodk`` column.
+
+    DAV's own ``phanLoaiThuocEnum`` remains the regulatory drug
+    classification.  This separate field is evidence observed in VSS tender
+    records, so it must never be presented as a DAV classification.
+    """
+    keys = {_sdk_key(value) for value in registrations if _sdk_key(value)}
+    if not keys or not VSS_DB.exists():
+        return {}
+    # VSS keeps the original spelling of SĐK, therefore query the display
+    # values and normalize only after the indexed lookup returns them.
+    original = [str(value).strip() for value in registrations if str(value).strip()]
+    out: dict[str, set[str]] = {}
+    con = sqlite3.connect(f"file:{VSS_DB}?mode=ro", uri=True, timeout=15)
+    try:
+        for offset in range(0, len(original), 300):
+            part = original[offset:offset + 300]
+            slots = ",".join("?" for _ in part)
+            for sdk, group in con.execute(
+                f"SELECT sodk, nhomthau FROM bids WHERE sodk IN ({slots})", part
+            ):
+                digit = _tender_group(group)
+                key = _sdk_key(sdk)
+                if digit and key:
+                    out.setdefault(key, set()).add(digit)
+    finally:
+        con.close()
+    return out
 
 
 def _import_drug_tool():
@@ -359,6 +401,7 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
     sdk = fold(filters.get("soDangKy") or "")
     hc = fold(filters.get("hoatChat") or "")
     nhom_thuoc = [fold(value) for value in (filters.get("drugGroup") or []) if fold(value)]
+    tender_groups = {_tender_group(value) for value in (filters.get("tenderGroup") or []) if _tender_group(value)}
     dang = fold(filters.get("dangBaoChe") or "")
     sx = fold(filters.get("sanXuat") or "")
     dk = fold(filters.get("dangKy") or "")
@@ -455,9 +498,11 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
         except ValueError:
             return True
 
-    def row_matches(raw):
+    def row_matches(raw, groups_by_sdk):
         rec = json.loads(raw)
         flat = flatten(rec)
+        tender_group_values = groups_by_sdk.get(_sdk_key(flat.get("soDangKy") or ""), set())
+        flat["tenderGroup"] = ", ".join(f"Nhóm {value}" for value in sorted(tender_group_values))
         # Reliable text match on flattened fields (json_extract paths can miss variants)
         if ten and ten not in fold(flat.get("tenThuoc") or ""):
             return None
@@ -466,6 +511,8 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
         if hc and not all(w in fold(flat.get("hoatChat") or "") for w in hc.split()):
             return None
         if nhom_thuoc and not any(value in fold(flat.get("nhomThuoc") or "") for value in nhom_thuoc):
+            return None
+        if tender_groups and not tender_groups.intersection(tender_group_values):
             return None
         if dang and dang not in fold(flat.get("dangBaoChe") or ""):
             return None
@@ -511,8 +558,11 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
             ).fetchall()
             if not rows:
                 break
+            batch_groups = vss_groups_for_registrations(
+                json.loads(raw).get("soDangKy") or "" for (raw,) in rows
+            )
             for (raw,) in rows:
-                flat = row_matches(raw)
+                flat = row_matches(raw, batch_groups)
                 if flat is not None:
                     matched.append(flat)
                     if len(matched) >= target:
@@ -525,7 +575,7 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
 
     has_more = len(matched) > start + size
     exact_total = not any([
-        q, ten, sdk, hc, dang, sx, dk, nuoc, con_hieu_luc, ingredient_n, need_group,
+        q, ten, sdk, hc, nhom_thuoc, tender_groups, dang, sx, dk, nuoc, con_hieu_luc, ingredient_n, need_group,
     ]) and tags_set is None
     return {
         "total": int(total_db) if exact_total else None,
@@ -573,6 +623,7 @@ def start_crawl(restart: bool = False) -> dict:
     def work():
         global _downloader
         try:
+            previous_count = int(meta_info().get("count") or 0)
             update_status("dav", state="running", progress=1, message="Kết nối DAV…", updated=now_iso())
             _downloader = drug_tool.Downloader(report)
             _downloader.run(restart=restart)
@@ -583,11 +634,12 @@ def start_crawl(restart: bool = False) -> dict:
                 report(f"Đã tải danh mục, chưa làm mới chỉ số: {metric_error}")
             info = meta_info()
             count = int(info.get("count") or 0)
+            added = max(0, count - previous_count)
             source = int(info.get("sourceTotal") or 0)
-            note = f"Hoàn tất · {count:,} bản ghi"
+            note = f"Hoàn tất · +{added:,} mới · {count:,} bản ghi"
             if source and source != count:
                 note += f" · nguồn {source:,}"
-            update_status("dav", state="idle", progress=100, message=note, updated=now_iso(), count=count)
+            update_status("dav", state="idle", progress=100, message=note, updated=now_iso(), count=count, added=added)
         except Exception as e:
             update_status("dav", state="error", message=str(e), updated=now_iso())
 

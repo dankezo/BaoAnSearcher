@@ -47,6 +47,7 @@ export const api = {
   metrics: (section) => request(`/api/metrics?section=${encodeURIComponent(section)}`),
   metricsSlice: (body) => request('/api/metrics/slice', { method: 'POST', body: JSON.stringify(body || {}) }),
   metricsMap: (body) => request('/api/metrics/map', { method: 'POST', body: JSON.stringify(body || {}), timeoutMs: 90000 }),
+  mapFacilityIngredients: (body) => request('/api/metrics/map/facility-ingredients', { method: 'POST', body: JSON.stringify(body || {}), timeoutMs: 45000 }),
   suggest: (section, field, q) => request(
     `/api/suggest?section=${encodeURIComponent(section)}&field=${encodeURIComponent(field)}&q=${encodeURIComponent(q || '')}`,
   ),

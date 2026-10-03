@@ -12,12 +12,14 @@ from server.match_report import build_rows, select_open
 
 FAKE = ({
     "stems": ["paracetamol"],
-    "form": "vien",
+    "form": "vien nen",
+    "route": "uong",
     "strength": {(500.0, "mg")},
     "card": {"brand": "ParaBA", "inn": "Paracetamol", "strength": "500mg", "form": "Viên nén", "reg": "VD-1"},
 }, {
     "stems": ["paracetamol"],
-    "form": "vien",
+    "form": "vien nen",
+    "route": "uong",
     "strength": {(500.0, "mg")},
     "card": {"brand": "ParaBA2", "inn": "Paracetamol", "strength": "500mg", "form": "Viên nén", "reg": "VD-2"},
 })

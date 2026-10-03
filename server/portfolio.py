@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import json
+import os
 import threading
 from datetime import datetime
 from statistics import median
@@ -447,9 +448,15 @@ def _assemble() -> tuple[list[dict], dict]:
         key = _cell_key(row.get("hoat_chat") or "", row.get("ham_luong") or "", row.get("dang_bao_che") or "")
         _remember_cell_sdk(cells, key, row)
     brands = [str(item.get("brand_name") or "") for item in catalog if len(fold(item.get("brand_name") or "")) >= 5]
-    raw_vss = vss_candidates(tokens, registrations, brands)
+    # The local cockpit must paint promptly.  Exact SĐK records use indexed
+    # lookups and are sufficient for the per-product history shown here.
+    # The former fallback built a 45-term OR scan across every VSS/MSC row on
+    # first paint, which made the endpoint time out before returning a table.
+    # Full market expansion remains available for an explicit offline audit.
+    full_market = str(os.environ.get("PORTFOLIO_FULL_MARKET") or "").strip() == "1"
+    raw_vss = vss_candidates(tokens if full_market else [], registrations, brands if full_market else [])
     vss_rows = _prepare_vss(raw_vss)
-    msc_rows = msc_candidates(tokens, registrations)
+    msc_rows = msc_candidates(tokens, registrations) if full_market else []
     from .portfolio_bids import index_awards, enrich, _line_key
     awards = index_awards(msc_rows, raw_vss, cell_rows + dav_rows)
     company_awards = {}

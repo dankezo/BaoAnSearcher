@@ -139,6 +139,7 @@ def start_price_sync(date_from: str, date_to: str, refresh: bool = False, *, max
 
     def work():
         try:
+            previous_count = int(meta_info().get("prices") or 0)
             mode = "Quét tổng thể đơn giá (tự chia dải thời gian)…" if full_scan else (
                 f"Cập nhật {max_pages} trang đơn giá mới nhất…" if max_pages else "Tải đơn giá…"
             )
@@ -163,10 +164,11 @@ def start_price_sync(date_from: str, date_to: str, refresh: bool = False, *, max
             else:
                 raise RuntimeError("Không tìm thấy sync.Downloader")
             info = meta_info()
+            added = max(0, int(info["prices"]) - previous_count)
             update_status(
                 "msc", state="idle", progress=100,
-                message="Hoàn tất quét tổng thể đơn giá" if full_scan else "Hoàn tất đơn giá",
-                updated=now_iso(), count=info["prices"],
+                message=("Hoàn tất quét tổng thể đơn giá" if full_scan else "Hoàn tất đơn giá") + f" · +{added:,} mới",
+                updated=now_iso(), count=info["prices"], added=added,
             )
         except Exception as e:
             update_status("msc", state="error", message=str(e), updated=now_iso())
@@ -193,6 +195,7 @@ def start_price_browser(date_from: str, date_to: str, pages: int = 20, full_scan
         done = threading.Event()
         updater = None
         try:
+            previous_count = int(meta_info().get("prices") or 0)
             label = "Quét tổng thể đơn giá bằng trình duyệt…" if full_scan else f"Cập nhật {pages} trang đơn giá bằng trình duyệt…"
             update_status("msc", state="running", progress=1, message=label, updated=now_iso())
             p = str(_proc_path())
@@ -219,10 +222,11 @@ def start_price_browser(date_from: str, date_to: str, pages: int = 20, full_scan
             if updater.last_error:
                 raise RuntimeError(updater.last_error)
             info = meta_info()
+            added = max(0, int(info["prices"]) - previous_count)
             update_status(
                 "msc", state="idle", progress=100,
-                message="Hoàn tất quét tổng thể đơn giá" if full_scan else "Hoàn tất cập nhật đơn giá",
-                updated=now_iso(), count=info["prices"],
+                message=("Hoàn tất quét tổng thể đơn giá" if full_scan else "Hoàn tất cập nhật đơn giá") + f" · +{added:,} mới",
+                updated=now_iso(), count=info["prices"], added=added,
             )
         except Exception as e:
             update_status("msc", state="error", message=str(e), updated=now_iso())
@@ -249,7 +253,9 @@ def start_tender_browser(pages: int = 20) -> dict:
 
     def work():
         done = threading.Event()
+        updater = None
         try:
+            previous_tenders = int(meta_info().get("tenders") or 0)
             update_status("msc", state="running", progress=1, message="Mở trình duyệt đăng nhập MSC…", updated=now_iso())
             p = str(_proc_path())
             if p not in sys.path:
@@ -271,16 +277,24 @@ def start_tender_browser(pages: int = 20) -> dict:
                 password=account.get("password") or "",
                 after=scan_open_with_page,
             )
-            # Wait up to 2h for interactive login + crawl
-            done.wait(timeout=7200)
-            updater.close()
+            # The browser worker invokes ``after`` (scope scan) before this
+            # event is set, preserving the logged-in browser page for it.
+            if not done.wait(timeout=7200):
+                raise RuntimeError("Crawl gói thầu quá 2 giờ nên đã dừng an toàn.")
+            if updater.last_error:
+                raise RuntimeError(updater.last_error)
             info = meta_info()
+            added = max(0, int(info["tenders"]) - previous_tenders)
             update_status(
-                "msc", state="idle", progress=100, message="Hoàn tất gói thầu",
-                updated=now_iso(), count=info["prices"],
+                "msc", state="idle", progress=100,
+                message=f"Hoàn tất gói thầu · +{added:,} mới · đã quét hồ sơ đang mở",
+                updated=now_iso(), count=info["prices"], added=added,
             )
         except Exception as e:
             update_status("msc", state="error", message=str(e), updated=now_iso())
+        finally:
+            if updater:
+                updater.close()
 
     _thread = threading.Thread(target=work, daemon=True)
     _thread.start()
