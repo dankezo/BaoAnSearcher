@@ -38,7 +38,7 @@ const PRICE_COLS = [
 
 function MatchDot({ level }) {
   if (level !== 'exact' && level !== 'near') return null
-  const title = level === 'exact' ? 'Có đầu thuốc khớp!' : 'Có đầu thuốc gần khớp'
+  const title = level === 'exact' ? 'Có đầu thuốc khớp hợp lệ' : 'Có đầu thuốc cần rà soát HSMT'
   return <span className={`match-dot ${level}`} title={title} aria-label={title}>!</span>
 }
 

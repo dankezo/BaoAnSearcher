@@ -128,3 +128,30 @@ test('special-release forms are review-only instead of silently green', () => {
   assert.equal(result.status, 'POTENTIAL')
   assert.equal(result.level, 'near')
 })
+
+test('ingredient comparison uses whole tokens, never a substring', () => {
+  const result = classifyLot(
+    { lotName: 'Ciprofloxacin', nongDo: '300mg', dangBaoChe: 'Viên', duongDung: 'Uống' },
+    [{ inn: 'Ofloxacin', strength: '300mg', dosage_form: 'Viên nén bao phim', route: 'Uống' }],
+  )
+  assert.equal(result.status, 'MISMATCH')
+  assert.equal(result.matchedCriteria.ingredient, false)
+})
+
+test('a declared salt form still matches its named base ingredient', () => {
+  const result = classifyLot(
+    { lotName: 'Ciprofloxacin (dưới dạng Ciprofloxacin hydrochloride)', nongDo: '500mg', dangBaoChe: 'Viên', duongDung: 'Uống' },
+    [{ inn: 'Ciprofloxacin', strength: '500mg', dosage_form: 'Viên nén bao phim', route: 'Uống' }],
+  )
+  assert.equal(result.status, 'MATCH')
+})
+
+test('same ingredient with a supplied non-route difference stays yellow for HSMT review', () => {
+  const result = classifyLot(
+    { lotName: 'Fenofibrat', nongDo: '160mg', dangBaoChe: 'Viên', duongDung: 'Uống' },
+    [{ inn: 'Fenofibrate', strength: '145mg', dosage_form: 'Viên nén bao phim', route: 'Uống' }],
+  )
+  assert.equal(result.status, 'POTENTIAL')
+  assert.equal(result.level, 'near')
+  assert.equal(result.matchedCriteria.strength, false)
+})

@@ -539,10 +539,10 @@ export function computeMscTenderCompound(items, total) {
       mainValue: fmtInt(matchExact),
       unit: 'gói khớp',
       subtitle: note,
-      titleTip: 'Gói đang mời thầu có đầu thuốc trùng hoạt chất, dạng bào chế và hàm lượng với danh mục Bảo An. Gói vừa khớp vừa gần khớp vẫn tính là khớp.',
+      titleTip: 'Khớp hợp lệ cần cùng hoạt chất, hàm lượng, dạng bào chế và đường dùng. Cần rà soát là cùng hoạt chất, không mâu thuẫn đường dùng nhưng còn thiếu hoặc khác tiêu chí kỹ thuật; không phải xác nhận đủ điều kiện dự thầu.',
       subMetrics: [
         { id: 'match_exact', label: 'Khớp', count: fmtInt(matchExact), tone: 'ok', patch: { _quick: 'match_exact' } },
-        { id: 'match_near', label: 'Gần khớp', count: fmtInt(matchNear), tone: 'warn', patch: { _quick: 'match_near' } },
+        { id: 'match_near', label: 'Cần rà soát', count: fmtInt(matchNear), tone: 'warn', patch: { _quick: 'match_near' } },
       ],
     },
     {
@@ -998,7 +998,7 @@ export function MscTenderSlice({ view, loading, activeId, onFilter, onExportMatc
         <div>
           <p className="metric-kicker">Gói thầu thuốc</p>
           <h2>Ba chỉ số đang mời thầu</h2>
-          <p className="metric-lead">12 tháng. Khớp khi hoạt chất, dạng bào chế và hàm lượng trùng danh mục Bảo An. Gói vừa khớp vừa gần khớp vẫn tính là khớp.</p>
+          <p className="metric-lead">12 tháng. Khớp hợp lệ khi hoạt chất, hàm lượng, dạng bào chế và đường dùng đạt điều kiện. “Cần rà soát” chỉ là tín hiệu đối chiếu HSMT, không phải xác nhận dự thầu.</p>
         </div>
       </header>
       <div className="tender-grid">
@@ -1045,7 +1045,7 @@ export function MscTenderSlice({ view, loading, activeId, onFilter, onExportMatc
               >
                 <span className="match-dot near" aria-hidden="true">!</span>
                 <strong>{fmtInt(near)}</strong>
-                <span>Có đầu thuốc gần khớp</span>
+                <span>Có đầu thuốc cần rà soát</span>
               </button>
               {onExportMatch && (
                 <ExcelDownload

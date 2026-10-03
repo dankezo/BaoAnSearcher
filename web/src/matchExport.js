@@ -150,7 +150,7 @@ export function buildMatchBlob(rows, now = Date.now(), { split = false } = {}) {
   const near = rows.filter((row) => row.match === 'near')
   return buildSheetsXlsx([
     sheetPart(exact, 'Khớp', now),
-    sheetPart(near, 'Gần khớp', now),
+    sheetPart(near, 'Cần rà soát HSMT', now),
   ], STYLES)
 }
 

@@ -59,7 +59,7 @@ test('combined match workbook splits exact and near onto two sheets', async () =
   const blob = buildMatchBlob(rows, now, { split: true })
   const text = Buffer.from(await blob.arrayBuffer()).toString('utf8')
   assert.match(text, /sheet name="Khớp"/)
-  assert.match(text, /sheet name="Gần khớp"/)
+  assert.match(text, /sheet name="Cần rà soát HSMT"/)
   assert.match(text, /Target="https:\/\/muasamcong\.mpi\.gov\.vn\/goi\/1" TargetMode="External"/)
   assert.match(text, /Target="https:\/\/muasamcong\.mpi\.gov\.vn\/goi\/2" TargetMode="External"/)
   assert.doesNotMatch(text, /HYPERLINK/)
