@@ -3077,6 +3077,7 @@ tr.bid-open.selected > td {
   border-radius: 999px;
 }
 .map-match-tag.near { background: #b96800; }
+.map-package header h2 .map-match-tag { margin-left: 8px; vertical-align: middle; }
 .map-list-name small { color: var(--muted); font-size: 11px; }
 .map-list em { font-style: normal; font-weight: 750; font-size: 12px; white-space: nowrap; }
 .map-list-empty { margin: 12px; }
