@@ -37,6 +37,13 @@ class RegulatoryDailyTest(unittest.TestCase):
             self.assertEqual(data['autoCrawl']['daily']['dav'], 'ok')
             self.assertFalse(daily.finished_today())
 
+    def test_skipped_source_with_old_error_is_not_a_new_daily_failure(self):
+        report = {"ok": True, "results": [{"source": "dav", "state": "skipped", "previous_error": True}]}
+        completed = types.SimpleNamespace(returncode=0, stdout=__import__('json').dumps(report), stderr='')
+        with patch('server.daily.subprocess.run', return_value=completed):
+            from server import daily
+            daily._run_regulatory()
+
 
 if __name__ == '__main__':
     unittest.main()

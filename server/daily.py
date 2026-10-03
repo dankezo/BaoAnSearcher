@@ -94,9 +94,12 @@ def _run_vss() -> None:
     rebuild_heat()
 
 
-def _run_regulatory() -> None:
+def _run_regulatory(force: bool = False) -> None:
+    command = ["node", str(ROOT / "scripts" / "crawl_regulatory.mjs")]
+    if force:
+        command.append("--force")
     result = subprocess.run(
-        ["node", str(ROOT / "scripts" / "crawl_regulatory.mjs")], cwd=ROOT,
+        command, cwd=ROOT,
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
@@ -104,7 +107,10 @@ def _run_regulatory() -> None:
         raise RuntimeError("Không cập nhật được tin pháp luật; xem Nguồn tin & quản trị.")
     lines = result.stdout.strip().splitlines()
     report = json.loads(lines[-1]) if lines else {}
-    if any(row.get("state") in ("error", "partial") or row.get("previous_error") for row in report.get("results", [])):
+    # A skipped source can retain its previous diagnostic until its scheduled
+    # interval arrives.  It must not mark the whole daily pass failed again;
+    # only this run's error/partial result is actionable.
+    if any(row.get("state") in ("error", "partial") for row in report.get("results", [])):
         raise RuntimeError("Một số nguồn pháp luật chưa cập nhật được; xem Nguồn tin & quản trị.")
 
 
@@ -159,7 +165,7 @@ def start_regulatory() -> dict:
             _running = True
             _save_daily("regulatory", "running", "Đang cào tin pháp luật…")
             try:
-                _run_regulatory()
+                _run_regulatory(force=True)
             except Exception as exc:
                 _save_daily("regulatory", "error", f"REGULATORY: {exc}")
                 return
