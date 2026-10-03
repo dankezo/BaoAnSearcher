@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { selectListedDot } from '../src/mapSelection.js'
 import { baoanLinesForIngredient, isExactBaoanMatch } from '../src/baoanIngredient.js'
+import { rankScopeLines } from '../../api-lib/mapPayload.js'
 
 test('chọn gói ở cột trái giữ nguyên tỉnh đang xem', () => {
   const state = {
@@ -36,4 +37,27 @@ test('hover hoạt chất chỉ khớp khi đủ dạng và hàm lượng', () =
   assert.deepEqual(baoanLinesForIngredient(line, catalog).map((row) => row.reg), ['VD-111'])
   assert.equal(baoanLinesForIngredient('Amoxicillin 500 mg Viên nang', catalog)[0].brand, 'Khác')
   assert.equal(baoanLinesForIngredient('Ibuprofen', catalog).length, 0)
+})
+
+test('Map giữ nhãn và danh mục của hoạt chất cần rà soát', () => {
+  const rows = rankScopeLines([
+    {
+      name: 'Silymarin', qty: 10, price: 100,
+      match: 'near', status: 'POTENTIAL', legalBasis: 'HSMT cần đối chiếu',
+      hits: [{ brand: 'Silymarin Bao An', strength: '140 mg', form: 'Viên nang', reg: 'VD-NEAR' }],
+    },
+  ])
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].match, 'near')
+  assert.equal(rows[0].status, 'POTENTIAL')
+  assert.equal(rows[0].baoanHits[0].reg, 'VD-NEAR')
+})
+
+test('Map ưu tiên khớp đúng khi cùng hoạt chất có cả hai mức', () => {
+  const rows = rankScopeLines([
+    { name: 'Paracetamol', match: 'near', hits: [{ brand: 'Rà soát', reg: 'VD-NEAR' }] },
+    { name: 'Paracetamol', match: 'exact', hits: [{ brand: 'Khớp', reg: 'VD-EXACT' }] },
+  ])
+  assert.equal(rows[0].match, 'exact')
+  assert.deepEqual(rows[0].baoanHits.map((hit) => hit.reg), ['VD-EXACT'])
 })

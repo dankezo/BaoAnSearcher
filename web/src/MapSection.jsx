@@ -7,7 +7,7 @@ import { StatCards } from './areaStats'
 import { DetailModal, Field, SuggestField } from './components'
 import { fmtInt, fmtMoney, fmtVndCompact } from './metrics'
 import { VN_PROVINCES } from './vnProvinces'
-import { baoanLinesForIngredient, isExactBaoanMatch } from './baoanIngredient'
+import { baoanLinesForIngredient } from './baoanIngredient'
 import {
   REGION_ORDER,
   heatFill,
@@ -171,8 +171,13 @@ function hitCount(row) {
   return Array.isArray(row?.baoanHits) ? row.baoanHits.length : 0
 }
 
+function matchLevel(row) {
+  const level = String(row?.baoanMatch ?? row?.baoan_match ?? row?.match ?? '').trim().toLowerCase()
+  return level === 'exact' || level === 'near' ? level : ''
+}
+
 function matchRank(row) {
-  const level = String(row?.match || '').trim()
+  const level = matchLevel(row)
   if (level === 'exact') return 3
   if (level === 'near') return 2
   return hitCount(row) > 0 ? 1 : 0
@@ -185,7 +190,7 @@ function rowHits(row, catalog, fromScope) {
 }
 
 function rowTone(row, hits) {
-  const level = String(row?.match || '').trim()
+  const level = matchLevel(row)
   if (level === 'exact') return 'is-baoan'
   if (level === 'near') return 'is-baoan-near'
   // A catalog suggestion alone is not a tender-eligibility result.
@@ -255,11 +260,16 @@ function IngredientRank({ rows = [], title, note, valueLabel, qtyLabel, catalog 
 }
 
 function PackagePanel({ dot, onClose, onDetail }) {
+  const level = matchLevel(dot)
   return (
     <div className="map-package">
       <header>
         <p className="metric-kicker">{dot.statusLabel || 'Gói thầu'}</p>
-        <h2>{dot.name || dot.tenderNo || 'Gói thầu'}</h2>
+        <h2>
+          {dot.name || dot.tenderNo || 'Gói thầu'}
+          {level === 'exact' && <span className="map-match-tag">Khớp</span>}
+          {level === 'near' && <span className="map-match-tag near">Cần rà soát</span>}
+        </h2>
         <button type="button" className="btn ghost sm" onClick={onClose}>Về tổng</button>
       </header>
       {dot.status === 'closed' && (
@@ -319,7 +329,8 @@ function RankList({ source, rows, total, truncated, selectedId, loading, onPick,
                     <span className="map-list-name">
                       <span className="map-list-title">
                         <strong title={label}>{label}</strong>
-                        {msc && isExactBaoanMatch(row) && <span className="map-match-tag">Khớp</span>}
+                        {msc && matchLevel(row) === 'exact' && <span className="map-match-tag">Khớp</span>}
+                        {msc && matchLevel(row) === 'near' && <span className="map-match-tag near">Cần rà soát</span>}
                       </span>
                       <small>{msc && row.tenderNo ? `${row.tenderNo} · ` : ''}{row.province || '—'}</small>
                     </span>

@@ -889,30 +889,61 @@ function resolveProvince(name) {
   return { code: '', label: String(name || '').trim() }
 }
 
-function rankScopeLines(lines, limit = 60) {
+function addScopeMatch(slot, line) {
+  const level = line?.match === 'exact' || line?.match === 'near' ? line.match : ''
+  if (!level) return
+
+  // One ingredient can occur on several tender lines.  An exact result wins,
+  // so the cards shown on the Map cannot downgrade a confirmed match.
+  if (level === 'exact' && slot.match !== 'exact') {
+    slot.match = 'exact'
+    slot.status = line.status || ''
+    slot.matchedCriteria = line.matchedCriteria || null
+    slot.legalBasis = line.legalBasis || ''
+    slot.baoanHits = []
+  } else if (!slot.match) {
+    slot.match = level
+    slot.status = line.status || ''
+    slot.matchedCriteria = line.matchedCriteria || null
+    slot.legalBasis = line.legalBasis || ''
+  }
+
+  if (slot.match !== level) return
+  for (const hit of line.hits || []) {
+    const reg = String(hit.reg || '')
+    const key = reg || `${hit.brand || ''}|${hit.strength || ''}|${hit.form || ''}`
+    if (!key || slot.baoanHits.some((card) => card.key === key)) continue
+    slot.baoanHits.push({
+      key,
+      brand: hit.brand || '',
+      strength: hit.strength || '',
+      form: hit.form || '',
+      reg,
+    })
+  }
+}
+
+export function rankScopeLines(lines, limit = 60) {
   const buckets = new Map()
   for (const line of lines || []) {
     const name = String(line.name || '').trim()
     if (!name) continue
     const key = fold(name)
-    const slot = buckets.get(key) || { name, value: 0, quantity: 0, baoanHits: [] }
+    const slot = buckets.get(key) || {
+      name,
+      value: 0,
+      quantity: 0,
+      match: '',
+      status: '',
+      matchedCriteria: null,
+      legalBasis: '',
+      baoanHits: [],
+    }
     const qty = num(line.qty)
     const price = num(line.price)
     slot.value += price && qty ? price * qty : price
     slot.quantity += qty
-    if (line.match === 'exact') {
-      for (const hit of line.hits || []) {
-        const reg = String(hit.reg || '')
-        if (reg && !slot.baoanHits.some((card) => card.reg === reg)) {
-          slot.baoanHits.push({
-            brand: hit.brand || '',
-            strength: hit.strength || '',
-            form: hit.form || '',
-            reg,
-          })
-        }
-      }
-    }
+    addScopeMatch(slot, line)
     buckets.set(key, slot)
   }
   return [...buckets.values()].sort((a, b) => b.value - a.value || b.quantity - a.quantity).slice(0, limit)
@@ -1031,7 +1062,10 @@ FROM msc_tenders`,
         value: num(line.price) && num(line.qty) ? num(line.price) * num(line.qty) : num(line.price),
         quantity: num(line.qty),
         match: line.match,
-        baoanHits: line.match === 'exact' ? (line.hits || []).map((hit) => ({
+        status: line.status || '',
+        matchedCriteria: line.matchedCriteria || null,
+        legalBasis: line.legalBasis || '',
+        baoanHits: line.match === 'exact' || line.match === 'near' ? (line.hits || []).map((hit) => ({
           brand: hit.brand || '',
           strength: hit.strength || '',
           form: hit.form || '',
