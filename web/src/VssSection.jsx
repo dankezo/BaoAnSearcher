@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, matchesYear, SHORT_SEARCH_NOTE, skipShortTextSearch, sortByDateDesc } from './api'
-import { cloudSuggest, cloudVssSearch, cloudCount, cloudMap, supabaseConfigured } from './supabaseCloud'
+import { cloudSuggest, cloudVssSearch, cloudMap, supabaseConfigured } from './supabaseCloud'
 import { loadSuggestStatic } from './suggestClient'
 import { FilterDraft } from './filterDraft'
 import {
@@ -126,7 +126,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const [compactFilters, setCompactFilters] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 900px)').matches)
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
   const [page, setPage] = useState(0)
-  const [data, setData] = useState({ total: 0, items: [] })
+  const [data, setData] = useState({ total: null, hasMore: false, items: [] })
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exportAllOpen, setExportAllOpen] = useState(false)
@@ -170,7 +170,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const columnFiltersRef = useRef(columnFilters)
   const pageSizeRef = useRef(pageSize)
   const pageRef = useRef(0)
-  const cursorRef = useRef(null)
+  const cursorsByPageRef = useRef(new Map([[0, null]]))
   filtersRef.current = filters
   columnFiltersRef.current = columnFilters
   pageSizeRef.current = pageSize
@@ -203,25 +203,18 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     try {
       const useRemote = localMode || supabaseConfigured
       if (useRemote) {
-        const sequential = p === pageRef.current + 1
-        const cursor = !localMode && sequential ? cursorRef.current : null
+        if (p === 0) cursorsByPageRef.current = new Map([[0, null]])
+        const cursor = cursorsByPageRef.current.get(p)
+        if (p > 0 && cursor === undefined) throw new Error('Trang này chưa được tải. Hãy bấm Trang sau để xem tiếp.')
         const searchFn = localMode
-          ? (page, sz) => api.vssSearch({ filters: active, page, size: sz })
+          ? (page, sz, nextCursor) => api.vssSearch({ filters: active, page, size: sz, cursor: nextCursor })
           : (page, sz, nextCursor) => cloudVssSearch({ filters: active, page, size: sz, cursor: nextCursor })
         const res = await searchFn(p, size, cursor)
         if (stale()) return
         pageRef.current = p
-        cursorRef.current = res.nextCursor || null
-        setData(res)
+        cursorsByPageRef.current.set(p + 1, res.nextCursor || null)
+        setData({ ...res, total: null })
         setPage(p)
-        if (!localMode && res.total == null) {
-          cloudCount('vss', active)
-            .then((total) => {
-              if (stale() || total == null) return
-              setData((prev) => ({ ...prev, total }))
-            })
-            .catch(() => {})
-        }
         return
       }
       setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
@@ -509,6 +502,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           pageSize={pageSize}
           onPageSize={(v) => { setPageSize(v); setPage(0) }}
           extra={sel.size > 0 && <span className="chip">{sel.size} dòng đã chọn</span>}
+          cursorOnly
         />
       </div>
 

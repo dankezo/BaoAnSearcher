@@ -30,6 +30,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+def warm_local_portfolio() -> None:
+    from .portfolio import warm_portfolio
+    threading.Thread(target=warm_portfolio, daemon=True, name="portfolio-warmup").start()
+    # Populate the four lightweight Data Hub snapshots in the background.
+    # The dashboard itself only reads the cache/status file and never starts a
+    # catalog COUNT(*) on the user request.
+    _queue_meta_refresh("dav", dav.meta_info)
+    _queue_meta_refresh("msc", msc.meta_info)
+    _queue_meta_refresh("vss", vss.meta_info)
+
 # Status must remain fast while a crawler writes multi-gigabyte SQLite WAL
 # files. Metadata is refreshed only while sources are idle, then reused.
 _STATUS_META_CACHE: dict[str, tuple[float, dict]] = {}
@@ -88,6 +100,47 @@ class CrawlBody(BaseModel):
 @app.get("/api/health")
 def health():
     return {"ok": True, "mode": "local", "time": now_iso()}
+
+
+@app.get("/api/admin/datasets")
+def local_data_registry():
+    """Local Data Hub: four cached metadata snapshots, never table counts."""
+    state = load_status()
+
+    def item(code, name, description, section, count_key="count", *, meta_only=False):
+        current = state.get(section) or {}
+        persisted_meta = current.get("meta") if isinstance(current.get("meta"), dict) else {}
+        # ``/api/status`` does not write its refreshed metadata to disk: that
+        # is deliberate so polling cannot contend with crawls.  Reuse its
+        # in-process snapshot when available, including the separate tender
+        # count which has no standalone crawler state.
+        with _STATUS_META_LOCK:
+            cached = _STATUS_META_CACHE.get(section)
+        live_meta = cached[1] if cached else {}
+        meta = {**persisted_meta, **live_meta}
+        # MSC stores the unit-price total in ``count`` and tender total in
+        # ``meta.tenders``.  Never accidentally display the price count on the
+        # tender card just because both belong to the same crawler state.
+        count = meta.get(count_key) if meta_only else current.get("count")
+        if count is None:
+            count = meta.get(count_key, 0)
+        return {
+            "code": code,
+            "name": name,
+            "description": description,
+            "totalRecords": int(count or 0),
+            "status": "syncing" if current.get("state") == "running" else ("warning" if current.get("state") == "error" else "healthy"),
+            "lastSyncedAt": current.get("updated") or meta.get("updated"),
+            "r2DownloadUrl": None,
+            "fileSizeMb": None,
+        }
+
+    return {"datasets": [
+        item("DAV", "DAV", "Danh mục thuốc Cục Quản lý Dược", "dav"),
+        item("MSC_PRICE", "MSC Đơn giá", "Đơn giá trúng thầu thuốc", "msc", "prices"),
+        item("MSC_BID", "MSC Gói thầu", "Kế hoạch và thông báo mời thầu", "msc", "tenders", meta_only=True),
+        item("VSS", "VSS", "Danh mục thuốc BHYT", "vss"),
+    ]}
 
 
 @app.get("/api/status")
@@ -303,7 +356,7 @@ def msc_search(body: dict[str, Any]):
     page = int(body.get("page") or 0)
     size = int(body.get("size") or 50)
     try:
-        return msc.search(kind, filters, page=page, size=size)
+        return msc.search(kind, filters, page=page, size=size, cursor=body.get("cursor"))
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -347,7 +400,7 @@ def vss_search(body: dict[str, Any]):
     filters = body.get("filters") or body
     page = int(body.get("page") or 0)
     size = int(body.get("size") or 50)
-    return vss.search_bids(filters, page=page, size=size)
+    return vss.search_bids(filters, page=page, size=size, cursor=body.get("cursor"))
 
 
 @app.post("/api/vss/crawl")

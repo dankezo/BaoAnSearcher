@@ -162,6 +162,16 @@ def connect(db=None):
       raw TEXT NOT NULL, normalized TEXT NOT NULL, search_text TEXT NOT NULL,
       collected_at TEXT NOT NULL, PRIMARY KEY(kind,source_id));
     CREATE INDEX IF NOT EXISTS idx_records_tender ON records(kind,tender_no);
+    -- These expression indexes back cursor scans in the customer tables and
+    -- exact SĐK lookups used to prebuild the 45-product Bảo An cockpit.
+    CREATE INDEX IF NOT EXISTS idx_records_kind_cursor ON records(
+      kind,
+      coalesce(json_extract(normalized,'$.published'),json_extract(normalized,'$.close_date'),collected_at) DESC,
+      source_id DESC
+    );
+    CREATE INDEX IF NOT EXISTS idx_records_kind_registration ON records(
+      kind, json_extract(normalized,'$.registration')
+    );
     CREATE TABLE IF NOT EXISTS slices(
       key TEXT PRIMARY KEY, kind TEXT NOT NULL, category TEXT NOT NULL,
       date_from TEXT NOT NULL, date_to TEXT NOT NULL, page INTEGER NOT NULL DEFAULT 0,

@@ -456,7 +456,9 @@ def _assemble() -> tuple[list[dict], dict]:
     full_market = str(os.environ.get("PORTFOLIO_FULL_MARKET") or "").strip() == "1"
     raw_vss = vss_candidates(tokens if full_market else [], registrations, brands if full_market else [])
     vss_rows = _prepare_vss(raw_vss)
-    msc_rows = msc_candidates(tokens, registrations) if full_market else []
+    # The primary price is the latest comparable price for the Bảo An SĐK.
+    # Keep broad INN expansion for explicit offline review only.
+    msc_rows = msc_candidates(tokens if full_market else [], registrations)
     from .portfolio_bids import index_awards, enrich, _line_key
     awards = index_awards(msc_rows, raw_vss, cell_rows + dav_rows)
     company_awards = {}
@@ -597,3 +599,11 @@ def build_portfolio(product_id: int | None = None, registration: str | None = No
             raise KeyError(registration)
         payload = {'items': histories[registration], 'registration': registration, 'productId': product_id}
     return payload
+
+
+def warm_portfolio() -> None:
+    """Prebuild the fixed 45-product cockpit after the local API starts."""
+    try:
+        build_portfolio()
+    except Exception:
+        return

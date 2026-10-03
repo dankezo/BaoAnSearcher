@@ -2,6 +2,7 @@
 """MSC procurement search/crawl wrappers."""
 from __future__ import annotations
 import json
+import base64
 import sys
 import threading
 from pathlib import Path
@@ -45,7 +46,27 @@ def meta_info() -> dict:
     return info
 
 
-def search(kind: str, filters: dict, page: int = 0, size: int = 50) -> dict:
+def _cursor_decode(value) -> tuple[str, str] | None:
+    if not value:
+        return None
+    try:
+        data = json.loads(base64.urlsafe_b64decode(str(value) + "===").decode("utf-8"))
+        return str(data["sort"]), str(data["source"])
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def _cursor_encode(sort_value, source_id) -> str:
+    raw = json.dumps({"sort": str(sort_value or ""), "source": str(source_id or "")}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _sort_value(item: dict) -> str:
+    """Return the same null-safe order key used by the SQL cursor query."""
+    return str(item.get("published") or item.get("close_date") or item.get("_collected_at") or "")
+
+
+def search(kind: str, filters: dict, page: int = 0, size: int = 50, cursor: str | None = None) -> dict:
     core = _import_core()
     if not MSC_DB.exists():
         return {"total": None, "page": page, "size": size, "hasMore": False, "items": []}
@@ -86,27 +107,30 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50) -> dict:
         )
         args.append(y0)
 
-    where = " WHERE " + " AND ".join(clauses)
     page = max(0, int(page))
     size = max(1, min(5000, int(size)))
     scope_filter = kind == "tenders" and any(filters.get(k) for k in ("ingredient", "dosage_form", "metricQuick"))
+    cursor_value = _cursor_decode(cursor) if not scope_filter else None
+    # Keep the SQL ordering and cursor key identical.  A tender without a
+    # publication date is ordered by close date, then collection time.
+    order_expr = "coalesce(json_extract(normalized, '$.published'), json_extract(normalized, '$.close_date'), collected_at)"
+    if cursor_value:
+        clauses.append(f"({order_expr} < ? OR ({order_expr} = ? AND source_id < ?))")
+        args.extend([cursor_value[0], cursor_value[0], cursor_value[1]])
+    where = " WHERE " + " AND ".join(clauses)
     with core.connect(MSC_DB) as con:
         # List path: normalized holds the display fields. raw stays on the row for a later detail read.
         rows = con.execute(
-            "SELECT normalized, collected_at FROM records" + where +
-            " ORDER BY coalesce(json_extract(normalized, '$.published'), collected_at) DESC" + ("" if scope_filter else " LIMIT ? OFFSET ?"),
-            args if scope_filter else args + [size + 1, page * size],
+            "SELECT normalized, collected_at, source_id FROM records" + where +
+            f" ORDER BY {order_expr} DESC, source_id DESC" + ("" if scope_filter else " LIMIT ?"),
+            args if scope_filter else args + [size + 1],
         ).fetchall()
     items = []
-    for norm, collected in rows:
+    for norm, collected, source_id in rows:
         item = json.loads(norm)
         item["_collected_at"] = collected
+        item["_cursor_source"] = source_id
         items.append(item)
-    # Stable newest-first on published / close / collected
-    items.sort(
-        key=lambda it: str(it.get("published") or it.get("close_date") or it.get("_collected_at") or ""),
-        reverse=True,
-    )
     if scope_filter:
         from .msc_scope import attach, matches_scope
         from .msc_filters import matches_quick
@@ -129,7 +153,13 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50) -> dict:
     if kind == "tenders":
         from .msc_scope import present
         present(items)
-    return {"total": None, "page": page, "size": size, "hasMore": has_more, "items": items}
+    next_cursor = None
+    if has_more and not scope_filter:
+        last = items[-1]
+        next_cursor = _cursor_encode(_sort_value(last), last.get("_cursor_source"))
+    for item in items:
+        item.pop("_cursor_source", None)
+    return {"total": None, "page": page, "size": size, "hasMore": has_more, "nextCursor": next_cursor, "items": items}
 
 
 def start_price_sync(date_from: str, date_to: str, refresh: bool = False, *, max_pages: int | None = None, full_scan: bool = False) -> dict:

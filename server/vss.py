@@ -2,6 +2,7 @@
 """VSS BHYT winning-bid drugs: SQLite store, Excel import, export crawl."""
 from __future__ import annotations
 import json
+import base64
 import math
 import re
 import sqlite3
@@ -109,6 +110,10 @@ def connect():
     # the province beside it avoids a full scan of the archive on every map
     # load while leaving the existing import format untouched.
     con.execute("CREATE INDEX IF NOT EXISTS idx_bids_effective_province ON bids(tungay_hd, ma_tinh)")
+    # The list is ordered by this exact null-safe expression.  A plain
+    # ``tungay_hd`` index cannot serve ``ORDER BY coalesce(...)`` and caused
+    # SQLite to sort the whole VSS archive before returning one page.
+    con.execute("CREATE INDEX IF NOT EXISTS idx_bids_cursor ON bids(coalesce(tungay_hd,''), id)")
     return con
 
 
@@ -1206,7 +1211,7 @@ _VSS_JSON_COLS = (
     "created_date",
 )
 _VSS_LIST_SQL = (
-    "SELECT "
+    "SELECT id AS _cursor_id, "
     + ", ".join(_VSS_SQL_COLS)
     + ", "
     + ", ".join(f"json_extract(raw, '$.{key}') AS {key}" for key in _VSS_JSON_COLS)
@@ -1214,7 +1219,23 @@ _VSS_LIST_SQL = (
 )
 
 
-def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
+def _decode_cursor(value) -> tuple[str, int] | None:
+    if not value:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(str(value) + "===").decode("utf-8")
+        data = json.loads(raw)
+        return str(data["d"]), int(data["id"])
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def _encode_cursor(date_value, row_id) -> str:
+    raw = json.dumps({"d": str(date_value or ""), "id": int(row_id)}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def search_bids(filters: dict, page: int = 0, size: int = 50, cursor: str | None = None) -> dict:
     clauses, args = [], []
     q = fold(filters.get("q") or "")
     if q:
@@ -1333,15 +1354,18 @@ def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
         clauses.append("coalesce(denngay_hd,'') <= ?")
         args.append(filters["denNgay"] + " 23:59:59" if len(filters["denNgay"]) == 10 else filters["denNgay"])
 
+    cursor_value = _decode_cursor(cursor)
+    if cursor_value:
+        clauses.append("(coalesce(tungay_hd,'') < ? OR (coalesce(tungay_hd,'') = ? AND id < ?))")
+        args.extend([cursor_value[0], cursor_value[0], cursor_value[1]])
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     page = max(0, int(page))
     size = max(1, min(5000, int(size)))
     with connect() as con:
-        total = con.execute("SELECT count(*) FROM bids" + where, args).fetchone()[0]
         rows = con.execute(
             _VSS_LIST_SQL + where +
-            " ORDER BY coalesce(tungay_hd,'') DESC, id DESC LIMIT ? OFFSET ?",
-            args + [size + 1, page * size],
+            " ORDER BY coalesce(tungay_hd,'') DESC, id DESC LIMIT ?",
+            args + [size + 1],
         ).fetchall()
     items = []
     for i, row in enumerate(rows):
@@ -1359,4 +1383,8 @@ def search_bids(filters: dict, page: int = 0, size: int = 50) -> dict:
     from .sdk_forms import form_for
     for item in items:
         item["dangbaoche"] = form_for(item.get("sodk"))
-    return {"total": int(total), "page": page, "size": size, "hasMore": has_more, "items": items}
+    next_cursor = None
+    if has_more and rows:
+        last = rows[size - 1]
+        next_cursor = _encode_cursor(last["tungay_hd"], last["_cursor_id"])
+    return {"total": None, "page": page, "size": size, "hasMore": has_more, "nextCursor": next_cursor, "items": items}

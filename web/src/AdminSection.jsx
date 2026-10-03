@@ -208,7 +208,7 @@ export default function AdminSection({ localMode }) {
   const refreshRegistry = async () => {
     setRegistryLoading(true)
     try {
-      const next = await cloudDataRegistry()
+      const next = localMode ? await api.dataRegistry() : await cloudDataRegistry()
       setRegistry(next || { datasets: [] })
       setRegistryError('')
     } catch (error) {

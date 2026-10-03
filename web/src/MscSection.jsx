@@ -389,17 +389,17 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     setErr('')
     try {
       if (localMode || supabaseConfigured) {
-        const cursor = localMode ? null : cursorsByPageRef.current.get(p)
-        if (!localMode && p > 0 && cursor === undefined) {
+        const cursor = cursorsByPageRef.current.get(p)
+        if (p > 0 && cursor === undefined) {
           throw new Error('Trang này chưa có cursor. Hãy dùng nút Trang sau để xem tiếp.')
         }
         const searchFn = localMode
-          ? (page, sz) => api.mscSearch({ kind: activeKind, filters: active, page, size: sz })
+          ? (page, sz, nextCursor) => api.mscSearch({ kind: activeKind, filters: active, page, size: sz, cursor: nextCursor })
           : (page, sz, nextCursor) => cloudMscSearch({ kind: activeKind, filters: active, page, size: sz, cursor: nextCursor })
         const res = await searchFn(p, size, cursor)
         if (stale()) return null
         pageRef.current = p
-        if (!localMode) cursorsByPageRef.current.set(p + 1, res.nextCursor || null)
+        cursorsByPageRef.current.set(p + 1, res.nextCursor || null)
         setData({ ...res, total: null })
         setPage(p)
         // The table is visible before aggregates are requested. Metric work is
