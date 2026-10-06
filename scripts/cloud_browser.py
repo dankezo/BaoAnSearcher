@@ -22,6 +22,18 @@ def open_browser(runtime):
 
 def cloud_search_page(body):
     """Call the website's normal search handler in a bounded Quick Action."""
+    worker = os.environ.get('CLOUDFLARE_CRAWL_WORKER_URL', '').strip().rstrip('/')
+    if worker:
+        key = os.environ.get('CLOUDFLARE_CRAWL_WORKER_KEY', '').strip()
+        if worker != 'https://crawl.baoanpharma.com' or not key:
+            raise ValueError('Configure the BaoAn crawl Worker URL and its private invocation key.')
+        response = requests.post(worker + '/msc/search', headers={'Authorization': f'Bearer {key}'},
+                                 json={'page': body['pageNumber']}, timeout=(10, 110))
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data.get('page'), dict):
+            raise ValueError('Crawl Worker returned no MSC result page.')
+        return data
     from browser_update import COMPONENT, URL
     account = os.environ.get('CLOUDFLARE_BROWSER_ACCOUNT_ID', '').strip()
     token = os.environ.get('CLOUDFLARE_BROWSER_TOKEN', '').strip()
