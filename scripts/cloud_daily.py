@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 import time
@@ -20,7 +21,8 @@ from sync import Api, Downloader
 from browser_update import payload as tender_payload, URL as TENDER_PAGE, COMPONENT, same_search
 from server.common import VN
 from server import vss
-from server.msc_scope import _open, fetch_lots_on_page
+from server.msc_scope import _open, _fetch_lots, fetch_lots_on_page
+from scripts.cloud_browser import open_browser, cloud_search_page
 from connect import connect, require_config
 from rows import (MSC_PRICE_COLUMNS, MSC_TENDER_COLUMNS, VSS_COLUMNS,
                   build_msc_price_row, build_msc_tender_row, build_vss_row)
@@ -71,9 +73,11 @@ def crawl_vss(conn, start, end):
 
 
 def crawl_tenders(conn, start, end):
+    if os.environ.get('CLOUDFLARE_BROWSER_ACCOUNT_ID') or os.environ.get('CLOUDFLARE_BROWSER_TOKEN'):
+        return crawl_tender_pages(conn, start, None)
     from playwright.sync_api import sync_playwright
     with sync_playwright() as runtime:
-        browser = runtime.chromium.launch(headless=True)
+        browser = open_browser(runtime)
         try:
             page = browser.new_page(locale='vi-VN')
             page.goto(TENDER_PAGE, wait_until='domcontentloaded', timeout=60000)
@@ -87,19 +91,25 @@ def crawl_tender_pages(conn, start, browser_page):
     sent = 0
     seen = set()
     candidates = []
+    deadline = time.monotonic() + 420
     for page_no in range(200):
+        if browser_page is None and time.monotonic() >= deadline:
+            raise RuntimeError('Cloud browser daily time budget reached; catch-up is incomplete.')
         body = tender_payload(page_no)
         def matches(response):
             try:
                 return response.url.split('?')[0] == TENDER_API and same_search(response.request.post_data_json, body)
             except Exception:
                 return False
-        with browser_page.expect_response(matches, timeout=45000) as pending:
-            browser_page.evaluate('(p)=>{const v=' + COMPONENT + ';v.quickSearchPayload.pageSize=p.pageSize;v.currentPage=p.pageNumber;v.axiosSearch(p)}', body)
-        response = pending.value
-        if response.status != 200:
-            raise RuntimeError('MSC guest search requires an authenticated session or is unavailable.')
-        data = response.json()
+        if browser_page is None:
+            data = cloud_search_page(body)
+        else:
+            with browser_page.expect_response(matches, timeout=45000) as pending:
+                browser_page.evaluate('(p)=>{const v=' + COMPONENT + ';v.quickSearchPayload.pageSize=p.pageSize;v.currentPage=p.pageNumber;v.axiosSearch(p)}', body)
+            response = pending.value
+            if response.status != 200:
+                raise RuntimeError('MSC guest search is unavailable.')
+            data = response.json()
         page = data.get('page')
         if not isinstance(page, dict) or not isinstance(page.get('content'), list) or not isinstance(page.get('totalPages'), int):
             raise ValueError('MSC search response changed; no completeness claim.')
@@ -142,7 +152,7 @@ def crawl_scopes(conn, candidates, browser_page):
     failed = 0
     for nid, item in pending[:80]:
         try:
-            lots = fetch_lots_on_page(browser_page, nid, item.get('source_url') or '')
+            lots = _fetch_lots(nid) if browser_page is None else fetch_lots_on_page(browser_page, nid, item.get('source_url') or '')
             if not lots: raise ValueError('No public medicine webform.')
             with conn.cursor() as cur:
                 cur.execute('INSERT INTO msc_scope_lots (notify_id,tender_no,lots,fetched_at) VALUES (%s,%s,%s,UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE tender_no=VALUES(tender_no),lots=VALUES(lots),fetched_at=VALUES(fetched_at)',
