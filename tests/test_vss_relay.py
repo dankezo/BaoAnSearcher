@@ -1,7 +1,7 @@
 import os
 import threading
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import requests
@@ -34,17 +34,18 @@ class RelayTest(unittest.TestCase):
         finally:server.shutdown();server.server_close();thread.join()
 
     def test_source_fixed_url_tls_and_limits(self):
+        day = (datetime.now(timezone(timedelta(hours=7))).date()-timedelta(days=2)).isoformat()
         with patch.object(relay.requests,'get',return_value=response()) as get:
-            self.assertEqual(relay.export_bytes('2026-10-02',1),XML)
+            self.assertEqual(relay.export_bytes(day,1),XML)
             self.assertEqual(get.call_args.args[0],relay.SOURCE)
             self.assertTrue(get.call_args.kwargs['verify'])
             self.assertFalse(get.call_args.kwargs['allow_redirects'])
-        for day,loai in [('2026-10-02',True),('1900-01-01',1),('invalid',1)]:
-            with self.assertRaises((ValueError,TypeError)):relay.export_bytes(day,loai)
+        for bad_day,loai in [(day,True),('1900-01-01',1),('invalid',1)]:
+            with self.assertRaises((ValueError,TypeError)):relay.export_bytes(bad_day,loai)
         with patch.object(relay.requests,'get',return_value=response(data=b'<html>Workbook error</html>')):
-            with self.assertRaisesRegex(RuntimeError,'Workbook'):relay.export_bytes('2026-10-02',1)
+            with self.assertRaisesRegex(RuntimeError,'Workbook'):relay.export_bytes(day,1)
         with patch.object(relay,'MAX_BYTES',10),patch.object(relay.requests,'get',return_value=response()):
-            with self.assertRaisesRegex(RuntimeError,'size'):relay.export_bytes('2026-10-02',1)
+            with self.assertRaisesRegex(RuntimeError,'size'):relay.export_bytes(day,1)
 
     def test_wake_retry_and_key_only_in_header(self):
         with patch.dict(os.environ,ENV),patch.object(client.time,'sleep'),patch.object(client.requests,'get',side_effect=[response(503),response(health=True)]) as health,patch.object(client.requests,'post',side_effect=[response(502),response()]) as post:
