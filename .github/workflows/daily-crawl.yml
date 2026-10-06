@@ -42,6 +42,8 @@ jobs:
       TIDB_DATABASE: ${{ secrets.TIDB_DATABASE }}
       CLOUDFLARE_CRAWL_WORKER_URL: ${{ secrets.CLOUDFLARE_CRAWL_WORKER_URL }}
       CLOUDFLARE_CRAWL_WORKER_KEY: ${{ secrets.CLOUDFLARE_CRAWL_WORKER_KEY }}
+      VSS_EXPORT_RELAY_URL: ${{ secrets.VSS_EXPORT_RELAY_URL }}
+      VSS_EXPORT_RELAY_KEY: ${{ secrets.VSS_EXPORT_RELAY_KEY }}
       CRAWL_ONLY: ${{ inputs.only || 'tenders,prices' }}
       CRAWL_DAYS: ${{ inputs.days || '3' }}
       PYTHONUNBUFFERED: '1'
