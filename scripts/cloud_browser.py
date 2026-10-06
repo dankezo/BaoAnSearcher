@@ -25,7 +25,7 @@ def cloud_search_page(body):
     worker = os.environ.get('CLOUDFLARE_CRAWL_WORKER_URL', '').strip().rstrip('/')
     if worker:
         key = os.environ.get('CLOUDFLARE_CRAWL_WORKER_KEY', '').strip()
-        if worker != 'https://crawl.baoanpharma.com' or not key:
+        if worker not in ('https://crawl.baoanpharma.com','https://baoan-public-crawl.dannyphan190.workers.dev') or not key:
             raise ValueError('Configure the BaoAn crawl Worker URL and its private invocation key.')
         response = requests.post(worker + '/msc/search', headers={'Authorization': f'Bearer {key}'},
                                  json={'page': body['pageNumber']}, timeout=(10, 110))
