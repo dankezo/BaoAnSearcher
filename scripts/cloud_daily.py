@@ -20,6 +20,7 @@ from sync import Api, Downloader
 from browser_update import payload as tender_payload, URL as TENDER_PAGE, COMPONENT, same_search
 from server.common import VN
 from server import vss
+from server.msc_scope import _open, fetch_lots_on_page
 from connect import connect, require_config
 from rows import (MSC_PRICE_COLUMNS, MSC_TENDER_COLUMNS, VSS_COLUMNS,
                   build_msc_price_row, build_msc_tender_row, build_vss_row)
@@ -82,6 +83,7 @@ def crawl_tenders(conn, start, end):
 def crawl_tender_pages(conn, start, browser_page):
     sent = 0
     seen = set()
+    candidates = []
     for page_no in range(200):
         body = tender_payload(page_no)
         def matches(response):
@@ -111,6 +113,8 @@ def crawl_tender_pages(conn, start, browser_page):
             if normalized:
                 row = build_msc_tender_row(normalized, str(item.get('id') or item.get('notifyId')), None, datetime.now(VN).isoformat())
                 if row: mapped.append(row)
+                if _open(normalized, datetime.now(VN).replace(tzinfo=None)):
+                    candidates.append((str(item.get('id') or item.get('notifyId')), normalized))
         sent += _flush(conn, 'msc_tenders', MSC_TENDER_COLUMNS, mapped)
         if page_no + 1 >= page['totalPages']:
             break
@@ -120,8 +124,34 @@ def crawl_tender_pages(conn, start, browser_page):
         time.sleep(0.5)
     else:
         raise RuntimeError('MSC tender scan reached the page budget; catch-up remains incomplete.')
+    crawl_scopes(conn, candidates, browser_page)
     _write_meta(conn, 'msc_total', 'msc_tenders')
     return sent
+
+
+def crawl_scopes(conn, candidates, browser_page):
+    with conn.cursor() as cur:
+        cur.execute((ROOT / 'tidb' / '009_cloud_scope_lots.sql').read_text(encoding='utf-8'))
+        cur.execute('SELECT notify_id FROM msc_scope_lots')
+        known = {str(row[0]) for row in cur.fetchall()}
+    conn.commit()
+    pending = [(nid, item) for nid, item in candidates if nid not in known]
+    failed = 0
+    for nid, item in pending[:80]:
+        try:
+            lots = fetch_lots_on_page(browser_page, nid, item.get('source_url') or '')
+            if not lots: raise ValueError('No public medicine webform.')
+            with conn.cursor() as cur:
+                cur.execute('INSERT INTO msc_scope_lots (notify_id,tender_no,lots,fetched_at) VALUES (%s,%s,%s,UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE tender_no=VALUES(tender_no),lots=VALUES(lots),fetched_at=VALUES(fetched_at)',
+                            (nid, item.get('tender_no'), json.dumps(lots, ensure_ascii=False)))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            failed += 1
+        time.sleep(0.5)
+    print(f'MSC webforms: {min(len(pending), 80) - failed} loaded; {failed} unavailable; {max(0, len(pending) - 80)} deferred', flush=True)
+    if failed or len(pending) > 80:
+        raise RuntimeError('Some public webforms require login, are unavailable or remain queued.')
 
 
 def main():
@@ -160,7 +190,8 @@ def main():
                     cur.execute("UPDATE data_registry_meta SET status='warning' WHERE dataset_code=%s", (code,))
                 conn.commit()
                 # Do not echo connection strings, request tokens or response bodies.
-                print(f'{code}: failed ({type(exc).__name__}); successful sources are retained', flush=True)
+                reason = str(exc)[:240] if isinstance(exc, (ValueError, RuntimeError)) else str(getattr(exc, 'code', '') or getattr(exc, 'errno', '') or '')
+                print(f'{code}: failed ({type(exc).__name__} {reason}); successful sources are retained', flush=True)
                 failures.append(code)
     finally:
         conn.close()
