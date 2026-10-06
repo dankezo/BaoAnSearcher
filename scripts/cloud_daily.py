@@ -56,7 +56,11 @@ def crawl_vss(conn, start, end):
     day = start.date()
     while day <= end.date():
         label = day.strftime('%d/%m/%Y')
-        blob = vss.download_kqdt_export(label, cookie='')
+        if os.environ.get('VSS_EXPORT_RELAY_URL'):
+            from scripts.vss_relay_client import download_export
+            blob = download_export(day.isoformat())
+        else:
+            blob = vss.download_kqdt_export(label, cookie='')
         records = vss.rows_from_export_bytes(blob)
         for item in records:
             item.setdefault('congbo', label)
