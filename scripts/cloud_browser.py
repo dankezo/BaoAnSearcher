@@ -48,9 +48,9 @@ def cloud_search_page(body):
     response = requests.post(
         f'https://api.cloudflare.com/client/v4/accounts/{account}/browser-rendering/content',
         headers={'Authorization': f'Bearer {token}'},
-        json={'url': URL, 'gotoOptions': {'waitUntil': 'domcontentloaded', 'timeout': 25000},
+        json={'url': URL, 'actionTimeout': 45000, 'gotoOptions': {'waitUntil': 'domcontentloaded', 'timeout': 25000},
               'addScriptTag': [{'content': script}],
-              'waitForSelector': {'selector': '#baoan-search-result', 'timeout': 40000}}, timeout=75,
+              'waitForSelector': {'selector': '#baoan-search-result', 'timeout': 40000}}, timeout=(10, 110),
     )
     response.raise_for_status()
     data = response.json()
