@@ -6,7 +6,7 @@ on:
     inputs:
       only:
         description: Sources (prices,tenders,vss)
-        default: prices
+        default: tenders,prices
         type: string
       days:
         description: Replay days (1–30)
@@ -42,7 +42,9 @@ jobs:
       TIDB_DATABASE: ${{ secrets.TIDB_DATABASE }}
       CLOUDFLARE_BROWSER_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_BROWSER_ACCOUNT_ID }}
       CLOUDFLARE_BROWSER_TOKEN: ${{ secrets.CLOUDFLARE_BROWSER_TOKEN }}
-      CRAWL_ONLY: ${{ inputs.only || 'prices' }}
+      CLOUDFLARE_CRAWL_WORKER_URL: ${{ secrets.CLOUDFLARE_CRAWL_WORKER_URL }}
+      CLOUDFLARE_CRAWL_WORKER_KEY: ${{ secrets.CLOUDFLARE_CRAWL_WORKER_KEY }}
+      CRAWL_ONLY: ${{ inputs.only || 'tenders,prices' }}
       CRAWL_DAYS: ${{ inputs.days || '3' }}
       PYTHONUNBUFFERED: '1'
       PYTHONUTF8: '1'
@@ -56,7 +58,7 @@ jobs:
       - run: pip install -r "test zone/procurement/requirements.txt"
         if: matrix.source == 'tenders' && contains(env.CRAWL_ONLY, matrix.source)
       - run: python -m playwright install --with-deps chromium
-        if: matrix.source == 'tenders' && contains(env.CRAWL_ONLY, matrix.source) && env.CLOUDFLARE_BROWSER_ACCOUNT_ID == ''
+        if: matrix.source == 'tenders' && contains(env.CRAWL_ONLY, matrix.source) && env.CLOUDFLARE_BROWSER_ACCOUNT_ID == '' && env.CLOUDFLARE_CRAWL_WORKER_URL == ''
       - run: python scripts/cloud_daily.py --yes-remote --only "$CRAWL_SOURCE" --days "$CRAWL_DAYS"
         if: contains(env.CRAWL_ONLY, matrix.source)
         env:
