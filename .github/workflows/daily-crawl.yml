@@ -12,6 +12,11 @@ on:
         description: Replay days (1–30)
         default: '3'
         type: string
+      runner:
+        description: Runner platform
+        default: windows-latest
+        type: choice
+        options: [windows-latest, ubuntu-latest]
 permissions:
   contents: read
 concurrency:
@@ -19,7 +24,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   crawl:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'windows-latest' }}
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 45
     strategy:
       fail-fast: false
