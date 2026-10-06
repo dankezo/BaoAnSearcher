@@ -28,14 +28,17 @@ from sync_to_tidb import _flush, _write_meta, refresh_msc_price_metric_rollup
 
 
 def crawl_prices(conn, start, end):
-    # Export partitions handle the source's 10,000-row window. No Windows lock
-    # or existing local archive is needed on the isolated cloud runner.
+    # The public paged endpoint works where Export resets the connection.
+    # Existing time partitions handle the source's 10,000-result window.
     with tempfile.TemporaryDirectory() as folder:
         db = Path(folder) / 'prices.sqlite3'
         dl = Downloader(db=db, report=lambda _: None)
         for category in ('0', '1'):
-            dl.partition_export(start, end, category, refresh=True)
+            dl.partition(start, end, category, refresh=True)
         with sqlite_connect(db) as local:
+            unfinished = local.execute("SELECT count(*) FROM slices WHERE status NOT IN ('complete','split')").fetchone()[0]
+            if unfinished or dl.stop.is_set():
+                raise RuntimeError('MSC public pages are incomplete; no upload or success marker.')
             cursor = local.execute("SELECT source_id, normalized, search_text, collected_at FROM records WHERE kind='prices'")
             sent = 0
             while batch := cursor.fetchmany(500):
