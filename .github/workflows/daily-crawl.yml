@@ -43,6 +43,7 @@ jobs:
       CRAWL_ONLY: ${{ inputs.only || 'prices,tenders,vss' }}
       CRAWL_DAYS: ${{ inputs.days || '3' }}
       PYTHONUNBUFFERED: '1'
+      PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
