@@ -6,7 +6,7 @@ on:
     inputs:
       only:
         description: Sources (prices,tenders,vss)
-        default: prices,tenders,vss
+        default: prices
         type: string
       days:
         description: Replay days (1–30)
@@ -40,7 +40,7 @@ jobs:
       TIDB_USER: ${{ secrets.TIDB_USER }}
       TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
       TIDB_DATABASE: ${{ secrets.TIDB_DATABASE }}
-      CRAWL_ONLY: ${{ inputs.only || 'prices,tenders,vss' }}
+      CRAWL_ONLY: ${{ inputs.only || 'prices' }}
       CRAWL_DAYS: ${{ inputs.days || '3' }}
       PYTHONUNBUFFERED: '1'
       PYTHONUTF8: '1'
