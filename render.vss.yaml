@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: baoan-vss-relay
+    runtime: python
+    region: singapore
+    plan: free
+    branch: codex/vss-free-relay
+    autoDeployTrigger: off
+    buildCommand: pip install requests
+    startCommand: python scripts/vss_export_relay.py
+    healthCheckPath: /health
+    envVars:
+      - key: VSS_EXPORT_RELAY_KEY
+        sync: false
