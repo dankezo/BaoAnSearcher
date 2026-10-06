@@ -29,6 +29,8 @@ def cloud_search_page(body):
             raise ValueError('Configure the BaoAn crawl Worker URL and its private invocation key.')
         response = requests.post(worker + '/msc/search', headers={'Authorization': f'Bearer {key}'},
                                  json={'page': body['pageNumber']}, timeout=(10, 110))
+        if response.status_code >= 400:
+            raise RuntimeError(f'Crawl Worker HTTP {response.status_code}: ' + ('daily MSC browser budget reached; retry next window.' if response.status_code==429 else 'public search unavailable; invocation key and Worker logs must be checked.'))
         response.raise_for_status()
         data = response.json()
         if not isinstance(data.get('page'), dict):
