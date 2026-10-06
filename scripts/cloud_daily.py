@@ -73,7 +73,7 @@ def crawl_vss(conn, start, end):
 
 
 def crawl_tenders(conn, start, end):
-    if os.environ.get('CLOUDFLARE_BROWSER_ACCOUNT_ID') or os.environ.get('CLOUDFLARE_BROWSER_TOKEN'):
+    if os.environ.get('CLOUDFLARE_CRAWL_WORKER_URL') or os.environ.get('CLOUDFLARE_BROWSER_ACCOUNT_ID') or os.environ.get('CLOUDFLARE_BROWSER_TOKEN'):
         return crawl_tender_pages(conn, start, None)
     from playwright.sync_api import sync_playwright
     with sync_playwright() as runtime:
