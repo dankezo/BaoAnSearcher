@@ -129,6 +129,7 @@ def crawl_tender_pages(conn, start, browser_page):
                 if _open(normalized, datetime.now(VN).replace(tzinfo=None)):
                     candidates.append((str(item.get('id') or item.get('notifyId')), normalized))
         sent += _flush(conn, 'msc_tenders', MSC_TENDER_COLUMNS, mapped)
+        print(f'MSC search page {page_no + 1}: {len(rows)} medicine tenders', flush=True)
         if page_no + 1 >= page['totalPages']:
             break
         published = [str(item.get('publicDate') or '')[:10] for item in rows]
