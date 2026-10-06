@@ -173,7 +173,7 @@ def main():
     conn = connect(require_config())
     failures = []
     try:
-        today = datetime.now(VN).replace(hour=0, minute=0, second=0, microsecond=0)
+        today = datetime.now(VN).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         end = today.replace(hour=23, minute=59, second=59, microsecond=999000)
         for name in selected:
             code, action = actions[name]
@@ -193,7 +193,7 @@ def main():
                     cur.execute("UPDATE data_registry_meta SET status='warning' WHERE dataset_code=%s", (code,))
                 conn.commit()
                 # Do not echo connection strings, request tokens or response bodies.
-                reason = str(exc)[:240] if isinstance(exc, (ValueError, RuntimeError)) else str(getattr(exc, 'code', '') or getattr(exc, 'errno', '') or '')
+                reason = str(exc)[:240] if isinstance(exc, (ValueError, RuntimeError, TypeError)) else str(getattr(exc, 'code', '') or getattr(exc, 'errno', '') or '')
                 print(f'{code}: failed ({type(exc).__name__} {reason}); successful sources are retained', flush=True)
                 failures.append(code)
     finally:
