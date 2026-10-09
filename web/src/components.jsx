@@ -1,6 +1,8 @@
 import { createContext, memo, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { createPortal } from 'react-dom'
+import EntityContextMenu from './analytics/EntityContextMenu'
+import {columnEntity} from './analytics/navigation'
 import { fold, fmtDateTime, getStaticStatus, getStatus, relativeTime, sectionMeta } from './api'
 import { cloudMeta, supabaseConfigured } from './supabaseCloud'
 import { exportXlsx } from './export'
@@ -1208,6 +1210,15 @@ export const DataTable = memo(function DataTable({
   cardKeys = null,
   rowClassName = null,
 }) {
+  const [entityMenu,setEntityMenu]=useState(null)
+  const closeEntityMenu=useCallback(()=>setEntityMenu(null),[])
+  useEffect(()=>setEntityMenu(null),[rows])
+  const showEntityMenu=(event,column,row)=>{
+    const query=columnEntity(column,row);if(!query)return
+    event.preventDefault();event.stopPropagation()
+    const rect=event.currentTarget.getBoundingClientRect()
+    setEntityMenu({query,x:event.clientX||rect.left,y:event.clientY||rect.bottom})
+  }
   const keys = useMemo(() => rows.map((r, i) => rowKey(r, i)), [rows, rowKey])
   const allChecked = rows.length > 0 && keys.every((k) => selected?.has(k))
   const someChecked = !allChecked && keys.some((k) => selected?.has(k))
@@ -1243,13 +1254,13 @@ export const DataTable = memo(function DataTable({
   const scrollRef = useRef(null)
   const [narrow, setNarrow] = useState(() => (
     typeof window !== 'undefined' && window.matchMedia
-      ? window.matchMedia('(max-width: 900px)').matches
+      ? window.matchMedia('(max-width: 640px)').matches
       : false
   ))
   const [scrollMargin, setScrollMargin] = useState(0)
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return undefined
-    const mq = window.matchMedia('(max-width: 900px)')
+    const mq = window.matchMedia('(max-width: 640px)')
     const apply = () => setNarrow(mq.matches)
     apply()
     mq.addEventListener('change', apply)
@@ -1333,8 +1344,9 @@ export const DataTable = memo(function DataTable({
           else if (typeof v === 'number') content = v.toLocaleString('vi-VN')
           else content = v ?? ''
           content = maybeTruncateNode(content, c)
-          const cls = [c.align ? `al-${c.align}` : '', c.mono ? 'mono' : '', c.nowrap ? 'nowrap' : ''].filter(Boolean).join(' ')
-          return <td key={c.key} className={cls || undefined}>{content}</td>
+          const cls = [c.align ? `al-${c.align}` : '', c.mono ? 'mono' : '', c.nowrap ? 'nowrap' : '', ['registration','sodk','soDangKy','soDangKyCu','reg'].includes(c.key) ? 'registration-column' : ''].filter(Boolean).join(' ')
+          const entity=columnEntity(c,row)
+          return <td key={c.key} className={cls || undefined} tabIndex={entity?0:undefined} aria-haspopup={entity?'menu':undefined} title={entity?'Chuột phải hoặc Shift+F10 để phân tích chuyên sâu':undefined} onContextMenu={entity?e=>showEntityMenu(e,c,row):undefined} onKeyDown={entity?e=>{if(e.key==='ContextMenu'||e.shiftKey&&e.key==='F10')showEntityMenu(e,c,row)}:undefined}>{['registration','sodk','soDangKy','soDangKyCu','reg'].includes(c.key) ? <div className="registration-cell">{content}</div> : content}</td>
         })}
         {trailing && <td className="trail">{trailing.render(row)}</td>}
       </tr>
@@ -1343,6 +1355,7 @@ export const DataTable = memo(function DataTable({
 
   return (
     <div className="table-wrap" ref={scrollRef}>
+      {entityMenu&&<EntityContextMenu menu={entityMenu} onClose={closeEntityMenu}/>}
       <table className={`data desktop-table${filtersVisible ? ' with-filters' : ''}`} style={minWidth ? { minWidth } : undefined}>
         <thead>
           <tr className="labels">
@@ -1359,7 +1372,7 @@ export const DataTable = memo(function DataTable({
             )}
             {showIndex && <th className="idx">#</th>}
             {columns.map((c) => (
-              <th key={c.key} className={c.align ? `al-${c.align}` : ''} style={c.width ? { minWidth: c.width } : undefined}>
+              <th key={c.key} className={[c.align ? `al-${c.align}` : '', ['registration','sodk','soDangKy','soDangKyCu','reg'].includes(c.key) ? 'registration-column' : ''].filter(Boolean).join(' ')} style={c.width ? { width: c.width } : undefined}>
                 <span className="th-label">{c.label}</span>
                 {columnFilters[c.key] && <span className="th-dot" title="Đang lọc cột này" />}
               </th>
@@ -1371,7 +1384,7 @@ export const DataTable = memo(function DataTable({
               {selectable && <th className="sel" />}
               {showIndex && <th className="idx" />}
               {columns.map((c) => (
-                <th key={c.key}>
+                <th key={c.key} className={['registration','sodk','soDangKy','soDangKyCu','reg'].includes(c.key) ? 'registration-column' : undefined}>
                   {c.filter === false ? null : c.filter === 'select' ? (
                     <select
                       value={columnFilters[c.key] || ''}
@@ -1446,6 +1459,7 @@ export const DataTable = memo(function DataTable({
               ref={shouldVirtualize ? virtualizer.measureElement : undefined}
               className={`result-card${selected?.has(k) ? ' selected' : ''}`}
               onClick={() => onRowDoubleClick?.(row)}
+              onContextMenu={titleCol?e=>showEntityMenu(e,titleCol,row):undefined}
             >
               <div className="result-card-title">
                 {title == null || title === '' ? '—' : title}

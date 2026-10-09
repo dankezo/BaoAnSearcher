@@ -52,11 +52,26 @@ test('database enforces staff/admin/read isolation and preserves reviewed items 
       create function auth.uid() returns uuid language sql stable as $$ select (auth.jwt()->>'sub')::uuid $$;
       grant usage on schema auth to authenticated,service_role;
       insert into auth.users values ('00000000-0000-0000-0000-000000000001'),('00000000-0000-0000-0000-000000000002');`)
-    for (const name of ['20260928081206_regulatory_news_hub.sql','20260928082553_regulatory_manual_news.sql','20260928174406_regulatory_editorial_brief.sql']) await db.exec(await readFile(new URL(`../../supabase/migrations/${name}`,import.meta.url),'utf8'))
+    for (const name of ['20260928081206_regulatory_news_hub.sql','20260928082553_regulatory_manual_news.sql','20260928174406_regulatory_editorial_brief.sql','20261005024153_persistent_news_analysis.sql','20261008000100_regulatory_ingest_status.sql']) await db.exec(await readFile(new URL(`../../supabase/migrations/${name}`,import.meta.url),'utf8'))
     await db.exec(`insert into regulatory_sources(id,name,url) values('dav','DAV','https://dav.gov.vn');`)
-    const row = { id:'test', title:'Thuốc test', code:'808/QĐ-QLD', category:'BE', summary:'test', source_id:'dav', source_url:'https://dav.gov.vn/test', legal_status:'active', content_hash:'fixture', search_text:'thuoc test 808 qd qld' }
+    const articleContent = 'Toàn văn bài báo test: Bộ Y tế công bố danh mục thuốc cần rà soát đấu thầu.'
+    const row = { id:'test', title:'Thuốc test', code:'808/QĐ-QLD', category:'BE', summary:'test', content:articleContent, source_id:'dav', source_url:'https://dav.gov.vn/test', legal_status:'active', content_hash:'fixture', search_text:'thuoc test 808 qd qld' }
     await db.query('select regulatory_ingest($1::jsonb)',[JSON.stringify(row)])
     assert.equal((await db.query('select legal_status from regulatory_documents')).rows[0].legal_status,'unknown')
+    assert.equal((await db.query('select content from regulatory_documents')).rows[0].content,articleContent)
+    await db.query('select regulatory_ingest($1::jsonb)',[JSON.stringify({...row,legal_status:'draft'})])
+    assert.equal((await db.query('select legal_status from regulatory_documents')).rows[0].legal_status,'draft')
+    await db.query('select regulatory_ingest($1::jsonb)',[JSON.stringify(row)])
+    assert.equal((await db.query('select legal_status from regulatory_documents')).rows[0].legal_status,'unknown')
+    await db.exec("update regulatory_documents set legal_status='active',reviewed_at='2026-10-08',review_source='https://dav.gov.vn/test',review_note='Đã đối chiếu bản gốc'")
+    await db.query('select regulatory_ingest($1::jsonb)',[JSON.stringify({...row,legal_status:'draft'})])
+    assert.equal((await db.query('select legal_status from regulatory_documents')).rows[0].legal_status,'active')
+    await db.exec('set role service_role')
+    assert.equal((await db.query("select claim_news_analysis('test','00000000-0000-0000-0000-000000000011') as claimed")).rows[0].claimed,true)
+    await db.query("update regulatory_news_analyses set result=$1::jsonb, input_hash='hash',model='pro',prompt_version='v1',analyzed_at=now() where document_id='test'",['{\"headline\":\"saved\"}'])
+    assert.equal((await db.query("select claim_news_analysis('test','00000000-0000-0000-0000-000000000012') as claimed")).rows[0].claimed,false)
+    assert.deepEqual((await db.query("select result from regulatory_news_analyses where document_id='test'")).rows[0].result,{headline:'saved'})
+    await db.exec('reset role')
     const login = async (email, id='00000000-0000-0000-0000-000000000001') => {
       await db.exec('reset role')
       await db.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({ email, sub:id })])
@@ -64,9 +79,13 @@ test('database enforces staff/admin/read isolation and preserves reviewed items 
     }
     await login('outsider@example.com')
     assert.equal((await db.query('select * from regulatory_documents')).rows.length,0)
+    assert.equal((await db.query('select * from regulatory_news_analyses')).rows.length,0)
     await login('sales@baoanpharma.com')
     assert.equal((await db.query('select * from regulatory_documents')).rows.length,1)
+    assert.equal((await db.query('select * from regulatory_news_analyses')).rows.length,1)
     assert.equal((await db.query("update regulatory_documents set title='bad' returning id")).rows.length,0)
+    await assert.rejects(db.query("insert into regulatory_news_analyses(document_id) values('test')"),/permission/)
+    await assert.rejects(db.query("select claim_news_analysis('test','00000000-0000-0000-0000-000000000013')"),/permission/)
     await assert.rejects(db.query("select regulatory_ingest('{}'::jsonb)"),/permission/)
     await assert.rejects(db.query('select regulatory_ai_reserve()'),/permission/)
     await db.exec("insert into regulatory_reads(user_id,document_id) values(auth.uid(),'test')")

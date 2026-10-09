@@ -3,10 +3,13 @@
  * because the Hobby builder does not match a catch-all file to nested paths.
  * Handlers live in api-lib/routes and are imported only after the path matches.
  */
+export const config = { maxDuration: 300 }
+
 import { json } from '../api-lib/auth.js'
 import { matchRoute, requestPath, restoreRequestUrl } from '../api-lib/routeTable.js'
 
 const LOADERS = {
+  analytics: () => import('../api-lib/routes/analytics.js'),
   tenderSearch: () => import('../api-lib/routes/tenderSearch.js'),
   tenderCount: () => import('../api-lib/routes/tenderCount.js'),
   tenderMetrics: () => import('../api-lib/routes/tenderMetrics.js'),

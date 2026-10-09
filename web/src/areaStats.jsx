@@ -3,7 +3,7 @@ import { GROUP_COLORS } from './mapGeo'
 
 const CSYT_TIP = 'Số cơ sở y tế (bệnh viện, trung tâm) có kết quả trong cửa sổ.'
 
-export function Sparkline({ points = [], width = 168, height = 46 }) {
+export function Sparkline({ points = [], width = 168, height = 46, unit = 'VNĐ' }) {
   const values = points.map((point) => Number(point.value) || 0)
   if (!values.length) return <span className="muted">Chưa có xu hướng</span>
   const max = Math.max(...values, 1)
@@ -15,8 +15,9 @@ export function Sparkline({ points = [], width = 168, height = 46 }) {
     return `${index ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`
   }).join(' ')
   return (
-    <svg className="map-spark" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+    <svg className="map-spark" width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Xu hướng ${unit}`}>
       <path d={d} />
+      {points.map((point, index) => <circle key={point.key || index} cx={(index / Math.max(values.length - 1, 1)) * width} cy={height - ((values[index] - min) / span) * (height - 8) - 4} r="3" tabIndex="0"><title>{point.key}: {fmtInt(values[index])} {unit}{point.delta == null ? '' : ` · ${point.delta > 0 ? '+' : ''}${fmtInt(point.delta)} so với tháng trước`}</title></circle>)}
     </svg>
   )
 }
@@ -30,6 +31,7 @@ export function StatCards({
   pending = false,
   hideHeader = false,
   trendLabel = '',
+  trendMetric,
 }) {
   if (pending || !stats || stats.value == null) {
     return (
@@ -74,8 +76,8 @@ export function StatCards({
           <dd className={yoyClass}>{stats.yoy == null ? 'Chưa có cùng kỳ' : fmtPct(stats.yoy)}</dd>
         </div>
         <div>
-          <dt>Số phần/lô</dt>
-          <dd>{fmtInt(stats.lots ?? 0)}</dd>
+          <dt>{trendMetric === 'packages' ? 'Gói mở trong kỳ' : 'Số phần/lô'}</dt>
+          <dd>{fmtInt(trendMetric === 'packages' ? (stats.countTrend || []).reduce((total, point) => total + Number(point.value || 0), 0) : stats.lots ?? 0)}</dd>
         </div>
         <div>
           <dt title={CSYT_TIP}>CSYT</dt>
@@ -83,7 +85,7 @@ export function StatCards({
         </div>
         <div className="map-argus-trend">
           <dt>{trendLabel || `Xu hướng ${months} tháng`}</dt>
-          <dd><Sparkline points={stats.trend} /></dd>
+          <dd><Sparkline points={trendMetric === 'packages' ? stats.countTrend : stats.trend} unit={trendMetric === 'packages' ? 'gói' : 'VNĐ'} /></dd>
         </div>
       </dl>
       {showGroups && (

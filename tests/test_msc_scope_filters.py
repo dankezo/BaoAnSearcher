@@ -21,7 +21,7 @@ class TenderFiltersTest(unittest.TestCase):
 
     def test_same_lot_and_accent_insensitive(self):
         row = {'scope_lots': [
-            {'lotName': 'Paracetamol', 'dangBaoChe': 'Viên nén'},
+            {'lotName': 'Paracetamol', 'dangBaoChe': 'Viên nén', 'duongDung': 'Uống'},
             {'lotName': 'Ceftriaxon', 'dangBaoChe': 'Bột pha tiêm'},
         ]}
         self.assertTrue(msc_scope.matches_scope(row, {'ingredient': 'paracetamol', 'dosage_form': 'vien nen'}))
@@ -78,15 +78,16 @@ class TenderFiltersTest(unittest.TestCase):
         fake = ({
             'stems': ['paracetamol'],
             'form': 'vien nen',
+            'route': 'uong',
             'strength': {(500.0, 'mg')},
             'card': {'brand': 'ParaBA', 'inn': 'Paracetamol', 'strength': '500mg', 'form': 'Viên nén', 'reg': 'VD-1'},
         },)
         with patch.object(baoan_match, 'catalog', return_value=fake):
             rows = baoan_match.public_lines([
-                {'medicineCode': 'G1', 'lotName': 'Paracetamol', 'nongDo': '500mg', 'dangBaoChe': 'Viên nén', 'quantity': 10},
+                {'medicineCode': 'G1', 'lotName': 'Paracetamol', 'nongDo': '500mg', 'dangBaoChe': 'Viên nén', 'duongDung': 'Uống', 'quantity': 10},
                 {'lotName': 'Ceftriaxon', 'dangBaoChe': 'Bột pha tiêm'},
             ])
-            shown = msc_scope.present([{'baoan_match': 'exact', 'scope_lots': [{'lotName': 'Paracetamol', 'nongDo': '500mg', 'dangBaoChe': 'Viên nén'}]}])
+            shown = msc_scope.present([{'baoan_match': 'exact', 'scope_lots': [{'lotName': 'Paracetamol', 'nongDo': '500mg', 'dangBaoChe': 'Viên nén', 'duongDung': 'Uống'}]}])
         self.assertEqual(rows[0]['match'], 'exact')
         self.assertEqual(rows[0]['hits'][0]['brand'], 'ParaBA')
         self.assertEqual(rows[1]['match'], '')
@@ -100,6 +101,7 @@ class TenderFiltersTest(unittest.TestCase):
         fake = ({
             'stems': ['vitamin b1', 'vitamin b12', 'vitamin b6'],
             'form': 'vien nang',
+            'route': 'uong',
             'strength': {(110.0, 'mg'), (200.0, 'mg'), (0.5, 'mg')},
             'card': {
                 'brand': 'B1B6B12 Ansba',
@@ -114,6 +116,7 @@ class TenderFiltersTest(unittest.TestCase):
             'lotName': 'Vitamin B1 + B6 + B12',
             'nongDo': '110mg + 200mg + 500mcg',
             'dangBaoChe': 'Viên nang',
+            'duongDung': 'Uống',
         }
         with patch.object(baoan_match, 'catalog', return_value=fake):
             level, hits = baoan_match.classify_lot(lot)

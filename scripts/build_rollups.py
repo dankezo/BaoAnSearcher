@@ -76,11 +76,13 @@ def build_vss(path: Path):
             SELECT COALESCE(loai, ''), nam, tungay_hd, COALESCE(ma_tinh, ''), COALESCE(nhomthau, ''),
                    json_extract(raw, '$.thanhtien'), json_extract(raw, '$.gia'),
                    json_extract(raw, '$.soluong'), json_extract(raw, '$.congbo'),
-                   hoatchat, sodk, duongdung, nuocsx, loai_thau, ten
+                   hoatchat, sodk, duongdung, nuocsx, loai_thau, ten,
+                   json_extract(raw, '$.tennhathau'), json_extract(raw, '$.nhasx'),
+                   json_extract(raw, '$.ten_cskcb'), json_extract(raw, '$.ten_tinh')
             FROM bids
             """
         )
-        for loai, nam, tungay, ma_tinh, nhom, thanhtien, gia, soluong, congbo, hoatchat, sodk, duongdung, nuocsx, loai_thau, ten in cur:
+        for loai, nam, tungay, ma_tinh, nhom, thanhtien, gia, soluong, congbo, hoatchat, sodk, duongdung, nuocsx, loai_thau, ten, tennhathau, nhasx, ten_cskcb, ten_tinh in cur:
             ym = ym_of(tungay, congbo)
             key = (blank(loai), year_of(nam, ym), ym, blank(ma_tinh), blank(nhom))
             bucket = groups[key]
@@ -93,6 +95,10 @@ def build_vss(path: Path):
                 ("nuocsx", nuocsx),
                 ("loai_thau", loai_thau),
                 ("ten", ten),
+                ("tennhathau", tennhathau),
+                ("nhasx", nhasx),
+                ("ten_cskcb", ten_cskcb),
+                ("ten_tinh", ten_tinh),
             ):
                 text = blank(value)
                 if text:
@@ -136,6 +142,21 @@ def add_suggest(con, suggestions, section, table, fields):
                 suggestions.append({"section": section, "field": field, "value": text, "cnt": int(cnt)})
 
 
+def add_json_suggest(con, suggestions, section, table, fields):
+    if "raw" not in column_names(con, table):
+        return
+    for field, paths in fields:
+        values = [f"json_extract(raw, '$.{path}')" for path in paths]
+        expr = values[0] if len(values) == 1 else "COALESCE(" + ", ".join(values) + ")"
+        for value, cnt in con.execute(
+            f"SELECT {expr}, COUNT(*) FROM {table} WHERE {expr} IS NOT NULL "
+            f"AND TRIM(CAST({expr} AS TEXT)) != '' GROUP BY 1"
+        ):
+            text = blank(value)[:512]
+            if text:
+                suggestions.append({"section": section, "field": field, "value": text, "cnt": int(cnt)})
+
+
 def build_other_suggest(suggestions):
     if DAV_DB.exists():
         con = connect_ro(DAV_DB)
@@ -143,12 +164,13 @@ def build_other_suggest(suggestions):
             tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             table = "drugs" if "drugs" in tables else None
             if table:
-                add_suggest(con, suggestions, "dav", table, [
-                    ("tenThuoc", "ten_thuoc"),
-                    ("soDangKy", "so_dang_ky"),
-                    ("hoatChat", "hoat_chat"),
-                    ("dangBaoChe", "dang_bao_che"),
-                    ("q", "ten_thuoc"),
+                add_json_suggest(con, suggestions, "dav", table, [
+                    ("ten_thuoc", ("tenThuoc",)),
+                    ("so_dang_ky", ("soDangKy",)),
+                    ("hoat_chat", ("thongTinThuocCoBan.hoatChatChinh", "hoatChatChinh", "hoatChat")),
+                    ("dang_bao_che", ("thongTinThuocCoBan.dangBaoChe", "dangBaoChe")),
+                    ("cty_san_xuat", ("congTySanXuat.tenCongTySanXuat", "tenCongTySanXuat", "ctySanXuat")),
+                    ("cty_dang_ky", ("congTyDangKy.tenCongTyDangKy", "tenCongTyDangKy", "ctyDangKy")),
                 ])
         finally:
             con.close()
@@ -159,7 +181,7 @@ def build_other_suggest(suggestions):
             if "records" not in tables:
                 return
             for kind, section, fields in (
-                ("prices", "msc_prices", ("name", "ingredient", "manufacturer", "buyer", "province")),
+                ("prices", "msc_prices", ("name", "ingredient", "registration", "winner", "manufacturer", "buyer", "province")),
                 ("tenders", "msc_tenders", ("name", "buyer", "province", "tender_no")),
             ):
                 for field in fields:

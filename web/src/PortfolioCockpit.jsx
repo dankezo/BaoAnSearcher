@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api'
 import { cloudPortfolio, supabaseConfigured } from './supabaseCloud'
 import { LoadingOverlay, Modal, useLoadProgress } from './components'
@@ -8,6 +8,7 @@ import './portfolio.css'
 const FILTERS = [
   ['all', 'Tất cả'],
   ['won', 'Lịch sử trúng'],
+  ['new', 'SĐK mới'],
 ]
 
 const base = import.meta.env.BASE_URL || '/'
@@ -48,7 +49,7 @@ function columnsFor(mode) {
 function PriceCell({ row, compare = false, alert = false }) {
   const delta = row.priceDeltaPct
   const comparable = delta != null && !row.own
-  return <td className={comparable ? delta > 0 ? 'pc-price-higher' : delta < 0 ? 'pc-price-lower' : '' : ''}>
+  return <td className={alert ? 'pc-price-alert' : comparable ? delta > 0 ? 'pc-price-higher' : delta < 0 ? 'pc-price-lower' : '' : ''}>
     <span className="pc-price-line">
       <strong>{row.mscPrice == null ? '—' : `${formatVnd(row.mscPrice)} / ${row.mscUnit || '?'}`}</strong>
       {alert && (
@@ -59,6 +60,7 @@ function PriceCell({ row, compare = false, alert = false }) {
       )}
     </span>
     {row.latestAward && <small>{row.latestAward.source} · {dateLabel(row.latestAward.date)}</small>}
+    {compare && comparable && <small>{row.comparisonNote}</small>}
     {compare && !row.own && (comparable ? <small>{delta === 0 ? 'Bằng giá Bảo An' : `${delta > 0 ? 'Cao' : 'Thấp'} hơn ${Math.abs(delta).toLocaleString('vi-VN', {maximumFractionDigits: 2})}% · ${Math.abs(delta) > 5 ? '>5%' : Math.abs(delta) === 5 ? '=5%' : '<5%'}`}</small> : <small>{row.comparisonNote}</small>)}
   </td>
 }
@@ -93,15 +95,44 @@ function AwardHistory({ target, knownItems, onClose, remote = false }) {
     return () => { live = false }
   }, [target, knownItems, remote])
   const progress = useLoadProgress(loading, 'Đang tải lịch sử trúng')
-  const sourceUrl = row => /^https:\/\/muasamcong\.mpi\.gov\.vn\//.test(row.sourceUrl || '') ? row.sourceUrl : null
   return <Modal open={!!target} onClose={onClose} width={1280} title={`Lịch sử trúng · ${target?.name || ''}`} subtitle={`${target?.regNumber || ''} · ${target?.manufacturer || ''}`}>
     <LoadingOverlay show={loading || progress.percent > 0} percent={progress.percent} message={progress.message} etaSec={progress.etaSec} />
     <p className="pc-meta">Các kết quả của SĐK này và cùng hoạt chất, cùng nhà sản xuất; từng dòng ghi riêng hàm lượng, dạng và nhóm. Nhấp đúp dòng có liên kết để mở hồ sơ MSC. Số lượng là lượng trúng thầu theo nguồn, chưa phải lượng bán thực tế.</p>
     {error && <p role="alert">{error}</p>}
-    {items && <div className="pc-table-wrap"><table className="pc-table pc-history"><thead><tr><th>Gói / Quyết định</th><th>Thời điểm</th><th>Thuốc · SĐK</th><th>Hàm lượng</th><th>Dạng bào chế</th><th>Nhóm</th><th>Cơ sở / Tỉnh</th><th>Đơn giá</th><th>Số lượng</th><th>Nguồn</th></tr></thead><tbody>{items.map((r, i) => <tr key={i} onDoubleClick={() => { const url = sourceUrl(r); if (url) window.open(url, '_blank', 'noopener,noreferrer') }}>
-      <td><strong>{r.tenderNo || 'Chưa có mã gói'}</strong><small>{r.decision || 'Chưa có số quyết định'}</small></td><td>{dateLabel(r.date)}<small>{r.dateKind}</small></td><td>{r.name}<small>{r.registration}</small></td><td>{r.strength || '—'}</td><td>{r.dosageForm || '—'}</td><td>{r.group || '—'}</td><td>{r.buyer || '—'}<small>{r.province}</small></td><td className="pc-number">{r.price == null ? '—' : formatVnd(r.price)}<small>/ {r.unit || '?'}</small></td><td className="pc-number">{r.quantity == null ? '—' : Number(r.quantity).toLocaleString('vi-VN')}</td><td>{sourceUrl(r) ? <a href={sourceUrl(r)} target="_blank" rel="noreferrer">Hồ sơ MSC ↗</a> : <span>{r.source}<small>Chưa có link hồ sơ MSC</small></span>}</td>
-    </tr>)}</tbody></table>{!items.length && <p className="pc-empty">Chưa có kết quả trúng thầu đúng SĐK này trong dữ liệu đã tải.</p>}</div>}
+    {items && <AwardTable items={items} />}
   </Modal>
+}
+
+function AwardTable({ items }) {
+  const [visible, setVisible] = useState(50)
+  const sentinel = useRef(null)
+  useEffect(() => { setVisible(50) }, [items])
+  useEffect(() => {
+    if (visible >= items.length || !sentinel.current || typeof IntersectionObserver === 'undefined') return undefined
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) setVisible(count => Math.min(count + 50, items.length))
+    }, { root: sentinel.current.parentElement, rootMargin: '160px' })
+    observer.observe(sentinel.current)
+    return () => observer.disconnect()
+  }, [items, visible])
+  const sourceUrl = row => /^https:\/\/muasamcong\.mpi\.gov\.vn\//.test(row.sourceUrl || '') ? row.sourceUrl : null
+  return <div className="pc-table-wrap pc-history-scroll"><table className="pc-table pc-history"><thead><tr><th>Gói / Quyết định</th><th>Thời điểm</th><th>Tên thuốc</th><th>SĐK</th><th>Hoạt chất</th><th>Hàm lượng</th><th>Dạng bào chế</th><th>Nhóm</th><th>Cơ sở / Tỉnh</th><th>Đơn giá</th><th>Số lượng</th><th>Nguồn</th></tr></thead><tbody>{items.slice(0, visible).map((r, i) => <tr key={i} onDoubleClick={() => { const url = sourceUrl(r); if (url) window.open(url, '_blank', 'noopener,noreferrer') }}>
+      <td><strong>{r.tenderNo || 'Chưa có mã gói'}</strong><small>{r.decision || 'Chưa có số quyết định'}</small></td><td>{dateLabel(r.date)}<small>{r.dateKind}</small></td><td>{r.name || '—'}</td><td>{r.registration || '—'}</td><td>{r.ingredient || r.inn || '—'}</td><td>{r.strength || '—'}</td><td>{r.dosageForm || '—'}</td><td>{r.group || '—'}</td><td>{r.buyer || '—'}<small>{r.province}</small></td><td className="pc-number">{r.price == null ? '—' : formatVnd(r.price)}<small>/ {r.unit || '?'}</small></td><td className="pc-number">{r.quantity == null ? '—' : Number(r.quantity).toLocaleString('vi-VN')}</td><td>{sourceUrl(r) ? <a href={sourceUrl(r)} target="_blank" rel="noreferrer">Hồ sơ MSC ↗</a> : <span>{r.source}<small>Chưa có link hồ sơ MSC</small></span>}</td>
+    </tr>)}</tbody></table>{visible < items.length && <div ref={sentinel}><button type="button" className="pc-history-link" onClick={() => setVisible(count => Math.min(count + 50, items.length))}>Tải thêm ({visible}/{items.length.toLocaleString('vi-VN')})</button></div>}{!items.length && <p className="pc-empty">Chưa có kết quả trúng thầu đúng SĐK này trong dữ liệu đã tải.</p>}</div>
+}
+
+function PortfolioLookup({ items, registrations = false }) {
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(0)
+  const [expanded, setExpanded] = useState(null)
+  const found = useMemo(() => items.filter(row => fold([row.brandName, row.name, row.registration, row.regNumber, row.inn, row.ingredient, row.buyer, row.province, row.tenderNo, row.strength, row.dosageForm, row.ctyDangKy].filter(Boolean).join(' ')).includes(fold(query))), [items, query])
+  const shown = found.slice(page * 50, page * 50 + 50)
+  return <section aria-label={registrations ? 'SĐK cấp mới trong 12 tháng gần nhất' : 'Tra cứu từng kết quả trúng'}>
+    <label className="pc-search">Tìm thuốc, hoạt chất, SĐK, cơ sở hoặc gói<input value={query} onChange={event => { setQuery(event.target.value); setPage(0) }} placeholder="Nhập để lọc kết quả…" /></label>
+    <p className="pc-meta">{found.length.toLocaleString('vi-VN')} {registrations ? 'SĐK cấp trong 12 tháng gần nhất · mở từng SĐK để xem thuốc Bảo An khớp' : 'dòng trúng thầu · từng gói và thuốc ghi riêng'}</p>
+    {registrations ? <div className="pc-table-wrap"><table className="pc-table pc-registrations"><thead><tr><th>SĐK</th><th>Tên thuốc</th><th>Ngày cấp</th><th>Hoạt chất</th><th>Hàm lượng · Dạng</th><th>Nhóm thầu</th><th>Công ty đăng ký</th><th>Thuốc Bảo An khớp</th></tr></thead><tbody>{shown.map(row => <Fragment key={row.regNumber}><tr><td><strong>{row.regNumber}</strong></td><td>{row.name || '—'}</td><td>{showDate(row.grantDate)}</td><td>{row.inn}</td><td>{row.strength}<small>{row.dosageForm}</small></td><td>{row.groupKnown ? row.groups.map(g => String(g).startsWith('N') ? g : `N${g}`).join(', ') : 'Chưa có dữ liệu nhóm để xác nhận'}</td><td>{row.ctyDangKy || '—'}</td><td><button type="button" className="pc-history-link" aria-expanded={expanded === row.regNumber} onClick={() => setExpanded(expanded === row.regNumber ? null : row.regNumber)}>{row.matches.length} thuốc · {expanded === row.regNumber ? 'Thu gọn' : 'Xem thuốc khớp'}</button></td></tr>{expanded === row.regNumber && <tr className="pc-sdk-expand"><td colSpan={8}><ul className="pc-sdk-panel">{row.matches.map(match => <li key={match.id}><strong>{match.brandName}</strong> · {match.inn} · {match.strength} · {match.dosageForm} · {match.groups.map(g => String(g).startsWith('N') ? g : `N${g}`).join(', ') || 'Chưa rõ nhóm'}</li>)}</ul></td></tr>}</Fragment>)}</tbody></table>{!shown.length && <p className="pc-empty">Không có SĐK mới khớp.</p>}</div> : <AwardTable items={found} />}
+    {registrations && found.length > 50 && <div className="pc-chips"><button disabled={!page} onClick={() => setPage(page - 1)}>Trước</button><span>Trang {page + 1}/{Math.ceil(found.length / 50)}</span><button disabled={(page + 1) * 50 >= found.length} onClick={() => setPage(page + 1)}>Sau</button></div>}
+  </section>
 }
 
 function pct(value) {
@@ -242,7 +273,7 @@ function productCell(column, row, { sdkOpen, onToggleSdk, onHistory }) {
   if (column.id === 'sdk') return <td key={column.id}><button type="button" className={`pc-dot ${tone(row.statusColor)}`} aria-expanded={sdkOpen} aria-controls={`pc-sdk-${row.id}`} aria-label={`SĐK đối thủ của ${row.brandName}: ${row.competitorCount}`} onClick={event => { event.stopPropagation(); onToggleSdk(row.id) }}>{row.competitorCount}</button></td>
   if (column.id === 'price') return <PriceCell key={column.id} row={row} alert={rivalUndercuts(row)} />
   if (column.id === 'qty') return <QuantityCell key={column.id} row={row} />
-  return <td key={column.id}>{row.latestAward ? <><strong>{row.latestAward.tenderNo || row.latestAward.decision || 'Chưa có mã gói'}</strong><small>{dateLabel(row.latestAward.date)} · {row.latestAward.buyer}</small></> : <small>Chưa có kết quả</small>}<button className="pc-history-link" onClick={event => { event.stopPropagation(); onHistory({ id: row.id, regNumber: row.regNumber, name: row.brandName, manufacturer: row.manufacturer }) }}>Lịch sử ({row.awardCount || 0}) ↗</button></td>
+  return <td key={column.id}>{row.latestAward ? <><strong>{row.latestAward.sourceUrl ? <a href={row.latestAward.sourceUrl} target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()}>{row.latestAward.tenderNo || row.latestAward.decision || 'Hồ sơ MSC'} ↗</a> : (row.latestAward.tenderNo || row.latestAward.decision || 'Chưa có mã gói')}</strong>{!row.latestAward.sourceUrl && <small>Chưa có link hồ sơ MSC</small>}<small>{dateLabel(row.latestAward.date)} · {row.latestAward.buyer}</small></> : <small>Chưa có kết quả</small>}<button className="pc-history-link" onClick={event => { event.stopPropagation(); onHistory({ id: row.id, regNumber: row.regNumber, name: row.brandName, manufacturer: row.manufacturer }) }}>Lịch sử ({row.awardCount || 0}) ↗</button></td>
 }
 
 function rivalCell(column, row, parent, onHistory) {
@@ -260,7 +291,7 @@ function rivalCell(column, row, parent, onHistory) {
   if (column.id === 'sdk') return <td key={column.id}>—</td>
   if (column.id === 'price') return <PriceCell key={column.id} row={row} compare />
   if (column.id === 'qty') return <QuantityCell key={column.id} row={row} />
-  return <td key={column.id}>{row.latestAward && <><strong>{row.latestAward.tenderNo || row.latestAward.decision || 'Chưa có mã gói'}</strong><small>{dateLabel(row.latestAward.date)}</small></>}<button className="pc-history-link" onClick={open}>Lịch sử ({row.awardCount || 0}) ↗</button></td>
+  return <td key={column.id}>{row.latestAward && <><strong>{row.latestAward.sourceUrl ? <a href={row.latestAward.sourceUrl} target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()}>{row.latestAward.tenderNo || row.latestAward.decision || 'Hồ sơ MSC'} ↗</a> : (row.latestAward.tenderNo || row.latestAward.decision || 'Chưa có mã gói')}</strong>{!row.latestAward.sourceUrl && <small>Chưa có link hồ sơ MSC</small>}<small>{dateLabel(row.latestAward.date)}</small></>}<button className="pc-history-link" onClick={open}>Lịch sử ({row.awardCount || 0}) ↗</button></td>
 }
 
 function PortfolioTable({ rows, mode, selectedId, openSdkId, onSelect, onToggleSdk, onHistory }) {
@@ -365,34 +396,10 @@ export default function PortfolioCockpit({ localMode }) {
 
       {kpis && (
         <div className="pc-kpis">
-          <article>
-            <span>Quy mô</span>
-            <strong>{kpis.scale.sku} SKU</strong>
-            <small>{kpis.scale.categories} nhóm · {pct(kpis.scale.liveSdkPct)} còn SĐK</small>
-          </article>
-          <article>
-            <span>An toàn chu kỳ</span>
-            <strong>{pct(kpis.cycle.greenPct)} xanh</strong>
-            <small>
-              {kpis.cycle.expiryFrom && kpis.cycle.expiryTo ? `Hạn ${kpis.cycle.expiryFrom}–${kpis.cycle.expiryTo}` : 'Chưa đủ hạn'}
-              {' · '}{kpis.cycle.ready36} SKU đủ 36 tháng
-            </small>
-          </article>
-          <article>
-            <span>Ổ vàng</span>
-            <strong>{kpis.golden.count}</strong>
-            <small>SKU có tối đa 2 SĐK trong ô kỹ thuật</small>
-          </article>
-          <article>
-            <span>Kích hoạt thầu</span>
-            <strong>{kpis.bids.won}/{kpis.bids.total}</strong>
-            <small>{kpis.bids.waiting} SKU chưa thấy kết quả trong dữ liệu đã tải</small>
-          </article>
-          <article>
-            <span>CMO</span>
-            <strong>{pct(kpis.cmo.topPct)}</strong>
-            <small>{kpis.cmo.top}</small>
-          </article>
+          <article><span>Tổng doanh thu trúng thầu 12 tháng</span><strong>{formatVnd(kpis.awards12m?.revenue)} VNĐ</strong><small>{showDate(kpis.awards12m?.from)} – {showDate(kpis.awards12m?.to)}</small></article>
+          <article><span>Số lượng thuốc trúng thầu 12 tháng</span>{(kpis.awards12m?.quantityTotals || []).filter(total => total.unit?.trim().toLowerCase() !== 'gói').map(total => <strong key={total.unit}>{Number(total.quantity).toLocaleString('vi-VN')} {total.unit?.toLowerCase() === 'gói' ? 'gói thuốc' : total.unit}</strong>)}<small>Số lượng theo kết quả thầu, chưa phải lượng bán thực tế</small></article>
+          <article><span>Số gói thầu trúng 12 tháng</span><strong>{(kpis.awards12m?.packages || 0).toLocaleString('vi-VN')}</strong><small>{(kpis.awards12m?.records || 0).toLocaleString('vi-VN')} dòng kết quả</small></article>
+          <article><span>An toàn chu kỳ</span><strong>{pct(kpis.cycle.greenPct)} xanh</strong><small>{kpis.cycle.ready36} SKU đủ 36 tháng</small></article>
         </div>
       )}
 
@@ -402,12 +409,12 @@ export default function PortfolioCockpit({ localMode }) {
             <button key={id} type="button" className={filter === id ? 'on' : ''} aria-pressed={filter === id} onClick={() => setFilter(id)}>{label}</button>
           ))}
         </div>
-        <div className="pc-chips" role="group" aria-label="Chế độ cột">
+        {filter === 'all' && <div className="pc-chips" role="group" aria-label="Chế độ cột">
           {[['sorted', 'Sorted'], ['full', 'Full']].map(([id, label]) => (
             <button key={id} type="button" className={tableMode === id ? 'on' : ''} aria-pressed={tableMode === id} onClick={() => setTableMode(id)}>{label}</button>
           ))}
-        </div>
-        <label>
+        </div>}
+        {filter === 'all' && <label>
           Xưởng CMO
           <select value={plant} onChange={(event) => setPlant(event.target.value)}>
             <option value="">Tất cả xưởng</option>
@@ -415,10 +422,10 @@ export default function PortfolioCockpit({ localMode }) {
               <option key={plantKey(share.name)} value={plantKey(share.name)}>{share.name} ({share.count})</option>
             ))}
           </select>
-        </label>
+        </label>}
       </div>
 
-      <div className="pc-table-wrap">
+      {filter === 'won' ? <PortfolioLookup key="awards" items={data?.awardRows || []} /> : filter === 'new' ? <PortfolioLookup key="registrations" items={data?.newRegistrations || []} registrations /> : <div className="pc-table-wrap">
         <PortfolioTable
           rows={visible}
           mode={tableMode}
@@ -429,11 +436,11 @@ export default function PortfolioCockpit({ localMode }) {
           onHistory={setHistoryTarget}
         />
         {!loading && !visible.length && <p className="pc-empty">Không có SKU nào khớp bộ lọc.</p>}
-      </div>
+      </div>}
       <p className="pc-meta">Đã ghép {rows.reduce((n, r) => n + (r.awardCount || 0), 0).toLocaleString('vi-VN')} kết quả của thuốc Bảo An trong dữ liệu đã tải. SĐK cũ–mới chỉ được nối khi DAV xác nhận; chưa có kết quả không có nghĩa là chưa từng trúng. Số lượng là lượng trúng thầu, chưa phải lượng bán thực tế.</p>
       <AwardHistory target={historyTarget} knownItems={knownHistory} remote={!localMode} onClose={() => setHistoryTarget(null)} />
 
-      {selected && (
+      {filter === 'all' && selected && (
         <article className="pc-dossier">
           <header>
             <div>

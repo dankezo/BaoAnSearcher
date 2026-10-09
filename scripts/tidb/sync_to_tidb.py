@@ -200,7 +200,8 @@ def _write_meta(conn, key_name: str, table: str) -> None:
     if table not in PRIMARY_KEYS:
         raise KeyError(table)
     with conn.cursor() as cur:
-        cur.execute(f"SELECT COUNT(*) FROM {table}")
+        count_expr = "COUNT(DISTINCT COALESCE(NULLIF(tender_no, ''), source_id))" if table == "msc_tenders" else "COUNT(*)"
+        cur.execute(f"SELECT {count_expr} FROM {table}")
         total = int(cur.fetchone()[0])
         cur.execute(
             "INSERT INTO app_metadata (key_name, total_records) VALUES (%s, %s) "
@@ -236,6 +237,16 @@ def refresh_msc_price_metric_rollup(conn) -> None:
     """
     with conn.cursor() as cur:
         cur.execute("DELETE FROM agg_msc_price_monthly")
+        cur.execute("DELETE FROM agg_msc_price_daily_units")
+        cur.execute("""
+            INSERT INTO agg_msc_price_daily_units
+                (day, province, group_name, unit, revenue, quantity, min_price, max_price, cnt)
+            SELECT DATE(published), COALESCE(province, ''), COALESCE(group_name, ''), COALESCE(unit, ''),
+                   SUM(COALESCE(unit_price, 0) * COALESCE(quantity, 0)), SUM(COALESCE(quantity, 0)),
+                   MIN(unit_price), MAX(unit_price), COUNT(*)
+              FROM msc_prices WHERE published IS NOT NULL
+             GROUP BY DATE(published), COALESCE(province, ''), COALESCE(group_name, ''), COALESCE(unit, '')
+        """)
         cur.execute(
             """
             INSERT INTO agg_msc_price_monthly
@@ -399,7 +410,7 @@ def _sync_msc(conn, state: dict, from_start: bool, kind: str, table: str, column
     batch = []
     try:
         cur = con.execute(
-            "SELECT source_id, normalized, collected_at, search_text FROM records "
+            "SELECT source_id, normalized, collected_at, search_text, raw FROM records "
             "WHERE kind = ? AND source_id > ? AND "
             "(kind <> 'prices' OR (json_extract(normalized, '$.source_label')='API Mua sắm công' "
             "AND NOT EXISTS (SELECT 1 FROM excel_matches m WHERE m.excel_id=records.source_id))) ORDER BY source_id",
@@ -409,10 +420,12 @@ def _sync_msc(conn, state: dict, from_start: bool, kind: str, table: str, column
             fetched = cur.fetchmany(BATCH)
             if not fetched:
                 break
-            for source_id, normalized, collected, search_text in fetched:
+            for source_id, normalized, collected, search_text, raw in fetched:
                 last_id = source_id
                 try:
                     item = json.loads(normalized)
+                    if kind == "tenders":
+                        item["open_date"] = item.get("open_date") or json.loads(raw or "{}").get("bidOpenDate")
                 except json.JSONDecodeError:
                     continue
                 sid = str(source_id or "")

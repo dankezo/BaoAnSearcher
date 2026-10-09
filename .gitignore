@@ -68,3 +68,8 @@ _inspect_tmp.py
 *.har
 test zone/*.har
 test zone/*.html
+
+# Local release staging and screenshots
+.mobile-release/
+web/preview-output/
+tmp-portfolio-*.json

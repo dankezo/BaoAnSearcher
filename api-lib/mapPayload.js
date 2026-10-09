@@ -1,4 +1,5 @@
 import { fold } from './turso.js'
+import { whereFor } from './db/searchSql.js'
 import { groupDigit } from './metricsRollup.js'
 import { matchingTenderNos, packageMatchFromLines, publicLines, scopeFor } from './scopeMatch.js'
 import { VN_PROVINCES, provinceNameFromCode } from './vnProvinces.js'
@@ -161,7 +162,26 @@ function rollup(items, keys, code, name, region) {
       bucket.month_values[point.key] = (bucket.month_values[point.key] || 0) + num(point.value)
     }
   }
-  return finalize(bucket, keys)
+  const result = finalize(bucket, keys)
+  if (items.some((item) => Array.isArray(item.countTrend))) {
+    const counts = new Map(keys.map((key) => [key, 0]))
+    for (const item of items) for (const point of item.countTrend || []) {
+      counts.set(point.key, (counts.get(point.key) || 0) + num(point.value))
+    }
+    result.countTrend = countPoints(keys, counts)
+  }
+  return result
+}
+
+export function countPoints(keys, counts) {
+  let previous = null
+  return keys.map((key) => {
+    const count = counts.get(key)
+    const value = count instanceof Set ? count.size : num(count)
+    const point = { key, value, delta: previous === null ? null : value - previous }
+    previous = value
+    return point
+  })
 }
 
 export function shapeMapRows(rows, filters, window, facilityCounts = new Map()) {
@@ -225,19 +245,9 @@ function isoDate(date) {
 }
 
 function vssWhere(filters, from, to) {
-  const end = new Date(to.getFullYear(), to.getMonth() + 1, 1)
-  const clauses = ['loai = ?', 'tungay_hd >= ?', 'tungay_hd < ?']
-  const args = ['Tân dược', isoDate(from), isoDate(end)]
-  const needle = fold(filters.hoatchat || '').trim()
-  if (needle) {
-    clauses.push('hoatchat_f LIKE ?')
-    args.push(`%${needle}%`)
-  }
-  const words = fold(filters.q || '').trim().split(/\s+/).filter(Boolean)
-  for (const word of words) {
-    clauses.push('search LIKE ?')
-    args.push(`%${word}%`)
-  }
+  const shared = whereFor('vss', filters, 'tidb')
+  const clauses = [shared.where, 'tungay_hd >= ?', 'tungay_hd < DATE_ADD(?, INTERVAL 1 DAY)']
+  const args = [...shared.args, isoDate(from), isoDate(to)]
   const groups = groupSet(filters)
   if (groups.size) {
     clauses.push(`(${[...groups].map(() => 'nhomthau LIKE ?').join(' OR ')})`)
@@ -273,7 +283,9 @@ async function vssPayload(query, filters, window, withDots, withIngredients) {
   const needle = fold(filters.hoatchat || '').trim()
   const words = fold(filters.q || '').trim()
   let moneyRows = []
-  if (!needle && !words) {
+  const factKeys = ['hoatchat', 'q', 'sodk', 'loai_thau', 'duongdung', 'nuocsx', 'ten_tinh', 'tuNgay', 'denNgay', 'nam']
+  const needsFacts = factKeys.some(key => Array.isArray(filters[key]) ? filters[key].length : String(filters[key] || '').trim())
+  if (!needsFacts && (!filters.loai || filters.loai === 'Tân dược')) {
     moneyRows = await rowsOf(
       query,
       `SELECT ma_tinh, nhomthau, ym, SUM(sum_thanhtien) AS sum_thanhtien, SUM(cnt) AS cnt
@@ -409,7 +421,6 @@ LIMIT 60`,
     }
     for (const list of Object.values(areaDots)) list.sort((a, b) => b.value - a.value)
     const nationalIds = new Set(dots.slice(0, 120).map((dot) => dot.id))
-    await attachFacilityIngredients(query, span, dots)
     dots = dots.filter((dot) => nationalIds.has(dot.id))
   }
   return {
@@ -507,9 +518,11 @@ async function mscPricePayload(query, filters, window, withDots, withIngredients
   }
   const shaped = shapeMapRows(monthly.map(priceMapRow), filters, window)
   const current = mscPriceWhere(filters, window.curFrom, window.now)
+  const allowedCodes = codeSet(filters)
   let buyers = []
   if (withDots) {
     try {
+      // Resolve province aliases before taking the scoped top 120.
       const raw = await rowsOf(
         query,
         `SELECT ${hint('msc_prices')}
@@ -521,7 +534,7 @@ async function mscPricePayload(query, filters, window, withDots, withIngredients
         WHERE ${current.clauses.join(' AND ')} AND COALESCE(buyer, '') <> ''
         GROUP BY COALESCE(buyer, ''), COALESCE(province, '')
         ORDER BY value DESC
-        LIMIT 120`,
+        ${allowedCodes.size ? '' : 'LIMIT 120'}`,
         current.args,
       )
       buyers = raw.map((row) => {
@@ -542,12 +555,11 @@ async function mscPricePayload(query, filters, window, withDots, withIngredients
           lots: num(row.lots),
           ingredients: [],
         }
-      }).filter((row) => row.name && row.provinceCode)
+      }).filter((row) => row.name && row.provinceCode && (!allowedCodes.size || allowedCodes.has(row.provinceCode))).slice(0, 120)
     } catch {
       buyers = []
     }
   }
-  if (withDots && buyers.length) await attachPriceBuyerIngredients(query, current, buyers)
   const packageAreas = {}
   for (const buyer of buyers) {
     const list = packageAreas[buyer.provinceCode] || []
@@ -635,49 +647,62 @@ async function mscPricePayload(query, filters, window, withDots, withIngredients
   }
 }
 
-/** Compact ingredient ranking for a selected MSC-price buyer.  It uses the
- * exact same range and filters as its map marker, avoiding misleading
- * cross-period ingredients in the right-hand panel. */
-async function attachPriceBuyerIngredients(query, where, buyers) {
-  const pairs = buyers.slice(0, 120).map((buyer) => [buyer.provinceCode, buyer.buyer]).filter(([, buyer]) => buyer)
-  if (!pairs.length) return
-  const pairWhere = pairs.map(() => "(COALESCE(province, '') = ? AND COALESCE(buyer, '') = ?)").join(' OR ')
-  try {
+/** Load ingredients only for the selected VSS facility or MSC-price buyer. */
+export async function mapFacilityIngredients(query, body = {}) {
+  const dotId = String(body.dotId || '')
+  const source = String(body.source || 'vss').toLowerCase()
+  const filters = body.filters && typeof body.filters === 'object' ? body.filters : {}
+  const window = mapWindow(body.months)
+  if (source === 'msc_prices') {
+    const parts = dotId.split(':')
+    const code = padCode(body.provinceCode || parts[1] || '')
+    const buyer = String(body.buyer || parts.slice(2).join(':')).trim()
+    if (!buyer || !code) return { dotId, ingredients: [], months: window.months }
+    const where = mscPriceWhere(filters, window.curFrom, window.now)
+    where.clauses.push("COALESCE(buyer, '') = ?")
+    where.args.push(buyer)
     const raw = await rowsOf(
       query,
-      `SELECT province, buyer, name, value, quantity FROM (
-  SELECT ${hint('msc_prices')}
-    COALESCE(province, '') AS province,
-    COALESCE(buyer, '') AS buyer,
-    COALESCE(ingredient, '') AS name,
-    SUM(COALESCE(unit_price, 0) * COALESCE(quantity, 0)) AS value,
-    SUM(COALESCE(quantity, 0)) AS quantity,
-    ROW_NUMBER() OVER (
-      PARTITION BY COALESCE(province, ''), COALESCE(buyer, '')
-      ORDER BY SUM(COALESCE(unit_price, 0) * COALESCE(quantity, 0)) DESC
-    ) AS rn
-  FROM msc_prices
-  WHERE ${where.clauses.join(' AND ')}
-    AND (${pairWhere})
-    AND COALESCE(ingredient, '') <> ''
-  GROUP BY COALESCE(province, ''), COALESCE(buyer, ''), COALESCE(ingredient, '')
-) ranked WHERE rn <= 15`,
-      [...where.args, ...pairs.flat()],
+      `SELECT ${hint('msc_prices')}
+         COALESCE(province, '') AS province,
+         COALESCE(ingredient, '') AS name,
+         SUM(COALESCE(unit_price, 0) * COALESCE(quantity, 0)) AS value,
+         SUM(COALESCE(quantity, 0)) AS quantity
+       FROM msc_prices
+       WHERE ${where.clauses.join(' AND ')} AND COALESCE(ingredient, '') <> ''
+       GROUP BY COALESCE(province, ''), COALESCE(ingredient, '')`,
+      where.args,
     )
-    const grouped = new Map()
-    for (const row of raw) {
-      const code = resolveProvince(row.province).code
-      const buyer = String(row.buyer || '').trim()
-      const name = String(row.name || '').trim()
-      if (!code || !buyer || !name) continue
-      const key = `${code}\u001f${buyer}`
-      const list = grouped.get(key) || []
-      list.push({ name, value: num(row.value), quantity: num(row.quantity), baoanHits: [] })
-      grouped.set(key, list)
-    }
-    for (const buyer of buyers) buyer.ingredients = grouped.get(`${buyer.provinceCode}\u001f${buyer.buyer}`) || []
-  } catch {
-    /* The marker remains usable if the optional rank cannot be calculated. */
+    const ingredients = raw.filter((row) => resolveProvince(row.province).code === code)
+      .map((row) => ({ name: String(row.name || '').trim(), value: num(row.value), quantity: num(row.quantity), baoanHits: [] }))
+      .filter((row) => row.name).sort((a, b) => b.value - a.value).slice(0, 15)
+    return { dotId, ingredients, months: window.months }
+  }
+  const [rawCode, ...facilityParts] = dotId.split(':')
+  const code = padCode(body.provinceCode || rawCode)
+  const facility = String(body.facilityCode || facilityParts.join(':')).trim()
+  if (!facility || !/^\d{2}$/.test(code)) return { dotId, ingredients: [], months: window.months }
+  const where = vssWhere(filters, window.curFrom, window.now)
+  where.clauses.push("COALESCE(ma_tinh, '') IN (?, ?)", "COALESCE(ma_cskcb, '') = ?")
+  where.args.push(code, String(Number(code)), facility)
+  const raw = await rowsOf(
+    query,
+    `SELECT ${hint('vss_bids')}
+       COALESCE(hoatchat, '') AS name,
+       SUM(COALESCE(thanhtien, 0)) AS value,
+       SUM(COALESCE(soluong, 0)) AS quantity
+     FROM vss_bids
+     WHERE ${where.clauses.join(' AND ')} AND COALESCE(hoatchat, '') <> ''
+     GROUP BY COALESCE(hoatchat, '')
+     ORDER BY value DESC
+     LIMIT 15`,
+    where.args,
+  )
+  return {
+    dotId,
+    ingredients: raw.map((row) => ({ name: String(row.name || '').trim(), value: num(row.value), quantity: num(row.quantity), baoanHits: [] }))
+      .filter((row) => row.name),
+    months: window.months,
   }
 }
 
@@ -786,47 +811,6 @@ async function vssIngredientAreas(query, where) {
     return areas
   } catch {
     return {}
-  }
-}
-
-async function attachFacilityIngredients(query, where, dots) {
-  const ids = [...new Set(dots.map((dot) => dot.id.split(':').slice(1).join(':')).filter(Boolean))]
-  if (!ids.length) return
-  const capped = ids.slice(0, 400)
-  try {
-    const raw = await rowsOf(
-      query,
-      `SELECT fac, code, name, value, quantity FROM (
-  SELECT ${hint('vss_bids')}
-    COALESCE(ma_cskcb, '') AS fac,
-    COALESCE(ma_tinh, '') AS code,
-    COALESCE(hoatchat, '') AS name,
-    SUM(COALESCE(thanhtien, 0)) AS value,
-    SUM(COALESCE(soluong, 0)) AS quantity,
-    ROW_NUMBER() OVER (
-      PARTITION BY COALESCE(ma_tinh, ''), COALESCE(ma_cskcb, '')
-      ORDER BY SUM(COALESCE(thanhtien, 0)) DESC
-    ) AS rn
-  FROM vss_bids
-  WHERE ${where.clauses.join(' AND ')}
-    AND COALESCE(ma_cskcb, '') IN (${capped.map(() => '?').join(',')})
-    AND hoatchat <> ''
-  GROUP BY COALESCE(ma_tinh, ''), COALESCE(ma_cskcb, ''), COALESCE(hoatchat, '')
-) ranked WHERE rn <= 15`,
-      [...where.args, ...capped],
-    )
-    const grouped = new Map()
-    for (const row of raw) {
-      const id = `${padCode(row.code)}:${row.fac}`
-      const list = grouped.get(id) || []
-      const name = String(row.name || '').trim()
-      if (!name) continue
-      list.push({ name, value: num(row.value), quantity: num(row.quantity), baoanHits: [] })
-      grouped.set(id, list)
-    }
-    for (const dot of dots) dot.ingredients = grouped.get(dot.id) || []
-  } catch {
-    /* Facility ingredient list stays empty if this scan fails. */
   }
 }
 
@@ -990,25 +974,25 @@ WHERE ${clauses.join(' AND ')} AND tender_no <> ''`,
     tenders = await rowsOf(
       query,
       `SELECT ${hint('msc_tenders')}
-  source_id, tender_no, name, buyer, province, published, close_date, status_code, bid_price, bid_form, source_url
+  source_id, tender_no, name, buyer, province, published, close_date, open_date, status_code, bid_price, bid_form, source_url
 FROM msc_tenders`,
       [],
     )
   } catch {
-    tenders = []
+    throw new Error('Chưa tải được dữ liệu và ngày mở thầu từ nguồn MSC. Vui lòng thử lại.')
   }
   const grouped = { open: [], review: [], closed: [] }
   const keys = monthKeys(window.curFrom, window.now)
   const byCode = new Map()
+  const packageIds = new Set()
+  const openings = new Map()
   for (const [code, name] of Object.entries(VN_PROVINCES)) {
     if (allowedCodes.size && !allowedCodes.has(code)) continue
     if (regionName && regionOf(code) !== regionName) continue
-    byCode.set(code, { value: 0, lots: 0, buyers: new Set(), months: {} })
+    byCode.set(code, { value: 0, lots: 0, buyers: new Set(), months: {}, packageIds: new Set(), packageMonths: new Map(keys.map((key) => [key, new Set()])) })
   }
   for (const row of tenders) {
     const kind = classifyPackage(row.status_code, row.close_date, window.now, window.curFrom)
-    if (!kind) continue
-    if (statusNeed && kind !== statusNeed) continue
     const tenderNo = String(row.tender_no || '').trim()
     const name = String(row.name || '').trim()
     const buyer = String(row.buyer || '').trim()
@@ -1017,14 +1001,26 @@ FROM msc_tenders`,
     if (allowed && !tenderNo && !(needle && blob.includes(needle))) continue
     if (buyerQuery && !fold(`${buyer} ${name}`).includes(buyerQuery)) continue
     const place = resolveProvince(row.province)
+    if (!place.code && !allowedCodes.size && !regionName) {
+      const packageId = tenderNo || String(row.source_id || '').trim()
+      if (packageId) openings.set(packageId, { code: '', date: dayStamp(row.open_date) })
+    }
     if (!place.code || !byCode.has(place.code)) continue
+    const slot = byCode.get(place.code)
+    const packageId = tenderNo || String(row.source_id || '').trim()
+    if (packageId) openings.set(packageId, { code: place.code, date: dayStamp(row.open_date) })
+    if (!kind || (statusNeed && kind !== statusNeed)) continue
+    if (packageId && slot.packageIds.has(packageId)) continue
     const scope = scopeFor({ tender_no: tenderNo, source_id: row.source_id, source_url: row.source_url })
     const scopeLines = scope ? publicLines(scope.lots || []) : []
     const level = packageMatchFromLines(scopeLines)
     const value = num(row.bid_price)
-    const slot = byCode.get(place.code)
     slot.value += value
-    slot.lots += 1
+    if (packageId) packageIds.add(packageId)
+    if (packageId && !slot.packageIds.has(packageId)) {
+      slot.packageIds.add(packageId)
+      slot.lots += 1
+    }
     if (buyer) slot.buyers.add(fold(buyer))
     const published = dayStamp(row.published)
     if (published && inSpan(published, window.curFrom, window.now)) {
@@ -1074,6 +1070,11 @@ FROM msc_tenders`,
       })),
     })
   }
+  for (const [packageId, opening] of openings) {
+    const slot = byCode.get(opening.code)
+    const key = opening.date ? ymOf(opening.date) : ''
+    if (slot?.packageMonths.has(key)) slot.packageMonths.get(key).add(packageId)
+  }
   const made = [...grouped.open, ...grouped.review, ...grouped.closed]
   const packageAreas = {}
   for (const dot of made) {
@@ -1088,6 +1089,7 @@ FROM msc_tenders`,
   const packages = [...made].sort((a, b) => b.value - a.value).slice(0, 120)
   const provinces = [...byCode.entries()].map(([code, slot]) => {
     const trend = keys.map((key) => ({ key, value: num(slot.months[key]) }))
+    const countTrend = countPoints(keys, slot.packageMonths)
     return {
       code,
       name: VN_PROVINCES[code] || code,
@@ -1099,6 +1101,7 @@ FROM msc_tenders`,
       facilities: slot.buyers.size,
       activeMonths: trend.filter((point) => point.value > 0).length,
       trend,
+      countTrend,
       groups: [0, 0, 0, 0, 0],
     }
   }).sort((a, b) => b.value - a.value)
@@ -1106,6 +1109,12 @@ FROM msc_tenders`,
     .filter((name) => !regionName || name === regionName)
     .map((name) => rollup(provinces.filter((row) => row.region === name), keys, name, name, name))
   const summary = rollup(provinces, keys, '', 'Bộ lọc hiện tại', regionName)
+  const openingCounts = new Map(summary.countTrend.map(point => [point.key, point.value]))
+  for (const opening of openings.values()) {
+    const key = opening.date ? ymOf(opening.date) : ''
+    if (!opening.code && openingCounts.has(key)) openingCounts.set(key, openingCounts.get(key) + 1)
+  }
+  summary.countTrend = countPoints(keys, openingCounts)
   const ingredientPairs = []
   const rawByCode = {}
   const rawByRegion = {}
@@ -1125,7 +1134,6 @@ FROM msc_tenders`,
   const ingredientAreas = {}
   for (const [code, lines] of Object.entries(rawByCode)) ingredientAreas[code] = rankScopeLines(lines, 40)
   for (const [region, lines] of Object.entries(rawByRegion)) ingredientAreas[region] = rankScopeLines(lines, 40)
-  const openStatus = statusNeed === 'open' || !statusNeed
   return {
     source: 'msc',
     months: window.months,
@@ -1144,7 +1152,9 @@ FROM msc_tenders`,
     ingredientQtyLabel: 'Số lượng',
     packages,
     packageAreas,
-    packageTotal: made.length,
-    trendLabel: openStatus ? 'Giá trị gói mỗi tháng' : 'Giá trị gói trong tháng',
+    packageTotal: packageIds.size,
+    currentPackageCount: packageIds.size,
+    trendMetric: 'packages',
+    trendLabel: 'Số gói theo tháng',
   }
 }

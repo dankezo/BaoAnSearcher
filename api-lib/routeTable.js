@@ -3,6 +3,12 @@
  * methods includes OPTIONS where the old route answered preflight with 204.
  */
 export const ROUTES = {
+  'analytics/suggest': { methods: ['GET'], handler: 'analytics' },
+  'analytics/overview': { methods: ['POST'], handler: 'analytics' },
+  'analytics/detail': { methods: ['POST'], handler: 'analytics' },
+  'analytics/ai-insight': { methods: ['POST'], handler: 'analytics' },
+  'analytics/awards': { methods: ['POST'], handler: 'analytics' },
+  'analytics/company-profile': { methods: ['POST'], handler: 'analytics' },
   'tender/search': { methods: ['POST', 'OPTIONS'], handler: 'tenderSearch' },
   'tender/count': { methods: ['POST', 'OPTIONS'], handler: 'tenderCount' },
   'tender/metrics': { methods: ['GET', 'POST', 'OPTIONS'], handler: 'tenderMetrics' },
@@ -11,6 +17,7 @@ export const ROUTES = {
   'tender/suggest': { methods: ['GET', 'OPTIONS'], handler: 'tenderSuggest' },
   'admin/datasets': { methods: ['GET', 'OPTIONS'], handler: 'adminDatasets' },
   'metrics/map': { methods: ['POST', 'OPTIONS'], handler: 'metricsMap' },
+  'metrics/map/facility-ingredients': { methods: ['POST', 'OPTIONS'], handler: 'metricsMap' },
   regulatory: { methods: ['GET', 'POST'], handler: 'regulatory' },
   'regulatory-daily': { methods: ['GET'], handler: 'regulatoryDaily' },
   'gemini/analyze-legal': { methods: ['POST'], handler: 'geminiLegal' },

@@ -208,6 +208,7 @@ export async function cloudDavSearch({ filters = {}, page = 0, size = 100, curso
     return normalizePage(payload, page, size)
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
+    if (filters.tenderGroup?.length) throw new Error('Chưa tải được nhóm thầu từ nguồn chính. Nguồn DAV dự phòng chưa hỗ trợ bộ lọc nhóm; vui lòng thử lại.')
     const sb = getSupabase()
     const { data, error } = await sb.rpc('search_dav_drugs', buildDavRpcParams(filters, page, size))
     if (error) throw new Error(error.message || String(error))
@@ -264,6 +265,10 @@ export async function cloudMeta(section) {
   } catch {
     return null
   }
+}
+
+export function cloudMapFacilityIngredients(body) {
+  return tenderFetch('/api/metrics/map/facility-ingredients', body, { freshMs: 20000, abortKey: 'map:facility' })
 }
 
 /** The Cloud admin view fetches only the four registry rows from TiDB. */

@@ -38,7 +38,7 @@ def meta_info() -> dict:
             "AND json_extract(normalized, '$.source_label')='API Mua sắm công' "
             "AND NOT EXISTS (SELECT 1 FROM excel_matches m WHERE m.excel_id=records.source_id)"
         ).fetchone()[0]
-        info["tenders"] = con.execute("SELECT count(*) FROM records WHERE kind='tenders'").fetchone()[0]
+        info["tenders"] = con.execute("SELECT count(DISTINCT coalesce(nullif(tender_no, ''), source_id)) FROM records WHERE kind='tenders'").fetchone()[0]
         row = con.execute(
             "SELECT max(collected_at) FROM records"
         ).fetchone()
@@ -66,18 +66,21 @@ def _sort_value(item: dict) -> str:
     return str(item.get("published") or item.get("close_date") or item.get("_collected_at") or "")
 
 
-def search(kind: str, filters: dict, page: int = 0, size: int = 50, cursor: str | None = None) -> dict:
-    core = _import_core()
-    if not MSC_DB.exists():
-        return {"total": None, "page": page, "size": size, "hasMore": False, "items": []}
-    kind = "prices" if kind == "prices" else "tenders"
+def search_where(kind: str, filters: dict, indexed: bool = False):
     q = fold(filters.get("q") or "")
     clauses, args = ["kind=?"], [kind]
+    fts_groups = []
+    def fts(term):
+        return "rowid IN (SELECT rowid FROM records_search_fts WHERE search_text LIKE ?)", f"%{term}%"
     if kind == "prices":
         clauses.append("json_extract(normalized, '$.source_label')='API Mua sắm công'")
         clauses.append("NOT EXISTS (SELECT 1 FROM excel_matches m WHERE m.excel_id=records.source_id)")
     if q:
-        for w in q.split():
+        words = [q] if filters.get('match') == 'phrase' else q.split()
+        for w in words:
+            if indexed and len(w) >= 3:
+                fts_groups.append([fts(w)])
+        for w in words:
             clauses.append("search_text LIKE ?")
             args.append(f"%{w}%")
     # Field filters against normalized JSON
@@ -97,6 +100,15 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50, cursor: str 
             clauses.append("(" + " OR ".join("fold(coalesce(json_extract(normalized, ?),'')) LIKE ?" for _ in values) + ")")
             for val in values:
                 args.extend([path, f"%{val}%"])
+            # Each field is ANDed with the others; its values are ORed.
+            # Skip the whole prefilter group if any alternative is too short,
+            # otherwise it could hide rows matching only that short value.
+            if indexed and all(len(val) >= 3 for val in values):
+                fts_groups.append([fts(val) for val in values])
+
+    for group in fts_groups:
+        clauses.append("(" + " OR ".join(condition for condition, _ in group) + ")")
+        args.extend(value for _, value in group)
 
     published_from = filters.get("publishedFrom") or filters.get("tuNgay") or ""
     if published_from:
@@ -107,6 +119,14 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50, cursor: str 
         )
         args.append(y0)
 
+    return clauses, args
+
+
+def search(kind: str, filters: dict, page: int = 0, size: int = 50, cursor: str | None = None) -> dict:
+    core = _import_core()
+    if not MSC_DB.exists():
+        return {"total": None, "page": page, "size": size, "hasMore": False, "items": []}
+    kind = "prices" if kind == "prices" else "tenders"
     page = max(0, int(page))
     size = max(1, min(5000, int(size)))
     scope_filter = kind == "tenders" and any(filters.get(k) for k in ("ingredient", "dosage_form", "metricQuick"))
@@ -114,11 +134,15 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50, cursor: str 
     # Keep the SQL ordering and cursor key identical.  A tender without a
     # publication date is ordered by close date, then collection time.
     order_expr = "coalesce(json_extract(normalized, '$.published'), json_extract(normalized, '$.close_date'), collected_at)"
-    if cursor_value:
-        clauses.append(f"({order_expr} < ? OR ({order_expr} = ? AND source_id < ?))")
-        args.extend([cursor_value[0], cursor_value[0], cursor_value[1]])
-    where = " WHERE " + " AND ".join(clauses)
     with core.connect(MSC_DB) as con:
+        indexed = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='records_search_fts'"
+        ).fetchone() is not None
+        clauses, args = search_where(kind, filters, indexed=indexed)
+        if cursor_value:
+            clauses.append(f"({order_expr} < ? OR ({order_expr} = ? AND source_id < ?))")
+            args.extend([cursor_value[0], cursor_value[0], cursor_value[1]])
+        where = " WHERE " + " AND ".join(clauses)
         # List path: normalized holds the display fields. raw stays on the row for a later detail read.
         rows = con.execute(
             "SELECT normalized, collected_at, source_id FROM records" + where +
@@ -162,7 +186,7 @@ def search(kind: str, filters: dict, page: int = 0, size: int = 50, cursor: str 
     return {"total": None, "page": page, "size": size, "hasMore": has_more, "nextCursor": next_cursor, "items": items}
 
 
-def start_price_sync(date_from: str, date_to: str, refresh: bool = False, *, max_pages: int | None = None, full_scan: bool = False) -> dict:
+def start_price_sync(date_from: str, date_to: str, refresh: bool = False, *, max_pages: int | None = None, full_scan: bool = False, incremental: bool = False) -> dict:
     global _thread
     if _thread and _thread.is_alive():
         return {"ok": False, "message": "MSC đang chạy"}
@@ -188,7 +212,7 @@ def start_price_sync(date_from: str, date_to: str, refresh: bool = False, *, max
             # Prefer Downloader class API if present
             if hasattr(sync, "Downloader"):
                 dl = sync.Downloader(report=report, delay=2.5 if full_scan else 0.4)
-                dl.run(date_from=date_from, date_to=date_to, refresh=refresh, max_pages=max_pages, full_scan=full_scan)
+                dl.run(date_from=date_from, date_to=date_to, refresh=refresh, max_pages=max_pages, full_scan=full_scan, incremental=incremental)
             elif hasattr(sync, "download"):
                 sync.download(date_from, date_to, refresh=refresh, report=report)
             else:
@@ -226,7 +250,7 @@ def start_price_browser(date_from: str, date_to: str, pages: int = 20, full_scan
         updater = None
         try:
             previous_count = int(meta_info().get("prices") or 0)
-            label = "Quét tổng thể đơn giá bằng trình duyệt…" if full_scan else f"Cập nhật {pages} trang đơn giá bằng trình duyệt…"
+            label = "Quét tổng thể đơn giá bằng trình duyệt…" if full_scan else "Cập nhật đơn giá từ mốc hoàn tất, quét chồng 3 ngày…"
             update_status("msc", state="running", progress=1, message=label, updated=now_iso())
             p = str(_proc_path())
             if p not in sys.path:
@@ -273,7 +297,7 @@ def start_price_browser(date_from: str, date_to: str, pages: int = 20, full_scan
     }
 
 
-def start_tender_browser(pages: int = 20) -> dict:
+def start_tender_browser(pages: int = 200) -> dict:
     """Launch Playwright tender update (requires login in browser)."""
     global _thread
     if _thread and _thread.is_alive():

@@ -34,6 +34,15 @@ export function DavFilterSection({
     filterModalOpen,
   } = controller
   const draftRef = useRef(filters)
+  const [compactFilters, setCompactFilters] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 640px)').matches)
+  const modalFilters = filtersInModal || compactFilters
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia('(max-width: 640px)')
+    const apply = () => setCompactFilters(mq.matches)
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
   const [draft, setDraft] = useState(filters)
   const appliedKey = JSON.stringify(filters)
   useEffect(() => {
@@ -84,16 +93,14 @@ export function DavFilterSection({
         suggest={fieldSuggest('drugGroup')}
         placeholder="Chọn phân loại…"
       />
-      {localMode && (
-        <MultiSelectField
-          label="Nhóm thầu (VSS theo SĐK)"
-          hint="Dữ liệu thầu, không phải phân loại DAV"
-          value={draft.tenderGroup}
-          onChange={(v) => setLocal('tenderGroup', v)}
-          options={['Nhóm 1', 'Nhóm 2', 'Nhóm 3', 'Nhóm 4', 'Nhóm 5']}
-          placeholder="Chọn nhóm thầu…"
-        />
-      )}
+      <MultiSelectField
+        label="Nhóm thầu (VSS theo SĐK)"
+        hint="Dữ liệu thầu, không phải phân loại DAV"
+        value={draft.tenderGroup}
+        onChange={(v) => setLocal('tenderGroup', v)}
+        options={['Nhóm 1', 'Nhóm 2', 'Nhóm 3', 'Nhóm 4', 'Nhóm 5']}
+        placeholder="Chọn nhóm thầu…"
+      />
       <SuggestField
         label="Tên thuốc"
         value={draft.tenThuoc}
@@ -175,7 +182,7 @@ export function DavFilterSection({
             deferApply
           />
           <button type="button" className="btn" onClick={() => commit()}>{Icons.search} Tìm kiếm</button>
-          {filtersInModal ? (
+          {modalFilters ? (
             <button
               type="button"
               className={`btn ghost${advancedActive ? ' on' : ''}`}
@@ -214,13 +221,13 @@ export function DavFilterSection({
             </button>
           )}
         </div>
-        {!filtersInModal && detailFields}
+        {!modalFilters && detailFields}
         {draftTags.length === 0 && (
           <div className="tag-empty-hint">Chọn ít nhất một phân loại tag, rồi bấm Tìm kiếm.</div>
         )}
       </div>
       <FilterModal
-        open={filtersInModal && filterModalOpen}
+        open={modalFilters && filterModalOpen}
         onClose={() => setFilterModalOpen(false)}
         onApply={() => commit()}
       >

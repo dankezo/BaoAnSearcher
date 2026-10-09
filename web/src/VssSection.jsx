@@ -26,7 +26,7 @@ const fmtNum = (v) => {
 
 const ALL_COLS = [
   { key: 'hoatchat', label: 'Tên hoạt chất', width: 200, render: (v) => <IngredientText text={v} /> },
-  { key: 'sodk', label: 'Số ĐK', mono: true, nowrap: true },
+  { key: 'sodk', label: 'Số ĐK', width: 112, mono: true, nowrap: true },
   { key: 'ten', label: 'Tên thuốc', width: 160, truncateAt: 72 },
   { key: 'duongdung', label: 'Đường dùng', filter: 'select' },
   { key: 'dangbaoche', label: 'Dạng bào chế', filter: 'select', truncateAt: 48 },
@@ -36,7 +36,7 @@ const ALL_COLS = [
   { key: 'gia', label: 'Giá', align: 'right', mono: true, text: (r) => toNum(r.gia), render: (v) => fmtNum(v) },
   { key: 'thanhtien', label: 'Thành tiền', align: 'right', mono: true, text: (r) => toNum(r.thanhtien), render: (v) => fmtNum(v) },
   { key: 'nhomthau', label: 'Nhóm thầu', filter: 'select', align: 'center' },
-  { key: 'nhasx', label: 'Nhà SX', width: 170, truncateAt: 72 },
+  { key: 'nhasx', label: 'Nhà SX', width: 220, truncateAt: 72 },
   { key: 'nuocsx', label: 'Nước SX', filter: 'select' },
   { key: 'ma_tinh', label: 'Mã tỉnh', mono: true, filter: 'select' },
   { key: 'ten_tinh', label: 'Tỉnh / TP', width: 130, filter: 'select' },
@@ -246,6 +246,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     let cancelled = false
     const filters = JSON.parse(cardKey)
     setCardError('')
+    setCardStats(null)
     const load = localMode ? api.metricsMap : cloudMap
     load({
       source: 'vss',
@@ -255,7 +256,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
       filters,
     })
       .then((payload) => { if (!cancelled) setCardStats(payload?.summary && payload.summary.value != null ? payload.summary : null) })
-      .catch((err) => { if (!cancelled) setCardError(String(err?.message || err || 'Chưa tính được số liệu.')) })
+      .catch((err) => { if (!cancelled) { setCardStats(null); setCardError(String(err?.message || err || 'Chưa tính được số liệu.')) } })
     return () => { cancelled = true }
   }, [localMode, embedded, cardKey])
 
@@ -375,7 +376,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   }
 
   return (
-    <div className={`section${embedded ? ' embedded' : ''}`}>
+    <div className={`section lookup-section${embedded ? ' embedded' : ''}`}>
       {!embedded && (
         <header className="section-head">
           <div>
@@ -483,14 +484,14 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           onFilterSuggest={async (key, q) => fieldSuggest(key)(q)}
           onRowDoubleClick={setDetail}
           loading={loading}
-          emptyText="Không có dữ liệu — import Excel hoặc crawl VSS trong mục Quản trị"
+          emptyText="Không có dữ liệu — import Excel hoặc crawl VSS trong mục Dữ liệu"
           emptyAction={(
             <button type="button" className="btn" onClick={() => runSearch()}>
               {Icons.refresh} Tìm kiếm lại
             </button>
           )}
           cardKeys={['hoatchat', 'sodk', 'ten', 'thanhtien', 'ten_tinh']}
-          minWidth={embedded ? 720 : 1300}
+          minWidth={embedded ? 720 : 1100}
         />
         <Pagination
           page={page}

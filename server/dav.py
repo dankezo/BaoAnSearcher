@@ -29,7 +29,7 @@ def _sdk_key(value) -> str:
 def _tender_group(value) -> str:
     """Return one tender group digit without confusing it with drug class."""
     text = fold(value)
-    found = re.search(r"(?:nhom|group|n)?\s*([1-5])\b", text)
+    found = re.search(r"\b(?:nhom|group|n)?\s*([1-5])\b", text)
     return found.group(1) if found else ""
 
 
@@ -40,6 +40,7 @@ def vss_groups_for_registrations(registrations) -> dict[str, set[str]]:
     classification.  This separate field is evidence observed in VSS tender
     records, so it must never be presented as a DAV classification.
     """
+    registrations = list(registrations)
     keys = {_sdk_key(value) for value in registrations if _sdk_key(value)}
     if not keys or not VSS_DB.exists():
         return {}
@@ -148,6 +149,12 @@ def flatten(record: dict) -> dict:
     if end:
         months_left = (end - now).total_seconds() / (30.4375 * 24 * 3600)
 
+    def source_flag(key):
+        value = record.get(key)
+        if record.get("_cloudCanonical") and value is None:
+            return None
+        return bool(value)
+
     flat = {
         "id": record.get("id"),
         "soDangKy": record.get("soDangKy") or "",
@@ -174,10 +181,10 @@ def flatten(record: dict) -> dict:
         "nuocDangKy": dk.get("nuocDangKy") or "",
         "csDongGoi": dong_goi_cs,
         "csXuatXuong": xuat_xuong,
-        "isActive": bool(record.get("isActive")),
-        "isDeleted": bool(record.get("isDeleted")),
-        "isDaRut": bool(record.get("isDaRutSoDangKy")),
-        "isHetHan": bool(record.get("isHetHan")),
+        "isActive": source_flag("isActive"),
+        "isDeleted": source_flag("isDeleted"),
+        "isDaRut": source_flag("isDaRutSoDangKy"),
+        "isHetHan": source_flag("isHetHan"),
         "conHieuLuc": con_hl,
         "kyCapNam": round(ky_nam, 2) if ky_nam is not None else None,
         "monthsLeft": round(months_left, 1) if months_left is not None else None,
@@ -207,6 +214,9 @@ def classify_sdk_tag(flat: dict) -> str:
     expired = bool(flat.get("isHetHan")) or (end is not None and end < now)
     if flat.get("isDeleted") or flat.get("isDaRut") or expired or flat.get("isActive") is False:
         return TAG_XAM
+
+    if flat.get("isActive") is None:
+        return TAG_VANG
 
     if flat.get("dm93") == "match":
         return TAG_CAM
@@ -394,7 +404,7 @@ def count_ingredients(text: str) -> int:
     return len([x for x in split_ingredients(text) if x])
 
 
-def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
+def search_drugs(filters: dict, page: int = 0, size: int = 50, all_rows: bool = False) -> dict:
     """Search with text + structured filters."""
     q = fold(filters.get("q") or "")
     ten = fold(filters.get("tenThuoc") or "")
@@ -463,10 +473,10 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
         # Build stats from full DB for HC groups (once per request)
         con = connect()
         try:
-            all_rows = con.execute("SELECT raw FROM drugs").fetchall()
+            raw_rows = con.execute("SELECT raw FROM drugs").fetchall()
         finally:
             con.close()
-        for (raw,) in all_rows:
+        for (raw,) in raw_rows:
             rec = json.loads(raw)
             flat = flatten(rec)
             key = fold(flat["hoatChat"]) or "__empty__"
@@ -501,7 +511,9 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
     def row_matches(raw, groups_by_sdk):
         rec = json.loads(raw)
         flat = flatten(rec)
-        tender_group_values = groups_by_sdk.get(_sdk_key(flat.get("soDangKy") or ""), set())
+        tender_group_values = (groups_by_sdk.get(_sdk_key(flat.get("soDangKy") or ""), set())
+                               | groups_by_sdk.get(_sdk_key(flat.get("soDangKyCu") or ""), set()))
+        flat["drugGroup"] = flat.get("nhomThuoc") or ""
         flat["tenderGroup"] = ", ".join(f"Nhóm {value}" for value in sorted(tender_group_values))
         # Reliable text match on flattened fields (json_extract paths can miss variants)
         if ten and ten not in fold(flat.get("tenThuoc") or ""):
@@ -544,13 +556,13 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
     # json_extract sort scans every blob; the id primary key is enough for page 0.
     order_sql = " ORDER BY id DESC"
     start = page * size
-    target = start + size + 1
+    target = None if all_rows else start + size + 1
     matched = []
     batch = 400
     sql_at = 0
     con = connect()
     try:
-        while len(matched) < target:
+        while target is None or len(matched) < target:
             # drugs is (id, raw, search). flatten() needs the stored document; there is no display column to narrow to.
             rows = con.execute(
                 "SELECT raw FROM drugs" + where + order_sql + " LIMIT ? OFFSET ?",
@@ -559,13 +571,14 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
             if not rows:
                 break
             batch_groups = vss_groups_for_registrations(
-                json.loads(raw).get("soDangKy") or "" for (raw,) in rows
+                value for (raw,) in rows for flat in (flatten(json.loads(raw)),)
+                for value in (flat.get("soDangKy"), flat.get("soDangKyCu")) if value
             )
             for (raw,) in rows:
                 flat = row_matches(raw, batch_groups)
                 if flat is not None:
                     matched.append(flat)
-                    if len(matched) >= target:
+                    if target is not None and len(matched) >= target:
                         break
             if len(rows) < batch:
                 break
@@ -573,7 +586,7 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
     finally:
         con.close()
 
-    has_more = len(matched) > start + size
+    has_more = False if all_rows else len(matched) > start + size
     exact_total = not any([
         q, ten, sdk, hc, nhom_thuoc, tender_groups, dang, sx, dk, nuoc, con_hieu_luc, ingredient_n, need_group,
     ]) and tags_set is None
@@ -582,7 +595,7 @@ def search_drugs(filters: dict, page: int = 0, size: int = 50) -> dict:
         "page": page,
         "size": size,
         "hasMore": has_more,
-        "items": matched[start:start + size],
+        "items": matched if all_rows else matched[start:start + size],
         "dbTotal": total_db,
     }
 

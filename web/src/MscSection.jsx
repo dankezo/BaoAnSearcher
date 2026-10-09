@@ -23,12 +23,12 @@ const PRICE_COLS = [
   { key: 'route', label: 'Đường dùng', width: 100, filter: 'select' },
   { key: 'dosage_form', label: 'Dạng bào chế', width: 130, filter: 'select', truncateAt: 48 },
   { key: 'strength', label: 'Hàm lượng', width: 130, truncateAt: 64 },
-  { key: 'registration', label: 'SĐK', mono: true, nowrap: true },
+  { key: 'registration', label: 'SĐK', width: 110, mono: true, nowrap: true },
   { key: 'unit_price', label: 'Đơn giá', nowrap: true, align: 'right', mono: true, text: (r) => money(r.unit_price) },
   { key: 'quantity', label: 'SL', nowrap: true, align: 'right', mono: true, text: (r) => money(r.quantity) },
   { key: 'unit', label: 'ĐVT', width: 65, filter: 'select' },
   { key: 'group_name', label: 'Nhóm', nowrap: true, filter: 'select', align: 'center' },
-  { key: 'manufacturer', label: 'NSX', width: 170, truncateAt: 72 },
+  { key: 'manufacturer', label: 'NSX', width: 220, truncateAt: 96 },
   { key: 'country', label: 'Nước', width: 90, filter: 'select' },
   { key: 'buyer', label: 'Bệnh viện / CĐT', width: 170, truncateAt: 72 },
   { key: 'province', label: 'Tỉnh', width: 130, filter: 'select' },
@@ -98,7 +98,7 @@ function ScopeCatalog({ lines, tenderNo, embedded = false }) {
   const [copied, setCopied] = useState('')
   const [matchedOnly, setMatchedOnly] = useState(false)
   if (!Array.isArray(lines)) {
-    return <p className="muted small scope-empty">Chưa có danh mục thuốc của gói này trong hồ sơ đã tải. Quét lại tại Quản trị → Hồ sơ gói đang mở.</p>
+    return <p className="muted small scope-empty">Chưa có danh mục thuốc của gói này trong hồ sơ đã tải. Quét lại tại Dữ liệu → Hồ sơ gói đang mở.</p>
   }
   if (!lines.length) return <p className="muted small scope-empty">Hồ sơ đã tải nhưng không có dòng thuốc.</p>
   const exact = lines.filter((row) => row.match === 'exact').length
@@ -238,7 +238,7 @@ function filterStatic(items, f) {
 }
 
 function MscFieldGrid({ draft, setF, kind, provinceOpts, fieldSuggest, onCommit }) {
-  const searchField = (key) => (v) => onCommit({ [key]: v }, { metrics: false })
+  const searchField = (key) => (v) => onCommit({ [key]: v })
   return (
     <div
       className="filter-grid tight cols-4"
@@ -302,6 +302,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const [metricsTotal, setMetricsTotal] = useState(null)
   const [metricsProvincesYoy, setMetricsProvincesYoy] = useState(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
+  const [metricsError, setMetricsError] = useState('')
   const [provinceOpts, setProvinceOpts] = useState([])
   const [metricSlice, setMetricSlice] = useState(null)
   const [tableReady, setTableReady] = useState(false)
@@ -325,7 +326,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const sawTableLoad = useRef(false)
   const appliedCompare = useRef(0)
   useEffect(() => () => { reqSeq.current += 1 }, [])
-  const meta = useSectionMeta('msc', localMode, null, refreshKey)
+  const meta = useSectionMeta(kind === 'tenders' ? 'msc_tenders' : 'msc_prices', localMode, null, refreshKey)
 
 
   const cols = kind === 'prices' ? PRICE_COLS : TENDER_COLS
@@ -359,13 +360,16 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     metricKeyRef.current = key
     const id = ++metricSeq.current
     setMetricsLoading(true)
+    setMetricsError('')
+    setMetricSlice(null)
     const load = localMode ? api.metricsSlice(body) : cloudMetricsSlice(body)
     load
       .then((payload) => { if (id === metricSeq.current) setMetricSlice(payload || null) })
-      .catch(() => {
+      .catch((error) => {
         if (id !== metricSeq.current) return
         metricKeyRef.current = ''
         setMetricSlice(null)
+        setMetricsError(String(error?.message || 'Chưa tính được metric.'))
       })
       .finally(() => { if (id === metricSeq.current) setMetricsLoading(false) })
   }, [localMode, embedded])
@@ -378,12 +382,14 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     const filterOverride = { ...(override || {}) }
     delete filterOverride.kind
     const active = { ...mergedFilters(cf), ...filterOverride }
-    if (activeKind === 'prices') { delete active.dosage_form; delete active.metricQuick }
+    if (activeKind === 'prices') delete active.metricQuick
     if (skipShortTextSearch(active, MSC_TEXT_KEYS, EMPTY_FILTERS)) {
       setErr(SHORT_SEARCH_NOTE)
       setLoading(false)
       return
     }
+    const nextMetricKey = JSON.stringify({ section: activeKind === 'tenders' ? 'msc_tenders' : 'msc_prices', filters: { ...active, metricMonths: 12 }, months: 12 })
+    if (nextMetricKey !== metricKeyRef.current) { metricSeq.current += 1; metricKeyRef.current = ''; setMetricSlice(null); setMetricsLoading(true); setMetricsError('') }
     if (p === 0) cursorsByPageRef.current = new Map([[0, null]])
     setLoading(true)
     setErr('')
@@ -410,7 +416,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
       setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
       setData({ total: 0, items: [] })
     } catch (e) {
-      if (!stale()) setErr(String(e.message || e))
+      if (!stale()) { setErr(String(e.message || e)); setMetricsLoading(false); setMetricsError('Chưa tải được kết quả để tính metric.') }
     } finally {
       if (!stale()) {
         setLoading(false)
@@ -549,7 +555,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
       const clear = metricActiveId === id
       setMetricActiveId(clear ? null : id)
       setFilters((f) => ({ ...f, province: clear ? [] : [name] }))
-      search(0, undefined, { province: clear ? [] : [name] }, { metrics: false })
+      search(0, undefined, { province: clear ? [] : [name] })
       return
     }
     if (patch?._quick) {
@@ -592,7 +598,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   }
 
   return (
-    <div className={`section${embedded ? ' embedded' : ''}`}>
+    <div className={`section lookup-section${embedded ? ' embedded' : ''}`}>
       {!embedded && (
         <header className="section-head">
           <div>
@@ -628,7 +634,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
                     {!modalFilters && (
                       <MscFieldGrid draft={draft} setF={setF} kind={kind} provinceOpts={provinceOpts} fieldSuggest={fieldSuggest} onCommit={applyDraft} />
                     )}
-                    {kind === 'tenders' && <p className="muted small">Hoạt chất và dạng bào chế được tìm trong danh mục hồ sơ đã tải. Cập nhật tại Quản trị → Hồ sơ gói đang mở.</p>}
+                    {kind === 'tenders' && <p className="muted small">Hoạt chất và dạng bào chế được tìm trong danh mục hồ sơ đã tải. Cập nhật tại Dữ liệu → Hồ sơ gói đang mở.</p>}
                     {draft.metricQuick && kind === 'tenders' && (
                       <button className="btn ghost sm" type="button" onClick={() => { setMetricActiveId(null); setMetricQuick(null); applyDraft({ metricQuick: '' }) }}>Bỏ lọc chỉ số ×</button>
                     )}
@@ -653,9 +659,10 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
         </div>
         {!embedded && (
           <div className="msc-metrics-stage">
-            {kind === 'prices'
+            {metricsError && <p className="info-note" role="alert">{metricsError}</p>}
+            {!metricsError && (kind === 'prices'
               ? <MscPriceMetrics items={metricsItems} cards={metricsCards} provincesYoy={metricsProvincesYoy} total={metricsTotal ?? metricsSample?.length ?? data.total ?? 0} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} slice={metricSlice || {}} />
-              : <MscTenderMetrics items={metricsItems} cards={metricsCards} total={metricsTotal ?? metricsSample?.length ?? data.total ?? 0} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} slice={metricSlice || {}} onExportMatch={exportMatchReport} />}
+              : <MscTenderMetrics items={metricsItems} cards={metricsCards} total={metricsTotal ?? metricsSample?.length ?? data.total ?? 0} activeId={metricActiveId} onFilter={onMetricFilter} loading={metricsLoading} slice={metricSlice || {}} onExportMatch={exportMatchReport} />)}
           </div>
         )}
 
@@ -702,7 +709,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           cardKeys={kind === 'prices'
             ? ['name', 'registration', 'unit_price', 'province', 'winner']
             : ['name', 'tender_no', 'buyer', 'bid_price', 'close_date']}
-          minWidth={embedded ? 720 : (kind === 'prices' ? 1400 : 1100)}
+          minWidth={embedded ? 720 : (kind === 'prices' ? 1100 : 950)}
           trailing={{
             label: 'Nguồn',
             render: (row) => row.source_url ? (

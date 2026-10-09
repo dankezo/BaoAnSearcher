@@ -19,10 +19,40 @@ from .common import (
 )
 
 app = FastAPI(title="BaoAn Searcher", version="1.0.0")
+from . import cloud_jobs
+
+
+@app.get('/api/cloud-crawl/status')
+def cloud_crawl_status():
+    return cloud_jobs.status()
+
+
+class CloudCrawlBody(BaseModel):
+    action: str
+
+
+@app.post('/api/cloud-crawl/control')
+def cloud_crawl_control(body: CloudCrawlBody):
+    try:
+        return cloud_jobs.control(body.action)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except (RuntimeError, OSError):
+        raise HTTPException(503, 'Chưa điều khiển được lịch cloud. Kiểm tra GitHub CLI và workflow.')
+
+
+@app.post('/api/cloud-crawl/pull')
+def cloud_crawl_pull():
+    if any(value.get('state') == 'running' for value in load_status().values() if isinstance(value, dict)) or _tidb_sync_lock.locked():
+        return {'ok': False, 'message': 'Đợi crawl / đồng bộ local xong trước khi tải dữ liệu online.'}
+    return cloud_jobs.pull()
+
 from .regulatory_proxy import router as regulatory_router
 from .gemini_proxy import router as gemini_router
 app.include_router(regulatory_router)
 app.include_router(gemini_router)
+from .analytics import router as analytics_router
+app.include_router(analytics_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -86,7 +116,7 @@ class CrawlBody(BaseModel):
     restart: bool = False
     dateFrom: Optional[str] = None
     dateTo: Optional[str] = None
-    pages: int = 20
+    pages: int = 200
     days: int = 2
     loai: int = 1
     excelPath: Optional[str] = None

@@ -177,6 +177,7 @@ def _remember_cell_sdk(cells: dict, key: tuple, row: dict) -> None:
         "ctyDangKy": _cell_text(row, "cty_dang_ky"),
         "soQuyetDinh": _cell_text(row, "so_quyet_dinh"),
         "grantYear": _year_label(_cell_text(row, "ngay_cap")),
+        "grantDate": _iso_day(_cell_text(row, "ngay_cap")),
         "expDate": _iso_day(_cell_text(row, "ngay_het_han")),
     }
     current = slot.get(sdk)
@@ -274,6 +275,73 @@ def compute_kpis(rows: list[dict]) -> dict:
                 for item in ranked
             ],
         },
+    }
+
+
+def _award_window():
+    today = datetime.now(VN).date()
+    try:
+        start = today.replace(year=today.year - 1)
+    except ValueError:
+        start = today.replace(year=today.year - 1, day=28)
+    return start, today
+
+
+def _award_identity(item: dict) -> tuple:
+    return (
+        _sdk_key(item.get("registration") or ""), group_number(item.get("group")),
+        fold(item.get("unit") or ""), parse_money(item.get("price")), parse_money(item.get("quantity")),
+        fold(item.get("buyer") or ""), fold(item.get("province") or ""),
+        str(item.get("date") or "")[:10], str(item.get("tenderNo") or "").strip(),
+    )
+
+
+def _dedupe_awards(items: list[dict]) -> list[dict]:
+    # Prefer the richer MSC identity when the same line is also represented in VSS.
+    ordered = sorted(items, key=lambda item: item.get("source") != "MSC")
+    msc_ids = {_award_identity(item) for item in ordered if item.get("source") == "MSC"}
+    seen, result = set(), []
+    for item in ordered:
+        identity = _award_identity(item)
+        if item.get("source") == "VSS" and identity in msc_ids:
+            continue
+        key = (identity, str(item.get("tenderNo") or "").strip())
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
+
+
+def _awards_12m(award_rows: list[dict]) -> dict:
+    start, end = _award_window()
+    window_rows = []
+    for item in _dedupe_awards(award_rows):
+        stamp = parse_date(item.get("date"))
+        if stamp and start <= stamp.date() <= end:
+            window_rows.append(item)
+    quantities = {}
+    packages = set()
+    revenue = 0.0
+    for item in window_rows:
+        price, quantity = parse_money(item.get("price")), parse_money(item.get("quantity"))
+        unit = str(item.get("unit") or "").strip()
+        if price is not None and quantity is not None:
+            revenue += price * quantity
+        if quantity is not None and unit:
+            key = fold(unit)
+            slot = quantities.setdefault(key, {"unit": unit, "quantity": 0.0})
+            slot["quantity"] += quantity
+        tender = str(item.get("tenderNo") or "").strip()
+        if tender:
+            packages.add(("tender", tender))
+    return {
+        "revenue": revenue,
+        "quantityTotals": list(quantities.values()),
+        "packages": len(packages),
+        "records": len(window_rows),
+        "from": start.isoformat(),
+        "to": end.isoformat(),
     }
 
 
@@ -447,6 +515,29 @@ def _assemble() -> tuple[list[dict], dict]:
     for row in cell_rows:
         key = _cell_key(row.get("hoat_chat") or "", row.get("ham_luong") or "", row.get("dang_bao_che") or "")
         _remember_cell_sdk(cells, key, row)
+    # Award histories are indexed by registration. Include the registrations
+    # discovered in the same DAV technical cells as each catalog product so
+    # competitor history loads stay exact and never require a market-wide scan.
+    relevant_cells = set()
+    for item in catalog:
+        own = by_sdk.get(_sdk_key(str(item.get("reg_number") or ""))) or {}
+        relevant_cells.add(_cell_key(
+            own.get("hoat_chat") or item.get("inn") or "",
+            own.get("ham_luong") or item.get("strength") or "",
+            own.get("dang_bao_che") or item.get("dosage_form") or "",
+        ))
+    lookup_registrations = list(registrations)
+    relevant_records = [record for record in cell_rows + dav_rows if _cell_key(
+        record.get("hoat_chat") or "", record.get("ham_luong") or "", record.get("dang_bao_che") or "",
+    ) in relevant_cells]
+    for record in relevant_records:
+        current = str(record.get("so_dang_ky") or "").strip()
+        if current and current not in lookup_registrations:
+            lookup_registrations.append(current)
+        old_regs = re.findall(r"\b(?:[A-Z]{1,5}[-\s]?\d{2,8}[-\s]\d{2,4}|\d{12})\b", str(record.get("so_dang_ky_cu") or "").upper())
+        for old in old_regs:
+            if old not in lookup_registrations:
+                lookup_registrations.append(old)
     brands = [str(item.get("brand_name") or "") for item in catalog if len(fold(item.get("brand_name") or "")) >= 5]
     # The local cockpit must paint promptly.  Exact SĐK records use indexed
     # lookups and are sufficient for the per-product history shown here.
@@ -454,11 +545,11 @@ def _assemble() -> tuple[list[dict], dict]:
     # first paint, which made the endpoint time out before returning a table.
     # Full market expansion remains available for an explicit offline audit.
     full_market = str(os.environ.get("PORTFOLIO_FULL_MARKET") or "").strip() == "1"
-    raw_vss = vss_candidates(tokens if full_market else [], registrations, brands if full_market else [])
+    raw_vss = vss_candidates(tokens if full_market else [], lookup_registrations, brands if full_market else [])
     vss_rows = _prepare_vss(raw_vss)
     # The primary price is the latest comparable price for the Bảo An SĐK.
     # Keep broad INN expansion for explicit offline review only.
-    msc_rows = msc_candidates(tokens if full_market else [], registrations)
+    msc_rows = msc_candidates(tokens if full_market else [], lookup_registrations)
     from .portfolio_bids import index_awards, enrich, _line_key
     awards = index_awards(msc_rows, raw_vss, cell_rows + dav_rows)
     company_awards = {}
@@ -470,6 +561,9 @@ def _assemble() -> tuple[list[dict], dict]:
     won_ids = _won_ids(catalog, vss_rows)
     built = []
     heatmaps = {}
+    award_rows = []
+    new_registrations = {}
+    new_start, new_end = _award_window()
     for item in catalog:
         dav = by_sdk.get(_sdk_key(item.get("reg_number") or ""))
         inn = (dav or {}).get("hoat_chat") or item.get("inn") or ""
@@ -543,6 +637,10 @@ def _assemble() -> tuple[list[dict], dict]:
         row["be"] = _be_math(market, manufacturer)
         enrich(row, awards)
         built.append(row)
+        own_history = awards.get(_sdk_key(row["regNumber"]), [])
+        award_rows.extend({**entry, "productId": row["id"], "brandName": row["brandName"],
+                           "tenderNo": "" if entry.get("source") == "VSS" and re.fullmatch(r"G\d+", str(entry.get("tenderNo") or ""), re.I) else entry.get("tenderNo")}
+                          for entry in _dedupe_awards(own_history))
         provinces, facilities = _heatmap(market)
         histories = {}
         for identity in [row] + row['competitors']:
@@ -553,6 +651,41 @@ def _assemble() -> tuple[list[dict], dict]:
             histories[identity['regNumber']] = sorted(unique.values(), key=lambda h: str(h['date']), reverse=True)
         heatmaps[row["id"]] = {"provinces": provinces, "facilities": facilities,
                                "histories": histories}
+        own_groups = {f"N{number}" for number in (group_number(entry.get("group")) for entry in own_history) if number}
+        for rival_sdk, info in cell_sdks.items():
+            rival_key = _sdk_key(rival_sdk)
+            granted = parse_date(info.get("grantDate"))
+            if (not rival_key or rival_key in catalog_regs or not granted
+                    or not new_start <= granted.date() <= new_end
+                    or _is_bao_an(info.get("manufacturer") or "", info.get("ctyDangKy") or "")):
+                continue
+            rival_history = awards.get(rival_key, [])
+            rival_groups = {f"N{number}" for number in (group_number(entry.get("group")) for entry in rival_history) if number}
+            matched_groups = sorted(own_groups & rival_groups)
+            if own_groups and rival_groups and not matched_groups:
+                continue
+            slot = new_registrations.setdefault(rival_key, {
+                "regNumber": rival_sdk, "name": info.get("name") or "", "inn": info.get("inn") or inn,
+                "strength": info.get("strength") or strength, "dosageForm": info.get("dosageForm") or dosage,
+                "grantDate": info.get("grantDate") or "", "ctyDangKy": info.get("ctyDangKy") or "",
+                "groups": set(), "groupKnown": False, "matches": {},
+            })
+            slot["groups"].update(matched_groups)
+            slot["groupKnown"] = bool(slot["groups"])
+            slot["matches"][row["id"]] = {
+                "id": row["id"], "brandName": row["brandName"], "inn": row["inn"],
+                "strength": row["strength"], "dosageForm": row["dosageForm"], "groups": sorted(own_groups),
+            }
+    new_registrations = [
+        {**row, "groups": sorted(row["groups"]), "matches": list(row["matches"].values())}
+        for row in new_registrations.values()
+    ]
+    new_registrations.sort(key=lambda row: row.get("grantDate") or "", reverse=True)
+    heatmaps["__portfolio"] = {
+        "awardRows": award_rows,
+        "newRegistrations": new_registrations,
+        "awards12m": _awards_12m(award_rows),
+    }
     return built, heatmaps
 
 
@@ -578,13 +711,17 @@ def build_portfolio(product_id: int | None = None, registration: str | None = No
             _CACHE["payload"] = {"rows": rows, "heatmaps": heatmaps}
         cached = _CACHE["payload"]
     rows = cached["rows"]
+    extra = cached["heatmaps"].get("__portfolio", {})
     payload = {
         "kpis": compute_kpis(rows),
         "rows": rows,
+        "awardRows": extra.get("awardRows", []),
+        "newRegistrations": extra.get("newRegistrations", []),
         "meta": {"backend": backend_name(), "preparedFor": "tidb"},
     }
+    payload["kpis"]["awards12m"] = extra.get("awards12m", _awards_12m([]))
     if product_id is None:
-        payload["details"] = cached["heatmaps"]
+        payload["details"] = {key: value for key, value in cached["heatmaps"].items() if key != "__portfolio"}
         return payload
     selected = next((row for row in rows if row.get("id") == product_id), None)
     if selected is None:

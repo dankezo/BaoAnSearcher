@@ -27,6 +27,7 @@ export function useDavColumns(configs: TagConfig[]) {
           }
         }
         if (c.key === 'hoatChat') return { ...c, render: (v) => <IngredientText text={v} /> }
+        if (c.key === 'tenderGroup') return { ...c, render: (v) => v || 'Chưa có dữ liệu thầu' }
         if (c.key === 'ngayCap') return { ...c, render: (v) => fmtDate(v) }
         if (c.key === 'ngayHetHan') {
           return {

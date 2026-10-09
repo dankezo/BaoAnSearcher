@@ -143,12 +143,14 @@ function keysetDescAsc(dateCol, idCol, cursor, dialect, args) {
   return `((${dateCol} IS NOT NULL AND (${dateCol} < ? OR (${dateCol} = ? AND ${idCol} > ?))))`
 }
 
-function specFor(kind) {
+function specFor(kind, dialect = 'turso') {
   const tenders = kind === 'tenders' || kind === 'msc_tenders'
   if (kind === 'dav') {
+    const groups = ['so_dang_ky', 'so_dang_ky_cu'].map(column => `(SELECT GROUP_CONCAT(DISTINCT nhomthau) FROM vss_bids WHERE sodk = dav_drugs.${column})`)
+    const groupSelect = dialect === 'tidb' ? `CONCAT_WS(',', ${groups.join(', ')})` : `TRIM(${groups.map(sql => `COALESCE(${sql}, '')`).join(" || ',' || ")}, ',')`
     return {
       table: 'dav_drugs',
-      select: '*',
+      select: `dav_drugs.*, ${groupSelect} AS tender_group`,
       date: 'ngay_cap',
       id: 'id',
       order: 'ngay_cap DESC, ngay_gia_han DESC, id',
@@ -172,7 +174,7 @@ function specFor(kind) {
   }
 }
 
-function whereFor(kind, filters, dialect) {
+export function whereFor(kind, filters, dialect) {
   const f = filters || {}
   const indexed = []
   // Keep predicates in insertion order, exactly like their bound arguments.
@@ -195,6 +197,11 @@ function whereFor(kind, filters, dialect) {
     likeAny(rest, args, 'so_dang_ky', f.soDangKy, dialect)
     likeAny(rest, args, 'hoat_chat', f.hoatChat, dialect)
     likeAny(rest, args, 'drug_group', f.drugGroup, dialect)
+    if (asList(f.tenderGroup).length) {
+      const tokens = expandGroupTokens(f.tenderGroup)
+      rest.push(`(EXISTS (SELECT 1 FROM vss_bids WHERE sodk = dav_drugs.so_dang_ky AND nhomthau IN (${tokens.map(() => '?').join(',')})) OR EXISTS (SELECT 1 FROM vss_bids WHERE sodk = dav_drugs.so_dang_ky_cu AND nhomthau IN (${tokens.map(() => '?').join(',')})))`)
+      args.push(...tokens, ...tokens)
+    }
     likeAny(rest, args, 'dang_bao_che', f.dangBaoChe, dialect)
     likeAny(rest, args, 'cty_san_xuat', f.sanXuat, dialect)
     likeAny(rest, args, 'cty_dang_ky', f.dangKy, dialect)
@@ -284,7 +291,7 @@ function whereFor(kind, filters, dialect) {
 }
 
 export function buildSearchSql({ kind = 'vss', filters, page = 0, size = 100, cursor = null, dialect = 'turso' } = {}) {
-  const spec = specFor(kind)
+  const spec = specFor(kind, dialect)
   const built = whereFor(kind, filters, dialect)
   if (built.empty) return { empty: true, spec }
   const args = [...built.args]

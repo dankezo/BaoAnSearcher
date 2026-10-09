@@ -12,22 +12,27 @@ const HomeDashboard = lazy(() => import('./home/HomeDashboard'))
 const PortfolioCockpit = lazy(() => import('./PortfolioCockpit'))
 const BaoAnCatalog = lazy(() => import('./BaoAnCatalog'))
 const MapSection = lazy(() => import('./MapSection'))
+const AnalyticsApp = lazy(() => import('./analytics/AnalyticsApp'))
 
 function PaneFallback() {
   return <p className="info-note" role="status">Đang mở mục…</p>
 }
 
 const TABS = [
-  { id: 'home', label: 'Trang chủ', sub: 'Nhịp thầu · bảng tin' },
+  { id: 'analytics-overview', label: 'Phân tích tổng hợp' },
+
+  { id: 'home', label: 'Bảng tin', sub: 'Nhịp thầu · bảng tin' },
   { id: 'dav', label: 'Thuốc DAV', sub: 'Số đăng ký' },
   { id: 'msc', label: 'Thầu MSC', sub: 'Đơn giá · gói thầu' },
   { id: 'vss', label: 'BHYT VSS', sub: 'Trúng thầu' },
   { id: 'map', label: 'Bản đồ', sub: 'Nhiệt tỉnh · chủ đầu tư' },
-  { id: 'portfolio', label: 'Danh mục Bảo An', sub: 'Portfolio Cockpit' },
-  { id: 'admin', label: 'Quản trị', sub: 'Crawl · tài khoản' },
+  { id: 'portfolio', label: 'Quản lý danh mục', sub: 'Portfolio Cockpit' },
+  { id: 'admin', label: 'Dữ liệu', sub: 'Crawl · tài khoản' },
 ]
 
 const SPLIT_APPS = [
+  { id: 'analytics-overview', label: 'Phân tích tổng hợp', desc: 'MSC · VSS · DAV' },
+
   { id: 'baoan', label: 'Danh mục Bảo An', desc: 'Tên thuốc · hoạt chất · SĐK' },
   { id: 'dav', label: 'Thuốc DAV', desc: 'Số đăng ký · tag SĐK' },
   { id: 'msc', label: 'Thầu MSC', desc: 'Đơn giá · gói thầu quốc gia' },
@@ -36,9 +41,10 @@ const SPLIT_APPS = [
   { id: 'portfolio', label: 'Portfolio Cockpit', desc: 'Cockpit danh mục Bảo An' },
 ]
 
-function SectionById({ id, localMode, embedded, filtersInModal }) {
+function SectionById({ id, localMode, embedded, filtersInModal, onOpenDeep }) {
   let section = null
   if (id === 'dav') section = <DavSection localMode={localMode} embedded={embedded} filtersInModal={filtersInModal} />
+  else if (id === 'analytics-overview' || id === 'analytics-deep') section = <AnalyticsApp localMode={localMode} deep={true} onOpenDeep={onOpenDeep} />
   else if (id === 'msc') section = <MscSection localMode={localMode} embedded={embedded} filtersInModal={filtersInModal} />
   else if (id === 'vss') section = <VssSection localMode={localMode} embedded={embedded} filtersInModal={filtersInModal} />
   else if (id === 'map') section = <MapSection localMode={localMode} />
@@ -74,7 +80,7 @@ function SplitPane({ side, appId, onSelect, onClear, localMode }) {
 
       {appId && !picking && (
         <div className="split-pane-body">
-          <SectionById key={appId} id={appId} localMode={localMode} embedded filtersInModal />
+          <SectionById key={appId} id={appId} localMode={localMode} embedded filtersInModal onOpenDeep={()=>onSelect('analytics-overview')} />
         </div>
       )}
 
@@ -114,7 +120,8 @@ export default function App() {
     return TABS.some((t) => t.id === h) ? h : 'home'
   })
   const [mscKind, setMscKind] = useState('tenders')
-  const [localMode, setLocalMode] = useState(false)
+  const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+  const [localMode, setLocalMode] = useState(localHost)
   const [checked, setChecked] = useState(false)
   const [leftApp, setLeftApp] = useState('dav')
   const [rightApp, setRightApp] = useState('vss')
@@ -169,10 +176,18 @@ export default function App() {
     return () => window.removeEventListener('baoan-open-dataset', onOpenDataset)
   }, [])
 
+  useEffect(()=>{
+    const open=()=>setTab('analytics-overview')
+    const data=()=>setTab('admin')
+    window.addEventListener('baoan-analytics-open',open)
+    window.addEventListener('baoan-open-data',data)
+    return()=>{window.removeEventListener('baoan-analytics-open',open);window.removeEventListener('baoan-open-data',data)}
+  },[])
+
   useEffect(() => {
     api.health()
-      .then((h) => setLocalMode(!!h?.ok))
-      .catch(() => setLocalMode(false))
+      .then((h) => setLocalMode(localHost || !!h?.ok))
+      .catch(() => setLocalMode(localHost))
       .finally(() => setChecked(true))
   }, [])
 
@@ -212,42 +227,29 @@ export default function App() {
             <span className="brand-text">BaoAn <span>Searcher</span></span>
           </div>
           <nav className="nav" aria-label="Chuyên mục">
-            {TABS.map((t) => t.id === 'msc' ? (
-              <details className={`msc-nav-menu${tab === 'msc' ? ' active' : ''}`} key={t.id} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.open = false }} onKeyDown={(e) => { if (e.key === 'Escape') e.currentTarget.open = false }}>
-                <summary>Thầu MSC <span aria-hidden="true">⌄</span></summary>
-                <div className="msc-nav-options">
-                  {[['tenders', 'Gói thầu'], ['prices', 'Đơn giá']].map(([value, label]) => <button type="button" key={value} aria-pressed={tab === 'msc' && mscKind === value} onClick={(e) => { setMscKind(value); setTab('msc'); e.currentTarget.closest('details').open = false }}>{label}</button>)}
-                </div>
-              </details>
-            ) : (
-              <button
-                key={t.id}
-                type="button"
-                className={!multi && tab === t.id ? 'active' : ''}
-                onClick={() => setTab(t.id)}
-                aria-current={!multi && tab === t.id ? 'page' : undefined}
-              >
-                {t.label}
-              </button>
-            ))}
-            {!phone && (
-              <button
-                type="button"
-                className={multi ? 'active' : ''}
-                onClick={() => setTab('multi')}
-                aria-current={multi ? 'page' : undefined}
-                title="Chia 2 khung song song"
-              >
-                Đa khung
-              </button>
-            )}
+            <button type="button" className={tab === 'home' ? 'active' : ''} aria-current={tab === 'home' ? 'page' : undefined} onClick={() => setTab('home')}>Bảng tin</button>
+            <details className={`msc-nav-menu${['dav', 'msc', 'vss'].includes(tab) ? ' active' : ''}`} onBlur={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) e.currentTarget.open = false }} onKeyDown={(e) => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary').focus() } }}>
+              <summary>Tra cứu <span aria-hidden="true">⌄</span></summary>
+              <div className="msc-nav-options">
+                {[['dav', 'Thuốc DAV'], ['prices', 'MSC - Đơn giá'], ['tenders', 'MSC - Gói thầu'], ['vss', 'BHYT VSS']].map(([value, label]) => <button type="button" key={value} aria-pressed={value === 'prices' || value === 'tenders' ? tab === 'msc' && mscKind === value : tab === value} onClick={(e) => { if (value === 'prices' || value === 'tenders') { setMscKind(value); setTab('msc') } else setTab(value); e.currentTarget.closest('details').open = false }}>{label}</button>)}
+              </div>
+            </details>
+            <details className={`msc-nav-menu${tab === 'map' || tab.startsWith('analytics-') || multi ? ' active' : ''}`} onBlur={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) e.currentTarget.open = false }} onKeyDown={(e) => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary').focus() } }}>
+              <summary>Nâng cao <span aria-hidden="true">⌄</span></summary>
+              <div className="msc-nav-options">
+                {[['analytics-overview', 'Phân tích tổng hợp']].map(([id,label]) => <button key={id} type="button" aria-pressed={tab === id} onClick={(e)=>{setTab(id);e.currentTarget.closest('details').open=false}}>{label}</button>)}
+                <button type="button" aria-pressed={tab === 'map'} onClick={(e) => { setTab('map'); e.currentTarget.closest('details').open = false }}>Bản đồ</button>
+                {!phone && <button type="button" aria-pressed={multi} onClick={(e) => { setTab('multi'); e.currentTarget.closest('details').open = false }}>Đa khung</button>}
+              </div>
+            </details>
+            {TABS.filter((t) => ['portfolio', 'admin'].includes(t.id)).map((t) => <button key={t.id} type="button" className={tab === t.id ? 'active' : ''} aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)}>{t.label}</button>)}
           </nav>
           <div className="topbar-end">
             <div
               className={`mode-pill ${localMode ? 'local' : supabaseConfigured ? 'cloud' : 'static'}`}
               title={
                 localMode
-                  ? 'Kết nối API local 127.0.0.1:8787'
+                  ? 'Kết nối API local'
                   : supabaseConfigured
                     ? 'Supabase Auth + kho Supabase (SEARCH_BACKEND). Turso chỉ khi bật rollback.'
                     : 'Thiếu VITE_SUPABASE_* — cấu hình rồi build lại'
@@ -273,6 +275,7 @@ export default function App() {
           </div>
         </header>
         <main className={`page${multi ? ' page-split' : ''}`}>
+          {checked && !multi && tab.startsWith('analytics-') && <Suspense fallback={<PaneFallback />}><AnalyticsApp key={tab} localMode={localMode} deep={true} /></Suspense>}
           {checked && !multi && visited.home && (
             <div className="tab-pane" hidden={tab !== 'home'} aria-hidden={tab !== 'home'}>
               <Suspense fallback={<PaneFallback />}>

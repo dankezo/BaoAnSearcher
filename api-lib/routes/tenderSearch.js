@@ -12,7 +12,7 @@ import { searchSupabase } from '../supabaseSearch.js'
 import { buildSearchSql, cursorOf } from '../db/searchSql.js'
 import * as tursoDb from '../db/turso.js'
 import * as tidbDb from '../db/tidb.js'
-import { attachScope } from '../scopeMatch.js'
+import { attachScope, refreshCloudScopes } from '../scopeMatch.js'
 
 const ADAPTERS = { turso: tursoDb, tidb: tidbDb }
 
@@ -33,6 +33,7 @@ function normalizeKind(kind) {
 }
 
 async function runSearch(db, kind, filters, page, size, cursor) {
+  if (normalizeKind(kind) === 'msc_tenders') await refreshCloudScopes(db)
   const dialect = db?.dialect || 'turso'
   const built = buildSearchSql({ kind, filters, page, size, cursor, dialect })
   if (built.empty) return { total: null, page, size, hasMore: false, items: [], nextCursor: null }
@@ -63,6 +64,7 @@ export async function searchMsc(db, kind, filters, page, size, options = {}) {
 }
 
 export async function countSearch(db, kind, filters) {
+  if (normalizeKind(kind) === 'msc_tenders') await refreshCloudScopes(db)
   const dialect = db?.dialect || 'turso'
   const built = buildSearchSql({ kind: normalizeKind(kind), filters, dialect })
   if (built.empty) return 0

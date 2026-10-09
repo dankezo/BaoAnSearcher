@@ -66,7 +66,7 @@ def _proxy(path: str, authorization: str, body: bytes) -> JSONResponse:
             f"https://app.baoanpharma.com{path}",
             data=body,
             headers={"Authorization": authorization, "Content-Type": "application/json"},
-            timeout=30,
+            timeout=60,
             allow_redirects=False,
         )
     except requests.RequestException as exc:
@@ -85,7 +85,8 @@ async def _handle(kind: str, path: str, request: Request):
     except json.JSONDecodeError as exc:
         raise HTTPException(400, "JSON không hợp lệ.") from exc
     _load_env()
-    if os.environ.get("GEMINI_API_KEY"):
+    # News has a shared staff cache on cloud, even when this machine has an AI key.
+    if kind != "news" and os.environ.get("GEMINI_API_KEY"):
         payload = await run_in_threadpool(_local, kind, body if isinstance(body, dict) else {})
         return JSONResponse(payload)
     return await run_in_threadpool(_proxy, path, request.headers.get("authorization", ""), bytes(raw))

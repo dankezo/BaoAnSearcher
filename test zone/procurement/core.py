@@ -132,6 +132,7 @@ def normalize_tender(raw):
         'winner_code':flat(raw.get('winningCode')),
         'winning_price':number(raw.get('bidWinningPrice')),
         'published':flat(raw.get('publicDate')),'close_date':flat(raw.get('bidCloseDate')),
+        'open_date':flat(raw.get('bidOpenDate')),
         'status_code':flat(raw.get('statusForNotify')), 'source_status':flat(raw.get('status')),
         'bid_price':number(raw.get('bidPrice')),'bid_form':flat(raw.get('bidForm')),
         'plan_no':flat(raw.get('planNo')),'version':flat(raw.get('notifyVersion')),
@@ -195,6 +196,32 @@ def connect(db=None):
       original TEXT NOT NULL,PRIMARY KEY(file_hash,sheet,row_no));
     CREATE INDEX IF NOT EXISTS idx_excel_rows_record ON excel_rows(record_id);
     ''')
+    search_fts_exists = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='records_search_fts'"
+    ).fetchone() is not None
+    try:
+        con.execute("CREATE VIRTUAL TABLE IF NOT EXISTS records_search_fts USING fts5(search_text, content='records', content_rowid='rowid', tokenize='trigram')")
+        con.executescript('''
+        CREATE TRIGGER IF NOT EXISTS records_search_fts_insert AFTER INSERT ON records BEGIN
+          INSERT INTO records_search_fts(rowid,search_text) VALUES(new.rowid,new.search_text);
+        END;
+        CREATE TRIGGER IF NOT EXISTS records_search_fts_delete AFTER DELETE ON records BEGIN
+          INSERT INTO records_search_fts(records_search_fts,rowid,search_text) VALUES('delete',old.rowid,old.search_text);
+        END;
+        CREATE TRIGGER IF NOT EXISTS records_search_fts_update AFTER UPDATE ON records BEGIN
+          INSERT INTO records_search_fts(records_search_fts,rowid,search_text) VALUES('delete',old.rowid,old.search_text);
+          INSERT INTO records_search_fts(rowid,search_text) VALUES(new.rowid,new.search_text);
+        END;
+        ''')
+        if not search_fts_exists:
+            con.execute("INSERT INTO records_search_fts(records_search_fts) VALUES('rebuild')")
+    except sqlite3.OperationalError:
+        # A failed first rebuild must not leave an empty index hiding rows.
+        if not search_fts_exists:
+            con.rollback()
+            for suffix in ('insert', 'delete', 'update'):
+                con.execute(f'DROP TRIGGER IF EXISTS records_search_fts_{suffix}')
+            con.execute('DROP TABLE IF EXISTS records_search_fts')
     con.execute("""UPDATE browser_runs SET status='superseded' WHERE status IN ('running','paused')
       AND EXISTS(SELECT 1 FROM browser_runs completed WHERE completed.status='complete'
       AND completed.pages=browser_runs.pages AND completed.updated>=browser_runs.updated)""")
@@ -207,7 +234,7 @@ def connect(db=None):
         con.execute('PRAGMA user_version=2');con.commit()
     return con
 
-def save_records(con,kind,records,observed_at=None):
+def save_records(con,kind,records,observed_at=None,only_changed=False):
     accepted=skipped=0
     for raw in records:
         if not isinstance(raw,dict): skipped+=1; continue
@@ -221,6 +248,11 @@ def save_records(con,kind,records,observed_at=None):
         else: raise ValueError('Loại dữ liệu không hợp lệ')
         source_id=flat(raw.get('id') or (raw.get('notifyId') if kind=='tenders' else None))
         if not source_id: raise ValueError('Bản ghi thiếu ID nguồn. Chưa nhập để tránh gộp nhầm dữ liệu.')
+        if only_changed:
+            old=con.execute('SELECT raw FROM records WHERE kind=? AND source_id=?',(kind,source_id)).fetchone()
+            if old and json.loads(old[0])==raw:
+                accepted+=1
+                continue
         if observed_at:
             old=con.execute('SELECT collected_at FROM records WHERE kind=? AND source_id=?',(kind,source_id)).fetchone()
             def timestamp(value):
@@ -230,7 +262,10 @@ def save_records(con,kind,records,observed_at=None):
                 if old and timestamp(old[0])>timestamp(observed_at):skipped+=1;continue
             except ValueError:pass
         stamp=observed_at or now(); obj.update(source_id=source_id,collected_at=stamp,source_system='MSC',schema_version=1)
-        con.execute('INSERT OR REPLACE INTO records VALUES(?,?,?,?,?,?,?)',(
+        con.execute('''INSERT INTO records VALUES(?,?,?,?,?,?,?)
+          ON CONFLICT(kind,source_id) DO UPDATE SET tender_no=excluded.tender_no,
+          raw=excluded.raw,normalized=excluded.normalized,search_text=excluded.search_text,
+          collected_at=excluded.collected_at''',(
             kind,source_id,obj.get('tender_no',''),json.dumps(raw,ensure_ascii=False),
             json.dumps(obj,ensure_ascii=False),fold(' '.join(flat(v) for v in obj.values())),stamp))
         if kind=='prices':
@@ -286,7 +321,7 @@ def import_file(path,db=None):
     return counts
 
 def base_query(kind):
-    if kind=='prices': return "SELECT source_id, normalized obj, search_text, raw FROM records WHERE kind='prices' AND NOT EXISTS(SELECT 1 FROM excel_matches m WHERE m.excel_id=records.source_id)"
+    if kind=='prices': return "SELECT rowid record_rowid, source_id, normalized obj, search_text, raw FROM records WHERE kind='prices' AND NOT EXISTS(SELECT 1 FROM excel_matches m WHERE m.excel_id=records.source_id)"
     # A source tender and a price-derived tender are explicitly distinguished.
     return '''WITH price_groups AS (
       SELECT tender_no,count(*) drug_rows,min(json_extract(normalized,'$.buyer')) buyer,
@@ -294,13 +329,13 @@ def base_query(kind):
       FROM records WHERE kind='prices' AND tender_no!=''
       AND NOT EXISTS(SELECT 1 FROM excel_matches m WHERE m.excel_id=records.source_id) GROUP BY tender_no
     ), imported AS (
-      SELECT *,row_number() OVER(PARTITION BY tender_no ORDER BY json_extract(normalized,'$.version') DESC, collected_at DESC) rn
+      SELECT rowid record_rowid,*,row_number() OVER(PARTITION BY tender_no ORDER BY json_extract(normalized,'$.version') DESC, collected_at DESC) rn
       FROM records WHERE kind='tenders'
     )
-    SELECT t.source_id,json_set(t.normalized,'$.drug_rows',coalesce(p.drug_rows,0)) obj,t.search_text,t.raw
+    SELECT t.record_rowid,t.source_id,json_set(t.normalized,'$.drug_rows',coalesce(p.drug_rows,0)) obj,t.search_text,t.raw
       FROM imported t LEFT JOIN price_groups p ON p.tender_no=t.tender_no WHERE t.rn=1
     UNION ALL
-    SELECT 'price:'||p.tender_no,json_object('source_id','price:'||p.tender_no,
+    SELECT NULL,'price:'||p.tender_no,json_object('source_id','price:'||p.tender_no,
       'tender_no',p.tender_no,'name','Chưa có thông báo gốc','buyer',p.buyer,'province',p.province,
       'published',p.published,'source_label','Từ bảng đơn giá — chưa có TBMT','drug_rows',p.drug_rows,
       'source_url','https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data'),

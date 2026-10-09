@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { api, fmtDateTime } from './api'
-import { cloudCatalog, cloudMap, cloudMscSearch, cloudSuggest } from './supabaseCloud'
+import { cloudCatalog, cloudMap, cloudMapFacilityIngredients, cloudMscSearch, cloudSuggest } from './supabaseCloud'
 import { StatCards } from './areaStats'
 import { DetailModal, Field, SuggestField } from './components'
 import { fmtInt, fmtMoney, fmtVndCompact } from './metrics'
@@ -95,8 +95,8 @@ function IngredientName({ name, hits }) {
     const rect = anchorRef.current?.getBoundingClientRect()
     if (rect) {
       setBox({
-        top: rect.bottom + 6,
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - POPUP_WIDTH - 16)),
+        top: Math.max(8, Math.min(rect.top, window.innerHeight - 380)),
+        left: Math.max(8, rect.left - POPUP_WIDTH - 10),
       })
     }
     setOpen(true)
@@ -208,7 +208,7 @@ function IngredientLineLabel({ row }) {
   )
 }
 
-function IngredientRank({ rows = [], title, note, valueLabel, qtyLabel, catalog = [], pinMatches = false, fromScope = false }) {
+function IngredientRank({ rows = [], title, note, valueLabel, qtyLabel, catalog = [], pinMatches = false, fromScope = false, loading = false, error = '' }) {
   const [by, setBy] = useState('value')
   const sorted = useMemo(() => {
     const copy = [...rows]
@@ -231,6 +231,8 @@ function IngredientRank({ rows = [], title, note, valueLabel, qtyLabel, catalog 
         </div>
       </header>
       {note && <p className="metric-lead">{note}</p>}
+      {loading && <p role="status">Đang tải hoạt chất của cơ sở…</p>}
+      {error && <p role="alert">{error}</p>}
       <div className="map-rank-scroll">
         {sorted.length ? (
           <ol>
@@ -253,7 +255,7 @@ function IngredientRank({ rows = [], title, note, valueLabel, qtyLabel, catalog 
               )
             })}
           </ol>
-        ) : <p className="metric-lead">Chưa có hoạt chất trong 12 tháng này.</p>}
+        ) : !loading && !error && <p className="metric-lead">Chưa có hoạt chất trong 12 tháng này.</p>}
       </div>
     </section>
   )
@@ -638,12 +640,16 @@ export default function MapSection({ localMode = true }) {
   }, [data, pick])
   useEffect(() => {
     let cancelled = false
-    if (!localMode || selectedDot?.kind !== 'facility') {
+    if (!['facility', 'price_buyer'].includes(selectedDot?.kind)) {
       setFacilityIngredients(null)
       return undefined
     }
     setFacilityIngredients({ dotId: selectedDot.id, loading: true, ingredients: [] })
-    api.mapFacilityIngredients({
+    const load = localMode ? api.mapFacilityIngredients : cloudMapFacilityIngredients
+    load({
+      source: query.source,
+      buyer: selectedDot.buyer || selectedDot.name,
+      province: selectedDot.provinceCode,
       dotId: selectedDot.id,
       months: 12,
       filters: {
@@ -657,11 +663,11 @@ export default function MapSection({ localMode = true }) {
       .then((payload) => {
         if (!cancelled) setFacilityIngredients({ dotId: selectedDot.id, loading: false, ingredients: payload?.ingredients || [] })
       })
-      .catch(() => {
-        if (!cancelled) setFacilityIngredients({ dotId: selectedDot.id, loading: false, ingredients: [] })
+      .catch(error => {
+        if (!cancelled) setFacilityIngredients({ dotId: selectedDot.id, loading: false, ingredients: [], error: error.message || 'Chưa tải được hoạt chất.' })
       })
     return () => { cancelled = true }
-  }, [localMode, selectedDot?.id, selectedDot?.kind, query.hoatchat, query.region, query.province, query.group, query.q])
+  }, [localMode, selectedDot?.id, selectedDot?.kind, query.source, query.hoatchat, query.region, query.province, query.group, query.q])
   const cardStats = selectedRegion
     ? (data?.regions || []).find((row) => row.name === selectedRegion)
     : selectedCode
@@ -872,12 +878,15 @@ export default function MapSection({ localMode = true }) {
                   : (cardStats && !Number(cardStats.value) ? 'Chưa có kết quả trong 12 tháng này.' : '')}
                 showGroups={!isTenderSource && selectedDot?.kind !== 'facility' && selectedDot?.kind !== 'price_buyer'}
                 trendLabel={isMscSource ? (data?.trendLabel || 'Giá trị mỗi tháng') : ''}
+                trendMetric={isMscSource ? data?.trendMetric : undefined}
               />
             )}
           <IngredientRank
+            loading={facilityIngredients?.dotId === selectedDot?.id && Boolean(facilityIngredients?.loading)}
+            error={facilityIngredients?.dotId === selectedDot?.id ? (facilityIngredients?.error || '') : ''}
             rows={
               selectedDot
-                ? (selectedDot.kind === 'facility' && facilityIngredients?.dotId === selectedDot.id
+                ? (['facility', 'price_buyer'].includes(selectedDot.kind) && facilityIngredients?.dotId === selectedDot.id
                   ? (facilityIngredients.ingredients || [])
                   : (selectedDot.ingredients || []))
                 : selectedCode

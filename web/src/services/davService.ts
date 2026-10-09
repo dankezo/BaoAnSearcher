@@ -30,6 +30,8 @@ export function parseDavPage(value: unknown): DavSearchResult {
       'ngayGiaHan',
       'ngayHetHan',
       'hoatChat',
+      'drugGroup',
+      'tenderGroup',
       'hamLuong',
       'dangBaoChe',
       'dongGoi',
@@ -64,6 +66,7 @@ export const api = {
     parseDavPage(await legacyApi.davSearch(request)),
   davValidity: (): Promise<unknown> => legacyApi.davValidity(),
   metrics: (section: string) => legacyApi.metrics(section),
+  metricsSlice: (body: { section: string; filters: DavFilters }) => legacyApi.metricsSlice(body),
   suggest: (section: string, field: string, q: string) => legacyApi.suggest(section, field, q),
 }
 export async function cloudDavSearch(request: DavSearchRequest): Promise<DavSearchResult> {
@@ -98,6 +101,7 @@ function isMetricCard(value: unknown): value is DavMetricCard {
 }
 export function davErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
+  if (message.includes('Nguồn DAV dự phòng chưa hỗ trợ')) return message
   if (/search_dav_drugs|schema cache|PGRST202/.test(message))
     return 'Nguồn dữ liệu DAV đang gián đoạn; nguồn dự phòng chưa được thiết lập. Vui lòng thử lại sau.'
   if (/Unauthorized|401|403|đăng nhập/i.test(message))

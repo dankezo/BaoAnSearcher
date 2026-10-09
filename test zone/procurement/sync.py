@@ -107,13 +107,14 @@ class Downloader:
         self.page_size=max(1,min(500,int(page_size)))
         self.api=api or Api(self.stop,report)
 
-    def run(self,date_from,date_to,refresh=False,max_pages=None,full_scan=False):
+    def run(self,date_from,date_to,refresh=False,max_pages=None,full_scan=False,incremental=False):
         start=datetime.fromisoformat(date_input(date_from)); end=datetime.fromisoformat(date_input(date_to)).replace(hour=23,minute=59,second=59,microsecond=999000)
         if start>end: raise ValueError('Ngày bắt đầu phải trước ngày kết thúc.')
         # A forced whole-store scan is an authoritative source snapshot.  Keep
         # its start timestamp so obsolete API IDs can be removed only after a
         # category has finished successfully; partial/daily runs never prune.
         snapshot_started=now() if full_scan and refresh else None
+        self.only_changed=incremental and not full_scan
         import msvcrt
         self.db.parent.mkdir(parents=True,exist_ok=True)
         with open(self.db.parent/'sync.lock','a+b') as lock:
@@ -132,7 +133,14 @@ class Downloader:
                             if removed:
                                 self.report(f'{category}: đã bỏ {removed:,} ID không còn trong nguồn MSC.')
                     else:
-                        self.partition(start,end,category,refresh,max_pages=max_pages)
+                        recent=start
+                        if incremental:
+                            with connect(self.db) as con:
+                                checkpoint=con.execute("SELECT MAX(date_to) FROM slices WHERE kind='prices' AND category=? AND status='complete' AND date_to>=? AND date_from<=?",(category,start.isoformat(),end.isoformat())).fetchone()[0]
+                            if checkpoint:
+                                recent=max(start, min(end,datetime.fromisoformat(checkpoint)).replace(hour=0,minute=0,second=0,microsecond=0)-timedelta(days=2))
+                            self.report(f'{category}: cập nhật từ {recent.date()} · quét chồng 3 ngày, tải đủ số trang nguồn.')
+                        self.partition(recent,end,category,refresh,max_pages=None if incremental else max_pages)
             finally:
                 lock.seek(0);msvcrt.locking(lock.fileno(),msvcrt.LK_UNLCK,1)
         self.report('Đã tạm dừng; có thể tải tiếp cùng khoảng ngày.' if self.stop.is_set() else 'Đã xử lý khoảng ngày đã chọn. Xem mục Phạm vi dữ liệu để biết phần hoàn tất hoặc còn thiếu.')
@@ -212,7 +220,7 @@ class Downloader:
                     if str(r.get('medicines'))!=category or r.get('tab')!='THUOC_TAN_DUOC': raise RuntimeError('Máy chủ trả sai loại thuốc yêu cầu.')
                 seen+=len(rows);page+=1
                 with connect(self.db) as con:
-                    count,skipped=save_records(con,'prices',rows)
+                    count,skipped=save_records(con,'prices',rows,only_changed=getattr(self,'only_changed',False))
                     if skipped:raise RuntimeError('Có dòng nguồn không nhận diện được; chưa đánh dấu hoàn tất.')
                     con.executemany('INSERT OR IGNORE INTO slice_ids VALUES(?,?)',[(key,str(r['id'])) for r in rows])
                     unique=con.execute('SELECT count(*) FROM slice_ids WHERE key=?',(key,)).fetchone()[0]

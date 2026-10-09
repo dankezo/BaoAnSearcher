@@ -191,7 +191,7 @@ export function newWatchId() {
   return `watch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function rowMatches(row, criteria) {
+function rowMatches(row, criteria, now) {
   if (criteria.ingredient && !hasWords(ingredientBlob(row), criteria.ingredient)) return false
   if (criteria.strength && !hasWords(strengthBlob(row), criteria.strength)) return false
   if (criteria.form && !hasWords(formBlob(row), criteria.form)) return false
@@ -202,7 +202,7 @@ function rowMatches(row, criteria) {
   }
   if (criteria.company && !hasWords(companyBlob(row), criteria.company)) return false
   if (criteria.contractor && !hasWords(contractorBlob(row), criteria.contractor)) return false
-  if (criteria.status && resolveBidStatusFromRow(row).key !== criteria.status) return false
+  if (criteria.status && resolveBidStatusFromRow(row, now).key !== criteria.status) return false
   return true
 }
 
@@ -251,7 +251,7 @@ export function countTopic(criteria, rows = [], now = Date.now(), { capped = fal
   const pool = DRUG_PLACE.some(key => c[key])
     ? rows.filter(row => classifyTender(row, now).fresh)
     : rows
-  const matched = pool.filter(row => rowMatches(row, c))
+  const matched = pool.filter(row => rowMatches(row, c, now))
   const bits = [capped ? 'Đếm trên trang đã tải, danh sách còn trang tiếp.' : 'Đếm trên trang đã tải.']
   if (c.sdkIngredient) bits.push('SĐK mới chỉ lưu tiêu chí, chưa đếm trên trang chủ.')
   return { kind: 'live', live: matched.length, rows: matched, note: bits.join(' ') }

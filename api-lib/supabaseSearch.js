@@ -138,6 +138,11 @@ export async function searchSupabase(accessToken, kind, filters, page, size, cur
   const f = filters || {}
   const words = fold(f.q || '').trim().split(/\s+/).filter(Boolean).map(plain)
   if (kind === 'dav') {
+    if (asList(f.tenderGroup).length) {
+      const error = new Error('Nguồn DAV dự phòng chưa hỗ trợ bộ lọc nhóm thầu.')
+      error.status = 501
+      throw error
+    }
     return runQuery(accessToken, 'dav_drugs', '*', (query) => {
       const rawTags = f.tags ?? f.selectedTags
       if (rawTags != null && !asList(rawTags).length) return { empty: true }

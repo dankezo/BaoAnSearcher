@@ -69,6 +69,9 @@ export const api = {
   supabaseSync: (body) => request('/api/supabase/sync', { method: 'POST', body: JSON.stringify(body || {}), timeoutMs: 600000 }),
   productionSync: (body) => request('/api/production/sync', { method: 'POST', body: JSON.stringify(body || {}), timeoutMs: 600000 }),
   productionSyncStatus: () => request('/api/production/sync/status'),
+  cloudCrawlStatus: () => request('/api/cloud-crawl/status', { timeoutMs: 60000 }),
+  cloudCrawlControl: (action) => request('/api/cloud-crawl/control', { method: 'POST', body: JSON.stringify({ action }), timeoutMs: 60000 }),
+  cloudCrawlPull: () => request('/api/cloud-crawl/pull', { method: 'POST', body: '{}' }),
   platformStatus: (refresh = false) => request(`/api/platform/status${refresh ? '?refresh=true' : ''}`, { timeoutMs: 8000 }),
   dailyRun: () => request('/api/daily/run', { method: 'POST', body: '{}' }),
   regulatoryCrawl: () => request('/api/regulatory/crawl', { method: 'POST', body: '{}' }),
@@ -315,12 +318,12 @@ export function getStaticStatus() {
 
 /** Extract {updated, count} for a section from a status payload. */
 export function sectionMeta(status, section) {
-  const s = status?.[section]
+  const s = status?.[section.startsWith('msc_') ? 'msc' : section]
   if (!s) return { updated: null, count: null }
   const meta = s.meta || {}
   // MSC exposes two independent stores.  Its headline must be the unit-price
   // catalogue; the tender count is displayed in its own tab/card.
-  const count = meta.count ?? (meta.prices != null ? meta.prices : s.count ?? null)
+  const count = section === 'msc_tenders' ? meta.tenders ?? null : meta.count ?? (meta.prices != null ? meta.prices : s.count ?? null)
   return { updated: meta.updated || s.updated || null, count, state: s.state, message: s.message }
 }
 

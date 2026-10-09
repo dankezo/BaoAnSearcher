@@ -13,7 +13,7 @@ import { countTopic, defaultTopicName, topicSentence } from './watchTopics'
 import Watchlist from './Watchlist'
 import '../home.css'
 
-function Sheet({ open, title, onClose, children, bottom = false }) {
+function Sheet({ open, title, onClose, children, bottom = false, leftDesktop = false }) {
   const closeRef = useRef(onClose)
   closeRef.current = onClose
   useEffect(() => {
@@ -29,7 +29,7 @@ function Sheet({ open, title, onClose, children, bottom = false }) {
   }, [open])
   if (!open) return null
   return (
-    <div className={`home-sheet-root${bottom ? ' home-sheet-bottom-root' : ''}`} role="presentation" onClick={onClose}>
+    <div className={`home-sheet-root${bottom ? ' home-sheet-bottom-root' : ''}${leftDesktop ? ' home-sheet-left-desktop' : ''}`} role="presentation" onClick={onClose}>
       <aside
         className={`home-sheet${bottom ? ' home-sheet-bottom' : ''}`}
         role="dialog"
@@ -135,7 +135,7 @@ function TenderRadar({ localMode, user, onOpenMsc }) {
             onTopics={rememberTopics}
           />
         </div>
-        <Sheet open={!!panel} title={panelLabel} onClose={() => setPanel(null)} bottom>
+        <Sheet leftDesktop open={!!panel} title={panelLabel} onClose={() => setPanel(null)} bottom>
           <div className="home-radar-panel" aria-live="polite" aria-label={panelLabel}>
             {panel === 'open' && (
               <PackageList
@@ -175,8 +175,8 @@ function TenderRadar({ localMode, user, onOpenMsc }) {
           </div>
         </Sheet>
       </div>
-      {localMode && !state.loading && matchCount === 0 && <p className="home-note">Chưa thấy gói khớp. Ở Quản trị, chạy «Quét hồ sơ gói đang mở» để đối chiếu danh mục Bảo An.</p>}
-      <Sheet open={!!picked} title={picked?.tender_no || 'Chi tiết gói thầu'} onClose={() => setPicked(null)}>
+      {localMode && !state.loading && matchCount === 0 && <p className="home-note">Chưa thấy gói khớp. Ở Dữ liệu, chạy «Quét hồ sơ gói đang mở» để đối chiếu danh mục Bảo An.</p>}
+      <Sheet leftDesktop open={!!picked} title={picked?.tender_no || 'Chi tiết gói thầu'} onClose={() => setPicked(null)}>
         {picked && <TenderDetail row={picked} />}
       </Sheet>
     </section>
@@ -275,7 +275,7 @@ function TenderDetail({ row }) {
     <div className="home-detail">
       <TenderLines row={row} />
       <h3>Phần thầu trong hồ sơ</h3>
-      {!lines.length && <p>Chưa có bảng phạm vi cung cấp. Quét hồ sơ gói đang mở ở Quản trị, hoặc mở E-HSMT gốc.</p>}
+      {!lines.length && <p>Chưa có bảng phạm vi cung cấp. Quét hồ sơ gói đang mở ở Dữ liệu, hoặc mở E-HSMT gốc.</p>}
       {!!lines.length && (
         <div className="home-table-wrap">
           <table>
@@ -302,35 +302,36 @@ function TenderDetail({ row }) {
 
 function NewsBlock({ onOpenAdmin }) {
   const [refresh, setRefresh] = useState(0)
-  const [state, setState] = useState({ loading: true, items: [], error: '' })
-  const [openMore, setOpenMore] = useState(false)
+  const [state, setState] = useState({ loading: true, items: [], sources: [], error: '' })
+  const [openMore, setOpenMore] = useState(true)
   const [sheet, setSheet] = useState(null)
   const [ai, setAi] = useState({ loading: false, error: '', data: null })
 
+  const aiSeq = useRef(0)
+  useEffect(() => () => { aiSeq.current += 1 }, [])
   useEffect(() => {
     const controller = new AbortController()
     setState(s => ({ ...s, loading: true, error: '' }))
     regulatoryRequest({ view: 'brief' }, undefined, controller.signal)
-      .then(data => { if (!controller.signal.aborted) setState({ loading: false, items: data.items || [], error: '' }) })
-      .catch(error => { if (!controller.signal.aborted) setState({ loading: false, items: [], error: error.message }) })
+      .then(data => { if (!controller.signal.aborted) setState({ loading: false, items: data.items || [], sources: data.sources || [], error: '' }) })
+      .catch(error => { if (!controller.signal.aborted) setState({ loading: false, items: [], sources: [], error: error.message }) })
     return () => controller.abort()
   }, [refresh])
 
   const { critical, secondary } = useMemo(() => splitBrief(state.items), [state.items])
+  const sourceErrors = state.sources.filter(source => source.enabled && source.last_error)
+  const latestCheck = state.sources.map(source => Date.parse(source.last_success || '')).filter(Number.isFinite).sort((a,b) => b-a)[0]
+  const sourceTime = value => new Date(value).toLocaleString('vi-VN',{timeZone:'Asia/Bangkok',hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit',year:'numeric'})
 
-  const runAi = async (item) => {
+  const runAi = async (item, refresh = false) => {
+    const seq = ++aiSeq.current
     setSheet({ kind: 'ai', item })
-    setAi({ loading: true, error: '', data: null })
+    setAi(previous => ({ loading: true, error: '', data: refresh ? previous.data : null }))
     try {
-      const data = await analyzeNews({
-        title: item.title,
-        content: item.summary || item.insight?.reason || '',
-        source: item.source_name || sourceBadge(item),
-        publish_date: item.published_at || item.issued_at || '',
-      })
-      setAi({ loading: false, error: '', data })
+      const data = await analyzeNews({ id: item.id, refresh })
+      if (seq === aiSeq.current) setAi({ loading: false, error: '', data })
     } catch (error) {
-      setAi({ loading: false, error: error.message, data: null })
+      if (seq === aiSeq.current) setAi(previous => ({ loading: false, error: error.message, data: previous.data }))
     }
   }
 
@@ -340,10 +341,11 @@ function NewsBlock({ onOpenAdmin }) {
         <h2>Bảng tin tình báo</h2>
         <button type="button" className="home-text" onClick={onOpenAdmin}>Crawl tin</button>
       </header>
-      <p className="home-note">DAV, Bộ Y tế, MSC và BHYT. Tin phạt vặt và mỹ phẩm đã bị hạ mức ở bản tin sáng. «Khớp danh mục» chỉ khi văn bản có SĐK hoặc dòng thuốc trùng hoạt chất, dạng và hàm lượng Bảo An — không coi trùng mỗi hoạt chất là khớp.</p>
+      <p className="home-note">Dược · đấu thầu · chính sách · BHYT{latestCheck ? ` · Kiểm tra nguồn: ${sourceTime(latestCheck)}` : ''}</p>
+      {sourceErrors.length > 0 && <details className="home-source-status"><summary>{sourceErrors.length} nguồn chưa cập nhật được · xem trạng thái</summary>{sourceErrors.map(source => <p key={source.id}><b>{source.name}</b>: {source.last_error}{source.last_success ? ` · Lần thành công: ${sourceTime(source.last_success)}` : ''}</p>)}</details>}
       {state.loading && <p role="status">Đang mở bản tin…</p>}
       {state.error && <p className="home-alert" role="alert">{state.error} <button type="button" onClick={() => setRefresh(n => n + 1)}>Thử lại</button></p>}
-      {!state.loading && !state.error && !critical.length && <p className="home-empty">Chưa có tin cấp 1 trong 30 ngày. Xem tin phụ hoặc cào lại ở Quản trị.</p>}
+      {!state.loading && !state.error && !critical.length && <p className="home-empty">Chưa có tin cấp 1 trong 90 ngày. Xem tin phụ hoặc cào lại ở Dữ liệu.</p>}
       <div className="home-critical">
         {critical.map(item => {
           const nature = natureOf(item)
@@ -393,10 +395,10 @@ function NewsBlock({ onOpenAdmin }) {
       <Sheet
         open={!!sheet}
         title={sheet?.kind === 'ai' ? 'Phân tích Gemini' : 'Văn bản & căn cứ'}
-        onClose={() => setSheet(null)}
+        onClose={() => { aiSeq.current += 1; setSheet(null) }}
       >
         {sheet?.kind === 'doc' && <DocBody item={sheet.item} />}
-        {sheet?.kind === 'ai' && <AiBody item={sheet.item} ai={ai} />}
+        {sheet?.kind === 'ai' && <AiBody item={sheet.item} ai={ai} onRefresh={() => runAi(sheet.item, true)} />}
       </Sheet>
     </section>
   )
@@ -415,13 +417,17 @@ function DocBody({ item }) {
   )
 }
 
-function AiBody({ item, ai }) {
-  if (ai.loading) return <p role="status">Gemini đang đọc tin…</p>
-  if (ai.error) return <p className="home-alert" role="alert">{ai.error}</p>
+function AiBody({ item, ai, onRefresh }) {
+  if (ai.loading && !ai.data) return <p role="status">AI đang đọc bài gốc và đối chiếu nguồn ngoài…</p>
+  if (ai.error && !ai.data) return <div className="home-alert" role="alert">{ai.error}<button onClick={onRefresh}>Thử lại</button></div>
   if (!ai.data) return null
   const data = ai.data
   return (
     <div className="home-detail">
+      {ai.error && <p className="home-alert" role="alert">{ai.error} · Đang giữ bản phân tích thành công trước.</p>}
+      <p className="home-note">{data.model ? `${data.model} · ` : ''}{data.analyzed_at ? `Phân tích ngày ${new Date(data.analyzed_at).toLocaleString('vi-VN')}` : ''}{data.cached ? ' · Đã lưu' : ''}</p>
+      {data.verification_limit && <p className="home-note">{data.verification_limit}</p>}
+      <button type="button" className="home-text" onClick={onRefresh} disabled={ai.loading}>{ai.loading ? 'Đang đối chiếu lại…' : 'Phân tích cập nhật'}</button>
       <p className="home-note">Gợi ý cho lãnh đạo · {item.code || sourceBadge(item)} · cần đối chiếu bản gốc</p>
       <h3>{data.headline_vietnamese}</h3>
       <p>{data.executive_summary}</p>
@@ -430,6 +436,9 @@ function AiBody({ item, ai }) {
         <p>{data.tender_impact.detail}</p>
       </div>
       <div className="home-callout action"><strong>Lệnh điều hành</strong><p>{data.action_order}</p></div>
+      {Object.entries({ evidence: 'Sự kiện và căn cứ', catalog_impact: 'Tác động đến Bảo An', opportunities: 'Cơ hội', risks: 'Rủi ro', priority_actions: 'Việc cần làm', verification: 'Cần xác minh' }).map(([key, title]) => data[key]?.length ? <section key={key}><strong>{title}</strong><ul>{data[key].map((entry, index) => <li key={index}>{entry.detail}{entry.source_urls?.map(url => <a key={url} href={url} target="_blank" rel="noreferrer"> [Nguồn]</a>)}</li>)}</ul></section> : null)}
+      {data.sources?.length > 0 && <section><strong>Nguồn đối chiếu</strong><ol>{data.sources.map(source => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a></li>)}</ol></section>}
+
     </div>
   )
 }

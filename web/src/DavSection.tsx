@@ -13,7 +13,7 @@ export default function DavSection({ localMode, embedded = false, filtersInModal
   const controller = useDavSearch({ localMode, embedded })
   const { meta, detail, setDetail, configs, loading, sim, exporting, exportPct } = controller
   return (
-    <div className={`section${embedded ? ' embedded' : ''}`}>
+    <div className={`section lookup-section${embedded ? ' embedded' : ''}`}>
       {!embedded && (
         <header className="section-head">
           <div>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SHORT_SEARCH_NOTE, skipShortTextSearch, sortByDateDesc } from '../api'
-import { supabaseConfigured, cloudSuggest, cloudCount } from '../supabaseCloud'
+import { supabaseConfigured, cloudSuggest, cloudCount, cloudMetricsSlice } from '../supabaseCloud'
 import { useAuth } from '../auth'
 import {
   applyColumnFilters,
@@ -18,7 +18,7 @@ import { userKeyPart } from '../userPrefs'
 import { applyMetricQuick } from '../metrics'
 import { EMPTY_FILTERS, SERVER_MAP } from '../components/dav/davConfig'
 import { useDavColumns } from '../components/dav/useDavColumns'
-import { api, cloudDavSearch, cloudMetrics, davErrorMessage } from '../services/davService'
+import { api, cloudDavSearch, davErrorMessage } from '../services/davService'
 import type {
   ColumnFilters,
   DavFilters,
@@ -32,7 +32,6 @@ import type {
 
 const PAGE_SIZE_DEFAULT = 100
 const DAV_TEXT_KEYS = ['q', 'tenThuoc', 'soDangKy', 'hoatChat', 'dangBaoChe', 'sanXuat', 'dangKy']
-const METRICS_REFRESH_NOTE = 'Chưa chạy làm mới dữ liệu hàng ngày — chỉ số DAV chưa được lưu.'
 
 export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
   const { user } = useAuth()
@@ -60,13 +59,13 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricsError, setMetricsError] = useState('')
   const [metricsRetry, setMetricsRetry] = useState(0)
-  const [tableReady, setTableReady] = useState(false)
+  const [metricFilters, setMetricFilters] = useState<DavFilters | null>(null)
   const [metricActiveId, setMetricActiveId] = useState<string | null>(null)
   const [metricQuick, setMetricQuick] = useState<string | null>(null)
   const sim = useLoadProgress(loading, 'Đang lọc thuốc DAV', loadPct)
   const sel = useSelection<DrugItem>()
+  const metricSearchKey = useRef('')
   const reqSeq = useRef(0)
-  const sawTableLoad = useRef(false)
   useEffect(
     () => () => {
       reqSeq.current += 1
@@ -120,6 +119,14 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
       }
       setLoading(true)
       setErr('')
+      const nextMetricKey = JSON.stringify(active)
+      const refreshMetrics = p === 0 || metricSearchKey.current !== nextMetricKey
+      if (refreshMetrics) {
+        setMetricFilters(null)
+        setMetricsCards(null)
+        setMetricsTotal(null)
+        setMetricsLoading(true)
+      }
       try {
         if (localMode || supabaseConfigured) {
           const sequential = p === pageRef.current + 1
@@ -135,6 +142,10 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
           items = sortByDateDesc(items, ['ngayCap', 'ngayGiaHan', 'ngayHetHan'])
           setData({ ...res, items })
           setPage(p)
+          if (refreshMetrics) {
+            metricSearchKey.current = nextMetricKey
+            setMetricFilters(active)
+          }
           if (!localMode && res.total == null) {
             cloudCount('dav', active)
               .then((total) => {
@@ -148,7 +159,11 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
         setErr('Chưa cấu hình Supabase. Thêm VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY rồi build lại.')
         setData({ total: 0, items: [], page: 0, size })
       } catch (e) {
-        if (!stale()) setErr(davErrorMessage(e))
+        if (!stale()) {
+          setErr(davErrorMessage(e))
+          setMetricsError('Không tải được dữ liệu theo bộ lọc hiện tại.')
+          setMetricsLoading(false)
+        }
       } finally {
         if (!stale()) {
           setLoading(false)
@@ -165,69 +180,26 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
     search(0)
   }, [pageSize, search])
 
-  // Track first table paint before loading metrics (avoids bandwidth contention)
+  // Applied filters are updated only by the latest successful table response.
   useEffect(() => {
-    if (embedded) return
-    if (loading) sawTableLoad.current = true
-    else if (sawTableLoad.current) setTableReady(true)
-  }, [embedded, loading])
-
-  // Metrics: cloud = 1 aggregate API; local = full catalog pages (deferred after table)
-  useEffect(() => {
-    if (embedded || !tableReady) return undefined
-    if (!(localMode || supabaseConfigured)) {
-      setMetricsSample([])
-      setMetricsError('Chưa cấu hình nguồn dữ liệu DAV.')
-      return undefined
-    }
+    if (embedded || !metricFilters) return undefined
     let cancelled = false
     setMetricsLoading(true)
     setMetricsError('')
-    const finish = () => {
-      if (!cancelled) setMetricsLoading(false)
-    }
-    if (!localMode) {
-      cloudMetrics('dav')
-        .then((payload) => {
-          if (cancelled) return
-          if (!payload) throw new Error('Missing metrics')
-          setMetricsCards(payload.cards || [])
-          setMetricsTotal(payload.total ?? payload.sampleSize ?? null)
-          setMetricsSample(null)
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setMetricsCards(null)
-            setMetricsSample([])
-            setMetricsError('Chưa tải được chỉ số DAV.')
-          }
-        })
-        .finally(finish)
-      return () => {
-        cancelled = true
-      }
-    }
-    api.metrics('dav')
-      .then((payload: { cards?: DavMetricCard[]; total?: number; sampleSize?: number } | null) => {
-        if (cancelled) return
-        if (!payload?.cards?.length) throw new Error('Chưa có chỉ số')
-        setMetricsCards(payload.cards)
-        setMetricsTotal(payload.total ?? payload.sampleSize ?? null)
-        setMetricsSample(null)
-        setMetricsError('')
-      })
-      .catch(() => {
-        if (cancelled) return
-        setMetricsCards([])
-        setMetricsSample(null)
-        setMetricsTotal(null)
-        setMetricsError(METRICS_REFRESH_NOTE)
-      })
-      .finally(finish)
-    return () => {
-      cancelled = true
-    }
-  }, [localMode, embedded, tableReady, metricsRetry])
+    setMetricsCards(null)
+    const body = { section: 'dav', filters: metricFilters }
+    const load = localMode ? api.metricsSlice(body) : cloudMetricsSlice(body)
+    load.then((payload: { cards?: DavMetricCard[]; total?: number }) => {
+      if (cancelled) return
+      if (!payload?.cards) throw new Error('Chưa có chỉ số theo bộ lọc.')
+      setMetricsCards(payload.cards)
+      setMetricsTotal(payload.total ?? 0)
+      setMetricsSample(null)
+    }).catch((error: Error) => {
+      if (!cancelled) { setMetricsCards(null); setMetricsSample([]); setMetricsTotal(0); setMetricsError(error.message || 'Chưa tính được chỉ số DAV.') }
+    }).finally(() => { if (!cancelled) setMetricsLoading(false) })
+    return () => { cancelled = true }
+  }, [localMode, embedded, metricFilters, metricsRetry])
 
   const toSuggest = useCallback(
     (items: DrugItem[]) =>

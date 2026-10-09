@@ -35,7 +35,7 @@ function WatchDialog({ open, title, onClose, children }) {
   }, [open])
   if (!open) return null
   return (
-    <div className="home-sheet-root" role="presentation" onClick={onClose}>
+    <div className="home-sheet-root home-sheet-left-desktop" role="presentation" onClick={onClose}>
       <aside
         className="home-sheet home-watch-sheet"
         role="dialog"

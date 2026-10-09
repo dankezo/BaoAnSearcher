@@ -25,9 +25,9 @@ def describe() -> list[tuple[str, str]]:
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Apply TiDB schema 001 through 006.")
+    parser = argparse.ArgumentParser(description="Apply TiDB schema 001 through 008.")
     parser.add_argument("--yes-remote", action="store_true", help="Execute on the configured cluster.")
-    parser.add_argument("--only", choices=("001", "002", "003", "004", "005", "006"), help="Apply one idempotent migration only.")
+    parser.add_argument("--only", choices=("001", "002", "003", "004", "005", "006", "007", "008"), help="Apply one idempotent migration only.")
     args = parser.parse_args()
     statements = describe()
     if args.only:
@@ -38,7 +38,7 @@ def main() -> None:
     tiflash = sum(1 for _name, statement in statements if "TIFLASH" in statement.upper())
     print(f"TiFlash statements: {tiflash}")
     if not args.yes_remote:
-        suffix = f" {args.only}" if args.only else " 001 through 006"
+        suffix = f" {args.only}" if args.only else " 001 through 008"
         print(f"TiDB unchanged. Pass --yes-remote to apply{suffix}.")
         return
     cfg = require_config()

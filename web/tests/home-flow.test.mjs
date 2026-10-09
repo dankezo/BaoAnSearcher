@@ -80,7 +80,7 @@ test('home cockpit keeps one row of three cards and confirms a watch topic from 
       : [{ tender_no: 'IB260002', name: 'Gói mới tuần này', buyer: 'Bệnh viện Bạch Mai', province: 'Hà Nội', status_code: '', close_date: stamp(20), published: stamp(-1), bid_price: 500000000 }]
     return { ok: true, json: async () => ({ items, hasMore: false }) }
   }
-  global.homeReg = async () => ({ items: [
+  global.homeReg = async () => ({ sources:[{id:'good',name:'Chính phủ',enabled:true,last_success:'2026-10-09T02:00:00Z'},{id:'bad',name:'Nguồn DAV',enabled:true,last_error:'Kết nối timeout',last_success:'2026-10-08T02:00:00Z'},{id:'disabled',name:'Nguồn tắt',enabled:false,last_error:'Không hoạt động'}], items: [
     { id: 'n1', title: 'Công bố danh mục thuốc đáp ứng điểm c khoản 1 Điều 4 Thông tư 40/2025', summary: 'Danh mục dùng cho đấu thầu.', source_url: 'https://dav.gov.vn/tin', source_name: 'Cục Quản lý Dược', category: 'Đấu thầu', published_at: '2026-09-18', insight: { priority: 90, impact: 'Có thể đổi cách xét nhóm 2.', action: 'Giao phòng thầu đối chiếu phụ lục.', method: 'rules' } },
     { id: 'n2', title: 'Lịch họp ngành dược', summary: 'Tin theo dõi.', source_url: 'https://moh.gov.vn/tin', category: 'Khác', insight: { priority: 35, impact: 'Chưa thấy tác động trực tiếp.', action: 'Đọc nếu có thuốc liên quan.', method: 'rules' } },
   ] })
@@ -96,6 +96,10 @@ test('home cockpit keeps one row of three cards and confirms a watch topic from 
     await act(async () => { root = create(React.createElement(Home, { localMode: true, onOpenMsc: () => opened.push('msc'), onOpenAdmin: () => opened.push('admin'), onOpenLaw: () => opened.push('law') })); await wait() })
     assert.match(content(root.toJSON()), /Bàn điều hành thầu/)
     assert.match(content(root.toJSON()), /Công bố danh mục thuốc/)
+    assert.match(content(root.toJSON()), /Kiểm tra nguồn: 09:00 9\/10\/2026|Kiểm tra nguồn: 09:00.*09\/10\/2026/)
+    assert.match(content(root.toJSON()), /1 nguồn chưa cập nhật được/)
+    assert.match(content(root.toJSON()), /Nguồn DAV.*Kết nối timeout/)
+    assert.doesNotMatch(content(root.toJSON()), /Nguồn tắt/)
     assert.match(content(root.toJSON()), /1 gói khớp/)
     assert.doesNotMatch(content(root.toJSON()), /Gói thầu khớp/)
     assert.match(content(root.toJSON()), /mới tuần này/)
@@ -163,6 +167,8 @@ test('home cockpit keeps one row of three cards and confirms a watch topic from 
     await act(async () => button(root, 'IB260001').props.onClick())
     assert.match(content(root.toJSON()), /Metformin/)
     assert.match(content(root.toJSON()), /Tải E-HSMT gốc/)
+    assert.match(content(root.toJSON()), /Lịch họp ngành dược/)
+    await act(async () => button(root, 'Thu gọn').props.onClick())
     await act(async () => button(root, 'Xem thêm 1 tin').props.onClick())
     assert.match(content(root.toJSON()), /Lịch họp ngành dược/)
     await act(async () => button(root, 'Dự thảo').props.onClick())

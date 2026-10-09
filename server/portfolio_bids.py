@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from urllib.parse import urlparse, parse_qs
 from .common import MSC_DB, fold, normalize_strength
 from .portfolio import _sdk_key, _plant_key, parse_money, group_number
 
@@ -12,16 +13,30 @@ def tender_links():
         return {}
     with sqlite3.connect(MSC_DB) as con:
         rows = con.execute("SELECT normalized FROM records WHERE kind='tenders'").fetchall()
-    return {str(r.get('tender_no') or '').split('-')[0]: r.get('source_url') for (raw,) in rows if (r := json.loads(raw)).get('source_url')}
+    links = {}
+    for (raw,) in rows:
+        row = json.loads(raw)
+        number = str(row.get('tender_no') or '').strip()
+        url = str(row.get('source_url') or '')
+        if number and _msc_profile_url(url):
+            links.setdefault(number, url)
+    return links
+
+
+def _msc_profile_url(value):
+    try:
+        parsed = urlparse(str(value or ''))
+        return (parsed.scheme == 'https' and parsed.hostname == 'muasamcong.mpi.gov.vn'
+                and bool(parse_qs(parsed.query).get('id')))
+    except ValueError:
+        return False
 
 
 def award(row, source, links):
     msc = source == 'MSC'
     number = str(row.get('tender_no') if msc else row.get('goithau') or '')
-    url = links.get(number.split('-')[0]) if msc else None
     original = str(row.get('source_url') or '')
-    if not url and original.startswith('https://muasamcong.mpi.gov.vn/') and 'id=' in original:
-        url = original
+    url = (_msc_profile_url(original) and original) or (links.get(number) if msc else None)
     return {
         'source': source, 'tenderNo': number, 'decision': row.get('decision' if msc else 'quyetdinh') or '',
         'date': row.get('decision_date') or row.get('published') or row.get('tungay_hd') or row.get('tungay') or row.get('congbo') or '',
@@ -109,19 +124,44 @@ def summarize(history):
             'quantityTotals': list(totals.values())}
 
 
-def compare_price(own, rival):
-    a, b = own.get('latestAward'), rival.get('latestAward')
-    if not a or not b:
-        return None, 'Chưa có giá trúng thầu để so sánh'
-    if not a.get('unit') or fold(a['unit']) != fold(b.get('unit')):
-        return None, 'Khác hoặc thiếu đơn vị tính'
+def _comparable(a, b):
+    if not a or not b or (a.get('price') or 0) <= 0 or (b.get('price') or 0) <= 0:
+        return False
+    if not a.get('ingredient') or fold(a['ingredient']) != fold(b.get('ingredient') or ''):
+        return False
+    if not a.get('unit') or fold(a['unit']) != fold(b.get('unit') or ''):
+        return False
     if not group_number(a.get('group')) or group_number(a['group']) != group_number(b.get('group')):
-        return None, 'Khác hoặc thiếu nhóm thầu'
+        return False
     if not a.get('strength') or normalize_strength(a['strength']) != normalize_strength(b.get('strength') or ''):
-        return None, 'Khác hoặc thiếu hàm lượng trong kết quả thầu'
-    if not a.get('dosageForm') or fold(a['dosageForm']) != fold(b.get('dosageForm')):
-        return None, 'Khác hoặc thiếu dạng bào chế trong kết quả thầu'
-    return (b['price'] / a['price'] - 1) * 100, ''
+        return False
+    if not a.get('dosageForm') or fold(a['dosageForm']) != fold(b.get('dosageForm') or ''):
+        return False
+    return True
+
+
+def compare_price(own, rival, own_history=None, rival_history=None):
+    own_rows = own_history if own_history is not None else [own.get('latestAward')]
+    rival_rows = rival_history if rival_history is not None else [rival.get('latestAward')]
+    pairs = [(a, b) for a in own_rows for b in rival_rows if _comparable(a, b)]
+    if not pairs:
+        a, b = own.get('latestAward'), rival.get('latestAward')
+        if not a or not b or (a.get('price') or 0) <= 0 or (b.get('price') or 0) <= 0:
+            return None, 'Chưa có giá trúng thầu hợp lệ để so sánh'
+        if not a.get('ingredient') or fold(a['ingredient']) != fold(b.get('ingredient') or ''):
+            return None, 'Khác hoặc thiếu hoạt chất trong kết quả thầu'
+        if not a.get('unit') or fold(a['unit']) != fold(b.get('unit') or ''):
+            return None, 'Khác hoặc thiếu đơn vị tính'
+        if not group_number(a.get('group')) or group_number(a['group']) != group_number(b.get('group')):
+            return None, 'Khác hoặc thiếu nhóm thầu'
+        if not a.get('strength') or normalize_strength(a['strength']) != normalize_strength(b.get('strength') or ''):
+            return None, 'Khác hoặc thiếu hàm lượng trong kết quả thầu'
+        if not a.get('dosageForm') or fold(a['dosageForm']) != fold(b.get('dosageForm') or ''):
+            return None, 'Khác hoặc thiếu dạng bào chế trong kết quả thầu'
+        return None, 'Chưa có cặp giá trúng thầu cùng điều kiện để so sánh'
+    a, b = max(pairs, key=lambda pair: (min(str(pair[0].get('date') or ''), str(pair[1].get('date') or '')),
+                                        max(str(pair[0].get('date') or ''), str(pair[1].get('date') or ''))))
+    return (b['price'] / a['price'] - 1) * 100, f"So sánh cùng {a['ingredient']}, {a['strength']}, {a['dosageForm']}, {a['group']}, {a['unit']} · {a['date']}: {a['price']} VNĐ / {b['date']}: {b['price']} VNĐ"
 
 
 def enrich(row, index):
@@ -132,4 +172,6 @@ def enrich(row, index):
         if not str(rival.get('inn') or '').strip():
             rival['inn'] = row.get('inn') or ''
         rival.update(summarize(index.get(_sdk_key(rival['regNumber']), [])))
-        rival['priceDeltaPct'], rival['comparisonNote'] = compare_price(row, rival)
+        rival['priceDeltaPct'], rival['comparisonNote'] = compare_price(
+            row, rival, history, index.get(_sdk_key(rival['regNumber']), []),
+        )

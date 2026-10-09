@@ -3,7 +3,7 @@ import type { DavColumn, DrugItem, DavFilters } from '../../types/dav'
 
 export const ALL_COLS: DavColumn[] = [
   { key: 'tagId', label: 'Trạng thái', filter: 'select', nowrap: true, width: 52, align: 'center' },
-  { key: 'soDangKy', label: 'Số đăng ký', mono: true, nowrap: true },
+  { key: 'soDangKy', label: 'Số đăng ký', width: 112, mono: true, nowrap: true },
   { key: 'ngayCap', label: 'Ngày cấp', text: (r) => fmtDate(r.ngayCap), nowrap: true },
   { key: 'tenThuoc', label: 'Tên thuốc', width: 180, truncateAt: 80 },
   { key: 'hoatChat', label: 'Hoạt chất', width: 220 },
@@ -12,10 +12,14 @@ export const ALL_COLS: DavColumn[] = [
   { key: 'hamLuong', label: 'Hàm lượng', width: 120, truncateAt: 72 },
   { key: 'dangBaoChe', label: 'Dạng bào chế', truncateAt: 64 },
   { key: 'dongGoi', label: 'Quy cách đóng gói', truncateAt: 72 },
+  { key: 'hanDung', label: 'Hạn dùng', width: 100 },
   { key: 'ngayHetHan', label: 'Ngày hết hạn', text: (r) => fmtDate(r.ngayHetHan), nowrap: true },
   { key: 'ctyDangKy', label: 'Công ty đăng ký', width: 180, truncateAt: 80 },
-  { key: 'ctySanXuat', label: 'Công ty sản xuất', width: 200, truncateAt: 80 },
+  { key: 'ctySanXuat', label: 'Công ty sản xuất', width: 240, truncateAt: 80 },
   { key: 'nuocSanXuat', label: 'Nước SX', filter: 'select' },
+  { key: 'soDangKyCu', label: 'SĐK cũ', width: 112, mono: true, nowrap: true },
+  { key: 'soQuyetDinh', label: 'Số quyết định', width: 140 },
+  { key: 'tieuChuan', label: 'Tiêu chuẩn', width: 120 },
 ]
 
 export const SERVER_MAP: Partial<Record<keyof DrugItem, keyof DavFilters>> = {

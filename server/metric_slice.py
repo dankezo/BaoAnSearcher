@@ -6,10 +6,14 @@ import importlib.util
 import json
 import re
 import sqlite3
+import threading
+from concurrent.futures import Future
+from contextlib import closing
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 
-from .common import MSC_DB, ROOT, VSS_DB, fold
+from .common import MSC_DB, ROOT, VSS_DB, DAV_DB, fold
 from .msc_scope import attach, load_cache, refresh_async
 
 _HEAT = ROOT / "data" / "vss_heat.sqlite3"
@@ -136,6 +140,15 @@ def rebuild_heat() -> int:
 def slice_payload(body: dict) -> dict:
     section = str(body.get("section") or "")
     filters = body.get("filters") or {}
+    if section == "dav":
+        from .dav import search_drugs
+        from .stored_metrics import read_metrics, summarize_dav
+        payload = read_metrics("dav") if not any(filters.values()) else None
+        if payload is None:
+            payload = summarize_dav(search_drugs(filters, all_rows=True)["items"])
+        for card in payload["cards"]:
+            card["subtitle"] = "Theo bộ lọc hiện tại"
+        return payload
     months = int(body.get("months") or 12)
     if section == "vss":
         return _vss(filters, months)
@@ -148,7 +161,8 @@ def slice_payload(body: dict) -> dict:
 
 def _heat_rows(filters: dict):
     """Use the month cube when the filter is only province / group / year."""
-    text_keys = ("q", "hoatchat", "sodk", "duongdung", "nuocsx", "loai_thau", "tuNgay", "denNgay")
+    text_keys = ("q", "hoatchat", "sodk", "duongdung", "nuocsx", "loai_thau", "tuNgay", "denNgay",
+                 "ten", "loai", "nhasx", "ma_cskcb", "ten_cskcb", "tennhathau", "hamluong", "donvitinh", "nam")
     if any(str(filters.get(key) or "").strip() for key in text_keys):
         return None
     if not _HEAT.exists():
@@ -167,9 +181,18 @@ def _vss_sql(filters: dict):
     for field, column in (
         ("hoatchat", "hoatchat"),
         ("sodk", "sodk"),
+        ("ten", "ten"),
+        ("loai", "loai"),
         ("duongdung", "duongdung"),
         ("nuocsx", "nuocsx"),
         ("loai_thau", "loai_thau"),
+        ("nhasx", "json_extract(raw,'$.nhasx')"),
+        ("ma_cskcb", "json_extract(raw,'$.ma_cskcb')"),
+        ("ten_cskcb", "json_extract(raw,'$.ten_cskcb')"),
+        ("ten_tinh", "json_extract(raw,'$.ten_tinh')"),
+        ("tennhathau", "json_extract(raw,'$.tennhathau')"),
+        ("hamluong", "json_extract(raw,'$.hamluong')"),
+        ("donvitinh", "json_extract(raw,'$.donvitinh')"),
     ):
         raw = filters.get(field)
         values = raw if isinstance(raw, list) else ([raw] if str(raw or "").strip() else [])
@@ -188,6 +211,20 @@ def _vss_sql(filters: dict):
     if filters.get("denNgay"):
         clauses.append("coalesce(denngay_hd,'') <= ?")
         args.append(str(filters["denNgay"])[:10] + " 23:59:59")
+    years = filters.get("nam") or []
+    if isinstance(years, (str, int)):
+        years = [years] if str(years).strip() else []
+    year_parts = []
+    for value in years:
+        try:
+            year = int(str(value).strip())
+        except (TypeError, ValueError):
+            continue
+        y = str(year)
+        year_parts.append("(nam = ? OR coalesce(tungay_hd,'') LIKE ? OR (tungay_hd <= ? AND denngay_hd >= ?) OR coalesce(json_extract(raw,'$.congbo'),'') LIKE ?)")
+        args.extend([year, f"{y}%", f"{y}-12-31", f"{y}-01-01", f"{y}%"])
+    if year_parts:
+        clauses.append("(" + " OR ".join(year_parts) + ")")
     q = fold(filters.get("q") or "")
     if q:
         for word in q.split():
@@ -356,106 +393,157 @@ def _month_span(buckets: dict, start: datetime, end: datetime) -> list:
     return points
 
 
-def _msc_prices(filters: dict, months: int) -> dict:
-    months, now, cur_from, _prev_from, prev_end = _window(months)
-    prev_from = _prev_from
-    series = {}
-    history = {}
-    available_dates = []
-    previous_count = 0
-    provinces: dict[str, dict] = {}
-    groups = [0.0, 0.0, 0.0, 0.0, 0.0]
+def _price_aggregates(filters, start, end):
+    from .msc import search_where
+    if not MSC_DB.exists():
+        return []
+    with closing(sqlite3.connect(f"file:{MSC_DB}?mode=ro", uri=True)) as lookup:
+        indexed = lookup.execute("SELECT 1 FROM sqlite_master WHERE name='records_search_fts'").fetchone() is not None
+        dated = lookup.execute("SELECT 1 FROM sqlite_master WHERE name='idx_records_kind_cursor'").fetchone() is not None
+    clauses, args = search_where("prices", filters, indexed=indexed)
+    clauses.extend(["metric_day(json_extract(normalized, '$.published')) >= ?",
+                    "metric_day(json_extract(normalized, '$.published')) <= ?"])
+    args.extend([start.date().isoformat(), end.date().isoformat()])
+    if dated:
+        cursor = "coalesce(json_extract(normalized,'$.published'),json_extract(normalized,'$.close_date'),collected_at)"
+        clauses.append(f"rowid IN (SELECT rowid FROM records INDEXED BY idx_records_kind_cursor WHERE kind='prices' AND {cursor}>=? AND {cursor}<=? UNION SELECT rowid FROM records INDEXED BY idx_records_kind_cursor WHERE kind='prices' AND {cursor} NOT GLOB '????-??-??*')")
+        args.extend([start.date().isoformat(), end.date().isoformat() + "~"])
+    with closing(sqlite3.connect(f"file:{MSC_DB}?mode=ro", uri=True)) as con:
+        con.create_function("fold", 1, fold, deterministic=True)
+        con.create_function("metric_num", 1, lru_cache(maxsize=8192)(_num), deterministic=True)
+        con.create_function("metric_day", 1, lru_cache(maxsize=4096)(lambda v: stamp.date().isoformat() if (stamp := _parse_dt(v)) else None), deterministic=True)
+        # Broad totals cannot use the registration index to narrow their rows.
+        scan = " NOT INDEXED" if not any(value for key, value in filters.items() if key != "metricMonths") else ""
+        rows = con.execute("""
+          SELECT metric_day(json_extract(normalized, '$.published')) AS published,
+                 coalesce(json_extract(normalized, '$.province'), ''),
+                 coalesce(json_extract(normalized, '$.group_name'), ''),
+                 coalesce(json_extract(normalized, '$.unit'), ''),
+                 SUM(metric_num(json_extract(normalized, '$.quantity'))),
+                 SUM(metric_num(json_extract(normalized, '$.quantity')) * metric_num(json_extract(normalized, '$.unit_price'))),
+                 COUNT(*), MIN(metric_num(json_extract(normalized, '$.unit_price'))), MAX(metric_num(json_extract(normalized, '$.unit_price')))
+            FROM records""" + scan + " WHERE " + " AND ".join(clauses) + " GROUP BY 1,2,3,4", args).fetchall()
+    keys = ("published", "province", "group_name", "unit", "qty", "revenue", "cnt", "minPrice", "maxPrice")
+    return [dict(zip(keys, row)) for row in rows]
+
+
+def _shape_price_rows(rows, window, include_groups=True):
+    months, now, cur_from, prev_from, prev_end = window
+    series, provinces = {}, {}
+    groups = [0.0] * 5
+    previous_count = current_count = 0
     prev_revenue = 0.0
-    for item in _msc_rows("prices"):
-        if not _msc_keep(item, filters, ("name", "ingredient", "registration", "manufacturer", "province", "buyer", "winner", "group_name", "country", "tender_no")):
-            continue
-        stamp = _parse_dt(item.get("decision_date")) or _parse_dt(item.get("published"))
-        if stamp:
-            available_dates.append(stamp)
+    for item in rows:
+        stamp = _parse_dt(item.get("published"))
         current = _in_span(stamp, cur_from, now)
         previous = _in_span(stamp, prev_from, prev_end)
-        if previous:
-            previous_count += 1
-        qty = _num(item.get("quantity"))
-        revenue = qty * _num(item.get("unit_price"))
-        if _in_span(stamp, cur_from, now):
-            key = f"{stamp.year}-{stamp.month:02d}"
-            bucket = history.setdefault(key, {"qty": 0.0, "revenue": 0.0})
-            bucket["qty"] += qty
-            bucket["revenue"] += revenue
         if not current and not previous:
             continue
-        group = _group(item.get("group_name"))
-        if current and stamp is not None:
-            key = f"{stamp.year}-{stamp.month:02d}"
-            bucket = series.setdefault(key, {"key": key, "label": f"T{stamp.month}", "qty": 0.0, "revenue": 0.0})
-            bucket["qty"] += qty
-            bucket["revenue"] += revenue
-            if group:
-                groups[int(group) - 1] += revenue
-        elif previous:
-            prev_revenue += revenue
+        qty, revenue = _num(item.get("qty")), _num(item.get("revenue"))
+        group = _group(item.get("group_name")) or ""
         name = str(item.get("province") or "").strip() or "Chưa xác định tỉnh"
         prov = provinces.setdefault(name, {"name": name, "value": 0.0, "prev": 0.0})
         if current:
+            current_count += int(item.get("cnt") or 0)
             prov["value"] += revenue
-        elif previous:
+            key = stamp.strftime("%Y-%m")
+            bucket = series.setdefault(key, {"qty": 0.0, "revenue": 0.0, "breakdown": {}})
+            bucket["qty"] += qty
+            bucket["revenue"] += revenue
+            unit = str(item.get("unit") or "").strip() or "ĐVT chưa rõ"
+            part = bucket["breakdown"].setdefault((group, unit), {"group": group, "unit": unit, "qty": 0.0, "revenue": 0.0, "minPrice": None, "maxPrice": None})
+            part["qty"] += qty
+            part["revenue"] += revenue
+            lo, hi = item.get("minPrice"), item.get("maxPrice")
+            if lo is not None: part["minPrice"] = min(lo, part["minPrice"]) if part["minPrice"] is not None else lo
+            if hi is not None: part["maxPrice"] = max(hi, part["maxPrice"]) if part["maxPrice"] is not None else hi
+            if group: groups[int(group) - 1] += revenue
+        else:
+            previous_count += int(item.get("cnt") or 0)
+            prev_revenue += revenue
             prov["prev"] += revenue
     points = _month_span(series, cur_from, now)
-    # The price dashboard is intentionally a compact rolling monthly view.
-    # Include zero months so the user sees exactly the requested 3/6/12-month
-    # range instead of a misleading run from the oldest imported record.
-    trend = _month_span(history, cur_from, now)
+    for point in points:
+        point["breakdown"] = list(series.get(point["key"], {}).get("breakdown", {}).values())
     ranked = []
     for row in provinces.values():
-        if row["prev"] > 0:
-            row["growth"] = (row["value"] - row["prev"]) / row["prev"] * 100
-        elif row["value"] > 0:
-            row["growth"] = None
-        else:
-            row["growth"] = 0
+        row["growth"] = (row["value"] - row["prev"]) / row["prev"] * 100 if row["prev"] > 0 else (None if row["value"] > 0 else 0)
         ranked.append(row)
     ranked.sort(key=lambda row: (row["growth"] is None, -(row["growth"] if row["growth"] is not None else -1e18), -row["value"]))
-    qty_now = sum(p["qty"] for p in points)
     rev_now = sum(p["revenue"] for p in points)
-    by_value = sorted(provinces.values(), key=lambda row: row["value"], reverse=True)
-    yoy = ((rev_now - prev_revenue) / prev_revenue * 100) if prev_revenue > 0 else (None if rev_now > 0 else 0)
-    return {
-        "section": "msc_prices",
-        "months": months,
-        "series": trend,
-        "topGrowth": ranked[:3],
-        "topProvinces": [
-            {"name": row["name"], "value": row["value"], "prev": row["prev"], "growth": row.get("growth")}
-            for row in by_value[:6]
-        ],
-        "groups": groups,
-        "quantity": qty_now,
-        "revenue": rev_now,
-        "prevRevenue": prev_revenue,
-        "yoy": yoy,
-        "coverage": {"from": min(available_dates).date().isoformat() if available_dates else None,
-                     "to": max(available_dates).date().isoformat() if available_dates else None,
-                     "records": len(available_dates), "previousRecords": previous_count},
-    }
+    payload = {"section": "msc_prices", "months": months, "series": points,
+        "topGrowth": ranked[:3], "topProvinces": sorted(ranked, key=lambda r: r["value"], reverse=True)[:6],
+        "groups": groups, "quantity": sum(p["qty"] for p in points), "revenue": rev_now,
+        "prevRevenue": prev_revenue, "yoy": (rev_now - prev_revenue) / prev_revenue * 100 if prev_revenue > 0 else (None if rev_now > 0 else 0),
+        "coverage": {"from": prev_from.date().isoformat() if rows else None, "to": now.date().isoformat() if rows else None, "records": current_count, "previousRecords": previous_count}}
+    if include_groups:
+        payload["groupViews"] = {g: _shape_price_rows([r for r in rows if _group(r.get("group_name")) == g], window, False) for g in "12345"}
+    return payload
+
+
+_PRICE_CACHE = {}
+_PRICE_FLIGHTS = {}
+_PRICE_LOCK = threading.Lock()
+
+def _msc_prices(filters: dict, months: int) -> dict:
+    window = _window(months)
+    # SQLite WAL changes must invalidate aggregates as well as main DB changes.
+    stamps = tuple((p.stat().st_mtime_ns, p.stat().st_size) if p.exists() else None for p in (MSC_DB, Path(str(MSC_DB) + "-wal")))
+    key = (json.dumps(filters, sort_keys=True, ensure_ascii=False), months, window[1].strftime("%Y-%m-%d"), stamps)
+    import time
+    with _PRICE_LOCK:
+        cached = _PRICE_CACHE.get(key)
+        if cached and time.monotonic() - cached[0] < 300:
+            return cached[1]
+        future = _PRICE_FLIGHTS.get(key)
+        owner = future is None
+        if owner:
+            future = _PRICE_FLIGHTS[key] = Future()
+    if not owner:
+        return future.result(timeout=90)
+    try:
+        result = _shape_price_rows(_price_aggregates(filters, window[3], window[1]), window)
+        with _PRICE_LOCK:
+            if len(_PRICE_CACHE) >= 16:
+                _PRICE_CACHE.pop(next(iter(_PRICE_CACHE)))
+            _PRICE_CACHE[key] = (time.monotonic(), result)
+        future.set_result(result)
+        return result
+    except Exception as exc:
+        future.set_exception(exc)
+        raise
+    finally:
+        with _PRICE_LOCK:
+            _PRICE_FLIGHTS.pop(key, None)
 
 
 def _msc_tenders(filters: dict, months: int) -> dict:
     months, now, cur_from, _prev_from, _prev_end = _window(months)
-    rows = attach(_msc_rows("tenders"))
+    if not MSC_DB.exists():
+        rows = []
+    else:
+        from .msc import search_where
+        with sqlite3.connect(f"file:{MSC_DB}?mode=ro", uri=True) as lookup:
+            indexed = lookup.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records_search_fts'").fetchone() is not None
+        clauses, args = search_where("tenders", filters, indexed=indexed)
+        clauses.append("(json_extract(normalized, '$.published') IS NULL OR metric_day(json_extract(normalized, '$.published')) IS NULL OR (metric_day(json_extract(normalized, '$.published')) >= ? AND metric_day(json_extract(normalized, '$.published')) <= ?))")
+        args.extend([cur_from.date().isoformat(), now.date().isoformat()])
+        with sqlite3.connect(f"file:{MSC_DB}?mode=ro", uri=True) as con:
+            con.create_function("fold", 1, fold, deterministic=True)
+            con.create_function("metric_day", 1, lambda v: _parse_dt(v).date().isoformat() if _parse_dt(v) else None, deterministic=True)
+            rows = [json.loads(raw) for (raw,) in con.execute(
+                "SELECT normalized FROM records WHERE " + " AND ".join(clauses), args
+            )]
+    rows = attach(rows)
     cache = load_cache()
     from .msc_scope import matches_scope
     open_n = review_n = new_n = closing_n = 0
     open_value = 0.0
     exact = near = cached_open = 0
     for item in rows:
-        if not _msc_keep(item, filters, ("name", "province", "buyer", "tender_no")):
-            continue
         if not matches_scope(item, filters):
             continue
         published = _parse_dt(item.get("published"))
-        if published is not None and not _in_span(published, cur_from, now):
-            continue
         code = str(item.get("status_code") or "").strip().upper()
         close = _parse_dt(item.get("close_date"))
         price = _num(item.get("bid_price"))

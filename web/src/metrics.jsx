@@ -805,18 +805,27 @@ function provinceShort(name) {
   return tail || text
 }
 
-function trendRangeLabel(series) {
-  if (!series.length) return 'Xu hướng tháng'
-  const start = series[0].label || series[0].key
-  const end = series[series.length - 1].label || series[series.length - 1].key
-  return start && end && start !== end ? `Xu hướng tháng ${start} – ${end}` : 'Xu hướng tháng'
+export function trendRangeLabel() { return 'Xu hướng 12 tháng gần nhất' }
+
+export function pricePointTooltip(point, group = '') {
+  const parts = (point?.breakdown || []).filter(p => !group || p.group === group).sort((a, b) => (Number(a.group) || 6) - (Number(b.group) || 6) || String(a.unit).localeCompare(String(b.unit), 'vi'))
+  const quantities = new Map()
+  for (const part of parts) quantities.set(part.unit, (quantities.get(part.unit) || 0) + Number(part.qty || 0))
+  const total = [...quantities].map(([unit, qty]) => `${fmtInt(qty)} ${unit}`).join(' · ')
+  return { total, revenue: parts.reduce((sum, p) => sum + Number(p.revenue || 0), 0), rows: [...parts].sort((a,b) => Number(b.revenue || 0)-Number(a.revenue || 0)), lines: parts.map(p => {
+    const qty = Number(p.qty) || 0
+    const price = qty ? Number(p.revenue) / qty : null
+    const average = p.minPrice != null && p.maxPrice != null && Number(p.minPrice) !== Number(p.maxPrice)
+    return `${group ? '' : p.group ? `N${p.group}: ` : 'Chưa phân nhóm: '}${fmtInt(qty)} ${p.unit} × ${price == null ? '—' : price.toLocaleString('vi-VN', { maximumFractionDigits: 2 })}${average ? ' (giá BQ)' : ''} = ${Number(p.revenue || 0).toLocaleString('vi-VN', { maximumFractionDigits: 2 })} VNĐ`
+  }) }
 }
 
-function MonthTrend({ series = [] }) {
+export function MonthTrend({ series = [], groupViews = {}, selectedGroup = '' }) {
   const [hover, setHover] = useState(null)
   const boxRef = useRef(null)
   const [width, setWidth] = useState(280)
   useEffect(() => {
+    setHover(null)
     const node = boxRef.current
     if (!node) return undefined
     const measure = () => setWidth(node.clientWidth || 280)
@@ -824,66 +833,60 @@ function MonthTrend({ series = [] }) {
     const observer = new ResizeObserver(measure)
     observer.observe(node)
     return () => observer.disconnect()
-  }, [series.length])
-  const values = series.map((point) => Number(point.revenue) || 0)
-  const max = Math.max(1, ...values)
+  }, [series])
+  useEffect(() => {
+    if (!hover?.pinned) return undefined
+    const outside = event => { if (!boxRef.current?.contains(event.target)) setHover(null) }
+    const escape = event => { if (event.key === 'Escape') setHover(null) }
+    document.addEventListener('pointerdown', outside)
+    document.addEventListener('keydown', escape)
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape) }
+  }, [hover?.pinned])
   const count = series.length
   if (!count) return <p className="price-strip-empty">Chưa có tháng có dữ liệu.</p>
-  const xAt = (index) => ((index + 0.5) / count) * 100
-  const yAt = (value) => 3 + (1 - (Number(value) || 0) / max) * 32
-  const line = values.map((value, index) => `${index ? 'L' : 'M'}${xAt(index).toFixed(2)},${yAt(value).toFixed(2)}`).join(' ')
-  const area = `${line} L${xAt(count - 1).toFixed(2)},36 L${xAt(0).toFixed(2)},36 Z`
+  const lines = [{ group: '', color: '#0b7285', series }, ...Object.entries(groupViews)
+    .filter(([, view]) => (view.coverage?.records || 0) > 0)
+    .map(([group, view]) => ({ group, color: GROUP_COLORS[Number(group) - 1], series: view.series }))]
+  const max = Math.max(1, ...lines.flatMap(line => line.series.map(point => Number(point.revenue) || 0)))
+  const xAt = index => ((index + 0.5) / count) * 100
+  const yAt = value => 3 + (1 - (Number(value) || 0) / max) * 32
   const anchors = trendAnchorIndexes(count, width)
   const anchorSet = new Set(anchors)
-  const point = hover != null ? series[hover] : null
-  const dots = hover != null && !anchorSet.has(hover) ? [...anchors, hover] : anchors
-  return (
-    <div className="price-trend" ref={boxRef} onMouseLeave={() => setHover(null)}>
-      <p className="price-trend-tip">{point ? `${point.label || point.key} · ${fmtMoney(point.revenue)}` : '\u00a0'}</p>
-      <div className="price-trend-plot">
-        <svg viewBox="0 0 100 38" preserveAspectRatio="none" role="img" aria-label="Xu hướng doanh thu theo tháng">
-          {hover != null && (
-            <line
-              x1={xAt(hover)}
-              x2={xAt(hover)}
-              y1="1"
-              y2="36"
-              className="price-trend-grid is-on"
-              vectorEffect="non-scaling-stroke"
-            />
-          )}
-          <line x1="0" x2="100" y1="36" y2="36" className="price-trend-axis" vectorEffect="non-scaling-stroke" />
-          <path d={area} className="price-trend-area" />
-          <path d={line} className="price-trend-line" vectorEffect="non-scaling-stroke" />
-        </svg>
-        {dots.map((index) => (
-          <i
-            key={series[index].key}
-            className={hover === index ? 'price-trend-dot is-on' : 'price-trend-dot'}
-            style={{ left: `${xAt(index)}%`, top: `${(yAt(values[index]) / 38) * 100}%` }}
-          />
-        ))}
-      </div>
-      <div className="price-trend-months" style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}>
-        {series.map((item, index) => {
-          const marked = anchorSet.has(index)
-          const year = item.key.slice(0, 4)
-          const prevAnchor = anchors.filter((at) => at < index).pop()
-          const showYear = marked && (index === 0 || year !== series[prevAnchor ?? 0].key.slice(0, 4))
-          return (
-            <span
-              key={item.key}
-              className={hover === index ? 'is-on' : ''}
-              onMouseEnter={() => setHover(index)}
-            >
-              {marked && <b>{item.label || item.key}</b>}
-              {marked && <small>{showYear ? year.slice(2) : '\u00a0'}</small>}
-            </span>
-          )
+  const hoveredSeries = hover?.group ? groupViews[hover.group]?.series : series
+  const point = hover ? hoveredSeries?.[hover.index] : null
+  const tooltip = point ? pricePointTooltip(point, hover.group) : null
+  return <div className="price-trend" ref={boxRef} onMouseLeave={() => setHover(current => current?.pinned ? current : null)}>
+    <div className="price-trend-plot">
+      <svg viewBox="0 0 100 38" preserveAspectRatio="none" role="img" aria-label="Xu hướng doanh thu 12 tháng theo nhóm">
+        <line x1="0" x2="100" y1="36" y2="36" className="price-trend-axis" vectorEffect="non-scaling-stroke" />
+        {hover && <line x1={xAt(hover.index)} x2={xAt(hover.index)} y1="1" y2="36" className="price-trend-grid is-on" vectorEffect="non-scaling-stroke" />}
+        {lines.map(line => {
+          const path = line.series.map((p, i) => `${i ? 'L' : 'M'}${xAt(i)},${yAt(p.revenue)}`).join(' ')
+          const active = selectedGroup === line.group
+          return <g key={line.group || 'total'} style={{ opacity: active ? 1 : line.group ? 0.25 : 0.4 }}>
+            {!line.group && !selectedGroup && <path d={`${path} L${xAt(count - 1)},36 L${xAt(0)},36 Z`} className="price-trend-area" />}
+            <path d={path} fill="none" stroke={line.color} strokeWidth={active ? 2.5 : 1.3} vectorEffect="non-scaling-stroke" />
+          </g>
         })}
-      </div>
+      </svg>
+      {lines.map(line => line.series.map((p, index) => <button
+        key={`${line.group}:${p.key}`} type="button" className="price-trend-point"
+        aria-label={`${line.group ? `N${line.group}` : 'Tổng'} · ${p.label || p.key} · ${pricePointTooltip(p, line.group).lines.join('; ') || 'Không có giao dịch'}`}
+        style={{ left: `${xAt(index)}%`, top: `${yAt(p.revenue) / 38 * 100}%`, '--point-color': line.color, zIndex: selectedGroup === line.group ? 3 : !line.group ? 2 : 1, opacity: !line.group || selectedGroup === line.group || hover?.group === line.group && hover?.index === index ? 1 : 0.5 }}
+        onMouseEnter={() => setHover(current => current?.pinned ? current : { group: line.group, index })} onFocus={() => setHover(current => current?.pinned ? current : { group: line.group, index })}
+        onClick={() => setHover({ group: line.group, index, pinned: true })} onBlur={event => { if (!boxRef.current?.contains(event.relatedTarget)) setHover(current => current?.pinned ? current : null) }} />))}
+      {tooltip && <section className="price-trend-tooltip" role="region" aria-label="Chi tiết điểm doanh thu" onPointerDown={() => setHover(current => current && {...current, pinned:true})}>
+        <header><div><b>Tháng {point.key} · {hover.group ? `Nhóm ${hover.group}` : 'Tất cả nhóm'}</b><strong>{fmtInt(tooltip.revenue)} ₫</strong></div><button type="button" aria-label="Đóng chi tiết điểm" onClick={() => setHover(null)}>×</button></header>
+        <small>{hover.pinned ? 'Đã giữ điểm · Esc để đóng' : 'Bấm điểm để giữ và cuộn chi tiết'}</small>
+        {tooltip.rows.length ? <div className="price-point-rows"><table><thead><tr><th>Quy cách</th><th>Số lượng</th><th>Đơn giá BQ</th><th>Giá trị</th></tr></thead><tbody>{tooltip.rows.map((part,i) => <tr key={i}><td>{part.unit}<small>{part.group ? `N${part.group}` : 'Chưa phân nhóm'}</small></td><td>{fmtInt(part.qty)}</td><td>{Number(part.qty)>0 ? (Number(part.revenue)/Number(part.qty)).toLocaleString('vi-VN',{maximumFractionDigits:2}) : '—'}</td><td>{fmtInt(part.revenue)} ₫</td></tr>)}</tbody></table></div> : <p>Không có giao dịch trong tháng này.</p>}
+      </section>}
     </div>
-  )
+    <div className="price-trend-months" style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}>
+      {series.map((item, index) => <span key={item.key} className={hover?.index === index ? 'is-on' : ''}>
+        {anchorSet.has(index) && <><b>T{Number(item.key.slice(5,7))}</b><small>{index === 0 || item.key.slice(0,4) !== series[index - 1]?.key.slice(0,4) ? item.key.slice(2,4) : '\u00a0'}</small></>}
+      </span>)}
+    </div>
+  </div>
 }
 
 function ProvinceRank({ title, note, rows, loading, empty, renderValue, onPick, active = '' }) {
@@ -911,13 +914,26 @@ function ProvinceRank({ title, note, rows, loading, empty, renderValue, onPick, 
 }
 
 export function MscPriceSlice({ view, loading, onProvince, activeProvince = '' }) {
+  const [selectedGroup, setSelectedGroup] = useState('')
+  const stripRef = useRef(null)
+  useEffect(() => { setSelectedGroup('') }, [view])
+  useEffect(() => {
+    if (!selectedGroup) return undefined
+    const outside = event => { if (!stripRef.current?.contains(event.target)) setSelectedGroup('') }
+    const escape = event => { if (event.key === 'Escape') setSelectedGroup('') }
+    document.addEventListener('pointerdown', outside)
+    document.addEventListener('keydown', escape)
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape) }
+  }, [selectedGroup])
+  const baseView = view
+  if (selectedGroup) view = baseView?.groupViews?.[selectedGroup] || view
   const top = (view?.topProvinces || []).slice(0, 6)
   const groups = Array.isArray(view?.groups) ? view.groups : []
   const groupTotal = groups.reduce((sum, value) => sum + (Number(value) || 0), 0)
   const months = Number(view?.months) || 12
   const yoyClass = view?.yoy == null ? 'flat' : view.yoy < 0 ? 'neg' : 'pos'
   return (
-    <aside className={`price-strip${loading ? ' is-loading' : ''}`} aria-label="Chỉ số đơn giá">
+    <aside ref={stripRef} className={`price-strip${loading ? ' is-loading' : ''}`} aria-label="Chỉ số đơn giá" aria-busy={loading}>
       <div className="price-strip-kpi">
         <span>Doanh thu {months} tháng</span>
         <strong>{fmtMoney(view?.revenue)}</strong>
@@ -941,8 +957,10 @@ export function MscPriceSlice({ view, loading, onProvince, activeProvince = '' }
         </div>
       </div>
       <div className="price-strip-trend">
-        <span>{trendRangeLabel(view?.series || [])}</span>
-        <MonthTrend series={view?.series || []} />
+        <div className="price-trend-heading"><span>{trendRangeLabel()}</span><div className="price-group-picks">
+          {Object.entries(baseView?.groupViews || {}).filter(([, group]) => group.coverage?.records > 0).map(([g]) => <button type="button" key={g} aria-pressed={selectedGroup === g} onClick={() => setSelectedGroup(selectedGroup === g ? '' : g)}><i style={{ background: GROUP_COLORS[Number(g) - 1] }} />N{g}</button>)}
+        </div></div>
+        <MonthTrend series={baseView?.series || []} groupViews={baseView?.groupViews || {}} selectedGroup={selectedGroup} />
         {view?.coverage && <small className="price-coverage" role="status">{view.coverage.from ? `Đã tải: ${view.coverage.from} – ${view.coverage.to} · ${fmtInt(view.coverage.records)} dòng.` : 'Chưa có dữ liệu theo bộ lọc.'} {!view.coverage.previousRecords && ' Chưa có dữ liệu cùng kỳ năm trước; cần bổ sung lịch sử MSC để tính tăng trưởng.'}</small>}
       </div>
       <ProvinceRank

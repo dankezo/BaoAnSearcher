@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     const { user, accessToken } = await requireUser(req)
     const db = createClient(process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL,
       process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY,
-      { global: { headers: { Authorization: `Bearer ${accessToken}` } }, auth: { persistSession: false, autoRefreshToken: false } })
+      { db: { retry: false }, global: { headers: { Authorization: `Bearer ${accessToken}` } }, auth: { persistSession: false, autoRefreshToken: false } })
     if (req.method === 'GET') {
       const params = Object.fromEntries(new URL(req.url, 'https://app.baoanpharma.com').searchParams)
       if (params.view === 'brief') return json(res, 200, { ...await brief(db), canEdit: isAdmin(user) })

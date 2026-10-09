@@ -77,6 +77,10 @@ test('DAV flow: load, metrics, draft filters, pagination, selection, columns, re
     if (String(url).includes('/api/metrics?section=dav')) return { ok: true, json: async () => ({ cards: computeDavCompound(rows, rows.length), total: rows.length }) }
     if (String(url).includes('/api/status')) return { ok: true, json: async () => ({}) }
     const body = JSON.parse(opts.body || '{}')
+    if (String(url).includes('/api/metrics/slice')) {
+      const matched = body.filters?.q ? rows.filter(r => r.tenThuoc.includes(body.filters.q)) : rows
+      return { ok: true, json: async () => ({ cards: computeDavCompound(matched, matched.length), total: matched.length }) }
+    }
     calls.push(body)
     if (fail) return { ok: false, text: async () => 'Could not find public.search_dav_drugs in schema cache' }
     const filtered = body.filters?.q ? rows.filter((r) => r.tenThuoc.includes(body.filters.q)) : rows

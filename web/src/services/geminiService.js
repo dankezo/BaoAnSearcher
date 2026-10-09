@@ -10,14 +10,22 @@ async function post(path, body) {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(65000),
   })
   const result = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(result.error || result.detail || `Chưa phân tích được (${response.status}).`)
   return result
 }
 
-export function analyzeNews(body) {
-  return post('/api/gemini/analyze-news', body)
+export async function analyzeNews(body) {
+  const started = new Date().toISOString()
+  let result = await post('/api/gemini/analyze-news', body)
+  for (let attempt = 0; result.pending && attempt < 23; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 3000))
+    result = await post('/api/gemini/analyze-news', { id: body.id, wait_after: started })
+  }
+  if (result.pending) throw new Error('Phân tích đang chạy. Mở lại bài sau ít phút để xem kết quả đã lưu.')
+  return result
 }
 
 export function analyzeLegal(body) {

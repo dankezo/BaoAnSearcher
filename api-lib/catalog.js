@@ -27,7 +27,7 @@ function shapeMeta(rows, section) {
       dav: Number(dav.count ?? dav.synced ?? 0),
       msc: Number(msc.tenders ?? msc.count ?? msc.synced ?? 0),
       updated: current.updated || current.synced_at || map[key]?.updated_at || null,
-      count: section === 'msc' || section === 'msc_prices' ? Number(msc.prices ?? count) : count,
+      count: section === 'msc_tenders' ? Number(msc.tenders ?? 0) : section === 'msc' || section === 'msc_prices' ? Number(msc.prices ?? count) : count,
       stats: section.startsWith('msc')
         ? {
           prices: Number(msc.prices ?? 0),
@@ -68,7 +68,7 @@ async function readTurso(section) {
   const tenders = meta.msc_total
   const vss = meta.vss_total
   const dav = meta.dav_total
-  const key = section === 'dav' ? 'dav_total' : section.startsWith('msc') ? 'msc_prices_total' : 'vss_total'
+  const key = section === 'dav' ? 'dav_total' : section === 'msc_tenders' ? 'msc_total' : section.startsWith('msc') ? 'msc_prices_total' : 'vss_total'
   const row = meta[key]
   const metricsKey = metricsCacheKey(section)
   let metrics = null
@@ -128,7 +128,7 @@ async function readTidb(section) {
     const tenders = meta.msc_total
     const vss = meta.vss_total
     const dav = meta.dav_total
-    const key = section === 'dav' ? 'dav_total' : String(section).startsWith('msc') ? 'msc_prices_total' : 'vss_total'
+    const key = section === 'dav' ? 'dav_total' : section === 'msc_tenders' ? 'msc_total' : String(section).startsWith('msc') ? 'msc_prices_total' : 'vss_total'
     const row = meta[key]
     return {
       dataVersion: row?.updated || null,

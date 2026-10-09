@@ -17,12 +17,14 @@ import time
 from .baoan_match import classify_lot, msc_price_lot, public_lines
 from .common import MSC_DB, VSS_DB, fold
 from .metric_slice import (
+    _HEAT,
     PROVINCES,
     _group,
     _heat_rows,
     _in_span,
     _msc_rows,
     _num,
+    _price_aggregates,
     _parse_dt,
     _vss_sql,
     _window,
@@ -425,7 +427,14 @@ def _rollup(items: list[dict], keys: list[str], *, code: str, name: str, region:
             bucket["groups"][index] += float(amount or 0)
         for point in item.get("trend") or []:
             bucket["month_values"][point["key"]] = bucket["month_values"].get(point["key"], 0.0) + float(point.get("value") or 0)
-    return _finalize(bucket, keys)
+    result = _finalize(bucket, keys)
+    if any(isinstance(item.get("countTrend"), list) for item in items):
+        counts = {key: 0 for key in keys}
+        for item in items:
+            for point in item.get("countTrend") or []:
+                counts[point["key"]] = counts.get(point["key"], 0) + int(point.get("value") or 0)
+        result["countTrend"] = _count_points(keys, counts)
+    return result
 
 
 def _vss_rows(filters: dict):
@@ -467,6 +476,46 @@ def _vss_where(filters: dict, start, end):
         for word in query.split():
             clauses.append("search LIKE ?")
             args.append(f"%{word}%")
+    for field, column in (
+        ("sodk", "sodk"), ("ten", "ten"), ("loai", "loai"),
+        ("loai_thau", "loai_thau"), ("duongdung", "duongdung"), ("nuocsx", "nuocsx"),
+        ("nhasx", "json_extract(raw,'$.nhasx')"),
+        ("ma_cskcb", "json_extract(raw,'$.ma_cskcb')"),
+        ("ten_cskcb", "json_extract(raw,'$.ten_cskcb')"),
+        ("tennhathau", "json_extract(raw,'$.tennhathau')"),
+        ("hamluong", "json_extract(raw,'$.hamluong')"),
+        ("donvitinh", "json_extract(raw,'$.donvitinh')"),
+    ):
+        raw = filters.get(field)
+        values = raw if isinstance(raw, (list, tuple)) else ([raw] if str(raw or "").strip() else [])
+        parts = []
+        for value in values:
+            needle = fold(value)
+            if needle:
+                parts.append(f"fold(coalesce({column},'')) LIKE ?")
+                args.append(f"%{needle}%")
+        if parts:
+            clauses.append("(" + " OR ".join(parts) + ")")
+    if filters.get("tuNgay"):
+        clauses.append("coalesce(tungay_hd,'') >= ?")
+        args.append(str(filters["tuNgay"])[:10])
+    if filters.get("denNgay"):
+        clauses.append("coalesce(denngay_hd,'') <= ?")
+        args.append(str(filters["denNgay"])[:10] + " 23:59:59")
+    years = filters.get("nam") or []
+    if isinstance(years, (str, int)):
+        years = [years] if str(years).strip() else []
+    year_parts = []
+    for value in years:
+        try:
+            year = int(str(value).strip())
+        except (TypeError, ValueError):
+            continue
+        y = str(year)
+        year_parts.append("(nam = ? OR coalesce(tungay_hd,'') LIKE ? OR (tungay_hd <= ? AND denngay_hd >= ?) OR coalesce(json_extract(raw,'$.congbo'),'') LIKE ?)")
+        args.extend([year, f"{y}%", f"{y}-12-31", f"{y}-01-01", f"{y}%"])
+    if year_parts:
+        clauses.append("(" + " OR ".join(year_parts) + ")")
     return " WHERE " + " AND ".join(clauses), args
 
 
@@ -691,6 +740,8 @@ def _attach_vss_ingredients(dots, filters, start, end):
 
 def vss_facility_ingredients(body: dict) -> dict:
     """Return the small right-panel list for one selected VSS facility only."""
+    if str(body.get("source") or "").lower() == "msc_prices":
+        return _msc_price_buyer_ingredients(body)
     dot_id = str(body.get("dotId") or "")
     if ":" not in dot_id or not VSS_DB.exists():
         return {"dotId": dot_id, "ingredients": []}
@@ -718,6 +769,53 @@ def vss_facility_ingredients(body: dict) -> dict:
         ).fetchall()
     finally:
         con.close()
+    return {"dotId": dot_id, "ingredients": rank_ingredients(rows, 15), "months": months}
+
+
+def _price_filters(filters: dict) -> dict:
+    mapped = dict(filters)
+    mapped["ingredient"] = filters.get("hoatchat") or filters.get("ingredient") or ""
+    mapped["q"] = filters.get("q") or ""
+    # Group names vary in spelling; filter normalized group numbers after aggregation.
+    mapped.pop("group_name", None)
+    mapped.pop("province", None)
+    mapped.pop("buyer", None)
+    return mapped
+
+
+def _msc_price_buyer_ingredients(body: dict) -> dict:
+    dot_id = str(body.get("dotId") or "")
+    parts = dot_id.split(":", 2)
+    code = str(body.get("provinceCode") or (parts[1] if len(parts) > 1 else "")).zfill(2)
+    buyer = str(body.get("buyer") or (parts[2] if len(parts) > 2 else "")).strip()
+    if not buyer or not MSC_DB.exists():
+        return {"dotId": dot_id, "ingredients": [], "months": 12}
+    from .msc import search_where
+    filters = body.get("filters") if isinstance(body.get("filters"), dict) else {}
+    months, now, start, _prev_from, _prev_end = _window(int(body.get("months") or 12))
+    with sqlite3.connect(f"file:{MSC_DB}?mode=ro", uri=True) as lookup:
+        indexed = lookup.execute("SELECT 1 FROM sqlite_master WHERE name='records_search_fts'").fetchone() is not None
+    clauses, args = search_where("prices", _price_filters(filters), indexed=indexed)
+    clauses.extend([
+        "metric_day(json_extract(normalized, '$.published')) >= ?",
+        "metric_day(json_extract(normalized, '$.published')) <= ?",
+        "json_extract(normalized, '$.buyer') = ?",
+    ])
+    args.extend([start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"), buyer])
+    group_need = _group_set(filters)
+    with sqlite3.connect(f"file:{MSC_DB}?mode=ro", uri=True) as con:
+        con.create_function("fold", 1, fold, deterministic=True)
+        con.create_function("metric_num", 1, _num, deterministic=True)
+        con.create_function("metric_day", 1, lambda v: _parse_dt(v).date().isoformat() if _parse_dt(v) else None, deterministic=True)
+        rows = con.execute("""
+          SELECT coalesce(json_extract(normalized, '$.province'), ''),
+                 coalesce(json_extract(normalized, '$.ingredient'), ''),
+                 coalesce(json_extract(normalized, '$.group_name'), ''),
+                 SUM(metric_num(json_extract(normalized, '$.quantity')) * metric_num(json_extract(normalized, '$.unit_price'))),
+                 SUM(metric_num(json_extract(normalized, '$.quantity')))
+            FROM records WHERE """ + " AND ".join(clauses) + " GROUP BY 1,2,3", args).fetchall()
+    rows = [(name, value, quantity) for raw_province, name, group, value, quantity in rows
+            if resolve_province(raw_province)[0] == code and (not group_need or _group(group) in group_need)]
     return {"dotId": dot_id, "ingredients": rank_ingredients(rows, 15), "months": months}
 
 
@@ -873,8 +971,9 @@ def _build_msc(filters: dict, months: int, *, with_ingredients: bool = True) -> 
             if buyer:
                 bucket["_facilities"].add(fold(buyer))
     named = [_finalize(bucket, keys) for bucket in buckets.values()]
+    opening_meta = {}
     _kept, matched, allowed_tenders, tender_meta, packages, package_areas, package_total = _msc_dots(
-        now, cur_from, province_codes, region_name, status_need, query, needle, ingredient_ids, group_ids,
+        now, cur_from, province_codes, region_name, status_need, query, needle, ingredient_ids, group_ids, opening_meta,
     )
     if status_need:
         ingredient_pairs = [row for row in ingredient_pairs if row[4] in allowed_tenders]
@@ -908,7 +1007,7 @@ def _build_msc(filters: dict, months: int, *, with_ingredients: bool = True) -> 
         title = "Hoạt chất theo đơn giá trúng"
         note = "Gói thầu không tách giá gói theo hoạt chất. Giá trị = số lượng × đơn giá trúng đã tải."
         value_label, qty_label = "SL × đơn giá", "Số lượng"
-    provinces = _package_provinces(named, tender_meta, keys)
+    provinces = _package_provinces(named, tender_meta, keys, opening_meta)
     provinces.sort(key=lambda row: row["value"], reverse=True)
     regions = [
         _rollup([row for row in provinces if row["region"] == name], keys, code=name, name=name, region=name)
@@ -916,8 +1015,14 @@ def _build_msc(filters: dict, months: int, *, with_ingredients: bool = True) -> 
         if not region_name or name == region_name
     ]
     summary = _rollup(provinces, keys, code="", name="Bộ lọc hiện tại", region=region_name)
+    if not province_codes and not region_name:
+        counts = {point["key"]: point["value"] for point in summary["countTrend"]}
+        for meta in opening_meta.values():
+            month = _month_of(meta.get("open_date"))
+            if not meta.get("code") and month in counts:
+                counts[month] += 1
+        summary["countTrend"] = _count_points(keys, counts)
     lists = area_ingredient_lists(price_rows + scope_rows) if with_ingredients else {"national": [], "areas": {}}
-    trend_label = msc_trend_label(status_need)
     return _payload(
         "msc", months, summary, provinces, regions, investors, investor_total, lists,
         title=title,
@@ -928,7 +1033,122 @@ def _build_msc(filters: dict, months: int, *, with_ingredients: bool = True) -> 
         packages=packages,
         package_areas=package_areas,
         package_total=package_total,
-        trend_label=trend_label,
+        trend_label="Số gói theo tháng",
+        trend_metric="packages",
+    )
+
+
+def _price_fact_query(filters: dict, start, end, select: str, group_by: str):
+    if not MSC_DB.exists():
+        return []
+    from .msc import search_where
+    with sqlite3.connect(f"file:{MSC_DB}?mode=ro", uri=True) as lookup:
+        indexed = lookup.execute("SELECT 1 FROM sqlite_master WHERE name='records_search_fts'").fetchone() is not None
+    clauses, args = search_where("prices", _price_filters(filters), indexed=indexed)
+    clauses.extend([
+        "metric_day(json_extract(normalized, '$.published')) >= ?",
+        "metric_day(json_extract(normalized, '$.published')) <= ?",
+    ])
+    args.extend([start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")])
+    with sqlite3.connect(f"file:{MSC_DB}?mode=ro", uri=True) as con:
+        con.create_function("fold", 1, fold, deterministic=True)
+        con.create_function("metric_num", 1, _num, deterministic=True)
+        con.create_function("metric_day", 1, lambda v: _parse_dt(v).date().isoformat() if _parse_dt(v) else None, deterministic=True)
+        return con.execute(
+            f"SELECT {select} FROM records WHERE " + " AND ".join(clauses) + f" GROUP BY {group_by}", args,
+        ).fetchall()
+
+
+def _build_msc_prices(filters: dict, months: int, *, with_dots: bool = True, with_ingredients: bool = True) -> dict:
+    months, now, cur_from, prev_from, prev_end = _window(months)
+    keys = _month_keys(cur_from, now)
+    codes = _code_set(filters)
+    region_name = str(filters.get("region") or "").strip()
+    group_need = _group_set(filters)
+    price_filters = _price_filters(filters)
+    buckets = _seed_buckets(codes, region_name)
+    for row in _price_aggregates(price_filters, prev_from, now):
+        stamp = _parse_dt(row.get("published"))
+        current = _in_span(stamp, cur_from, now)
+        previous = _in_span(stamp, prev_from, prev_end)
+        if not current and not previous:
+            continue
+        code, label = resolve_province(row.get("province") or "")
+        if not code or (codes and code not in codes) or (region_name and region_of(code) != region_name):
+            continue
+        group = _group(row.get("group_name"))
+        if group_need and group not in group_need:
+            continue
+        bucket = buckets.setdefault(code, _blank(code, label))
+        if label:
+            bucket["name"] = label
+        _add_amount(bucket, stamp, _num(row.get("revenue")), int(row.get("cnt") or 0), group, current, previous)
+
+    marker_rows = _price_fact_query(
+        price_filters, cur_from, now,
+        "json_extract(normalized, '$.buyer'), json_extract(normalized, '$.province'), "
+        "json_extract(normalized, '$.group_name'), "
+        "SUM(metric_num(json_extract(normalized, '$.quantity')) * metric_num(json_extract(normalized, '$.unit_price'))), COUNT(*)",
+        "1,2,3",
+    ) if with_dots else []
+    grouped_buyers = {}
+    for buyer, province, raw_group, value, lots in marker_rows:
+        buyer = str(buyer or "").strip()
+        code, label = resolve_province(province or "")
+        group = _group(raw_group)
+        if not buyer or not code or (codes and code not in codes) or (region_name and region_of(code) != region_name):
+            continue
+        if group_need and group not in group_need:
+            continue
+        slot = grouped_buyers.setdefault((code, buyer), {"value": 0.0, "lots": 0, "province": label})
+        slot["value"] += _num(value)
+        slot["lots"] += int(lots or 0)
+        buckets[code]["_facilities"].add(fold(buyer))
+    buyers = [
+        {"id": f"msc-price:{code}:{buyer}", "kind": "price_buyer", "name": buyer,
+         "buyer": buyer, "province": slot["province"], "provinceCode": code,
+         "region": region_of(code), "district": "", "precision": "province",
+         "placeNote": "Mức tỉnh, tổng giá trị = đơn giá × số lượng trúng thầu.",
+         "value": slot["value"], "lots": slot["lots"], "ingredients": []}
+        for (code, buyer), slot in sorted(grouped_buyers.items(), key=lambda item: item[1]["value"], reverse=True)
+    ]
+    package_total = len(buyers)
+    buyers = buyers[:120]
+    package_areas = {}
+    for buyer in buyers:
+        package_areas.setdefault(buyer["provinceCode"], []).append(buyer)
+    for rows in package_areas.values():
+        del rows[40:]
+
+    provinces = [_finalize(bucket, keys) for bucket in buckets.values()]
+    provinces.sort(key=lambda row: row["value"], reverse=True)
+    regions = [
+        _rollup([row for row in provinces if row["region"] == name], keys, code=name, name=name, region=name)
+        for name in REGION_ORDER if not region_name or name == region_name
+    ]
+    summary = _rollup(provinces, keys, code="", name="Bộ lọc hiện tại", region=region_name)
+    coded_pairs = []
+    if with_ingredients:
+        ingredient_rows = _price_fact_query(
+            price_filters, cur_from, now,
+            "json_extract(normalized, '$.province'), json_extract(normalized, '$.group_name'), "
+            "json_extract(normalized, '$.ingredient'), "
+            "SUM(metric_num(json_extract(normalized, '$.quantity')) * metric_num(json_extract(normalized, '$.unit_price'))), "
+            "SUM(metric_num(json_extract(normalized, '$.quantity'))) ",
+            "1,2,3",
+        )
+        for province, raw_group, ingredient, value, quantity in ingredient_rows:
+            code, _label = resolve_province(province or "")
+            group = _group(raw_group)
+            if code and (not codes or code in codes) and (not region_name or region_of(code) == region_name) \
+                    and (not group_need or group in group_need):
+                coded_pairs.append((code, ingredient, value, quantity))
+    lists = area_ingredient_lists(coded_pairs) if with_ingredients else {"national": [], "areas": {}}
+    return _payload(
+        "msc_prices", months, summary, provinces, regions, [], package_total, lists,
+        title="Hoạt chất theo đơn giá", note="Giá trị = đơn giá trúng × số lượng trong 12 tháng gần nhất.",
+        value_label="Giá trị", qty_label="Số lượng", packages=buyers,
+        package_areas=package_areas, package_total=package_total, trend_label="Giá trị đơn giá mỗi tháng",
     )
 
 
@@ -939,21 +1159,31 @@ def msc_trend_label(status_need: str) -> str:
     return "Giá trị gói trong tháng"
 
 
+def _count_points(keys: list[str], counts: dict) -> list[dict]:
+    previous = None
+    points = []
+    for key in keys:
+        value = int(counts.get(key) or 0)
+        points.append({"key": key, "value": value, "delta": None if previous is None else value - previous})
+        previous = value
+    return points
+
+
 def _value_trend(month_values: dict, keys: list[str]) -> list[dict]:
     amounts = month_values or {}
     return [{"key": key, "value": float(amounts.get(key) or 0)} for key in keys]
 
 
-def _package_provinces(named: list[dict], tender_meta: dict, keys: list[str]) -> list[dict]:
-    """Map and side cards follow the packages in the current status filter.
+def _package_provinces(named: list[dict], tender_meta: dict, keys: list[str], opening_meta=None) -> list[dict]:
+    """Amounts follow the status filter; opening counts include all statuses.
 
-    Each month in the 12-month series is the sum of giá gói published
-    in that month. The set is whatever tender_meta already kept
-    (status, province, region, ingredient, group, buyer).
+    The opening series uses the source opening date, never publication date.
+    Province, ingredient, group and buyer filters still apply to both series.
     """
     by_code: dict[str, dict] = {}
+    monthly_ids: dict[str, dict[str, set[str]]] = {}
     allowed = set(keys)
-    for meta in tender_meta.values():
+    for package_key, meta in tender_meta.items():
         code = str(meta.get("code") or "").strip()
         if not code:
             continue
@@ -971,6 +1201,12 @@ def _package_provinces(named: list[dict], tender_meta: dict, keys: list[str]) ->
                 break
         if month:
             slot["months"][month] = float(slot["months"].get(month) or 0) + _num(meta.get("value"))
+    for package_key, meta in (opening_meta if opening_meta is not None else tender_meta).items():
+        month = _month_of(meta.get("open_date"))
+        code = str(meta.get("code") or "")
+        tender_id = str(meta.get("tender_no") or meta.get("source_id") or package_key).strip()
+        if code and tender_id and month in allowed:
+            monthly_ids.setdefault(code, {}).setdefault(month, set()).add(tender_id)
     empty_trend = [{"key": key, "value": 0} for key in keys]
     out = []
     for row in named:
@@ -985,10 +1221,12 @@ def _package_provinces(named: list[dict], tender_meta: dict, keys: list[str]) ->
                 "facilities": 0,
                 "activeMonths": 0,
                 "trend": empty_trend,
+                "countTrend": _count_points(keys, {key: len(monthly_ids.get(row["code"], {}).get(key, set())) for key in keys}),
                 "groups": [0.0, 0.0, 0.0, 0.0, 0.0],
             })
             continue
         trend = _value_trend(slot["months"], keys)
+        count_trend = _count_points(keys, {key: len(monthly_ids.get(row["code"], {}).get(key, set())) for key in keys})
         out.append({
             **row,
             "value": slot["value"],
@@ -998,6 +1236,7 @@ def _package_provinces(named: list[dict], tender_meta: dict, keys: list[str]) ->
             "facilities": len(slot["buyers"]),
             "activeMonths": sum(1 for point in trend if point["value"] > 0),
             "trend": trend,
+            "countTrend": count_trend,
             "groups": [0.0, 0.0, 0.0, 0.0, 0.0],
         })
     return out
@@ -1061,7 +1300,7 @@ def _investor_directory(tender_meta: dict, price_pairs, scope_detailed):
         rows.sort(key=lambda item: item["value"], reverse=True)
         del rows[20:]
     national = sorted(made, key=lambda item: item["value"], reverse=True)[:120]
-    return national, area, len(made)
+    return national, area, len({str(dot.get("tenderNo") or dot.get("id") or "") for dot in made})
 
 
 def _scope_ingredient_pairs(tender_meta: dict, needle: str) -> list[tuple]:
@@ -1143,7 +1382,7 @@ def _package_directory(grouped: dict):
     return national, area, len(made)
 
 
-def _msc_dots(now, window_start, province_codes, region_name, status_need, query, needle, ingredient_ids, group_ids):
+def _msc_dots(now, window_start, province_codes, region_name, status_need, query, needle, ingredient_ids, group_ids, opening_meta=None):
     if not MSC_DB.exists():
         return [], 0, set(), {}, [], {}, 0
     con = sqlite3.connect(f"file:{MSC_DB}?mode=ro", uri=True)
@@ -1165,7 +1404,8 @@ def _msc_dots(now, window_start, province_codes, region_name, status_need, query
                    json_extract(raw,'$.winningCode'),
                    json_extract(raw,'$.bidWinningPrice'),
                    json_extract(raw,'$.locations'),
-                   json_extract(raw,'$.procuringEntityName')
+                   json_extract(raw,'$.procuringEntityName'),
+                   coalesce(nullif(json_extract(raw,'$.bidOpenDate'), ''), json_extract(normalized,'$.open_date'))
             FROM records WHERE kind='tenders'
             """
         ).fetchall()
@@ -1175,14 +1415,13 @@ def _msc_dots(now, window_start, province_codes, region_name, status_need, query
     match_cache = load_cache()
     grouped = {"open": [], "review": [], "closed": []}
     tender_meta = {}
+    seen_packages = set()
     for row in rows:
         (tender_no, name, buyer, province, published, close_raw, status_code,
          bid_price, bid_form, source_url, source_id, winner, winner_code, winner_price,
-         locations, procuring) = row
+         locations, procuring, open_raw) = row
         winner_name = text_name(winner)
         kind = classify_package(status_code, close_raw, now, window_start, winner_name or winner_code or "")
-        if not keep_for_status(kind, status_need):
-            continue
         tender_no = str(tender_no or "").strip()
         if group_ids is not None and tender_no not in group_ids:
             continue
@@ -1200,13 +1439,24 @@ def _msc_dots(now, window_start, province_codes, region_name, status_need, query
         if region_name and region_of(code) != region_name:
             continue
         district = loc.get("district") or ""
-        if tender_no and code:
-            tender_meta[tender_no] = {
+        package_key = tender_no or str(source_id or "").strip()
+        if opening_meta is not None and package_key:
+            opening_meta[package_key] = {"code": code, "tender_no": package_key, "open_date": open_raw or ""}
+        if not keep_for_status(kind, status_need):
+            continue
+        if package_key and package_key in seen_packages:
+            continue
+        seen_packages.add(package_key)
+        if package_key and code:
+            tender_meta[package_key] = {
+                "tender_no": tender_no,
+                "source_id": str(source_id or ""),
                 "code": code,
                 "value": _num(bid_price),
                 "buyer": buyer_name,
                 "published": published or "",
                 "close": close_raw or "",
+                "open_date": open_raw or "",
                 "source_url": str(source_url or ""),
                 "source_id": str(source_id or ""),
             }
@@ -1254,7 +1504,7 @@ def _msc_dots(now, window_start, province_codes, region_name, status_need, query
     return kept, matched, allowed, tender_meta, packages, package_areas, package_total
 
 
-def _payload(source, months, summary, provinces, regions, dots, matched, ingredients, *, title, note, value_label, qty_label, area_dots=None, packages=None, package_areas=None, package_total=0, trend_label="") -> dict:
+def _payload(source, months, summary, provinces, regions, dots, matched, ingredients, *, title, note, value_label, qty_label, area_dots=None, packages=None, package_areas=None, package_total=0, trend_label="", trend_metric="") -> dict:
     return {
         "source": source,
         "months": months,
@@ -1275,29 +1525,40 @@ def _payload(source, months, summary, provinces, regions, dots, matched, ingredi
         "packages": packages or [],
         "packageAreas": package_areas or {},
         "packageTotal": int(package_total or 0),
+        "currentPackageCount": int(package_total or 0),
         "trendLabel": trend_label or "",
+        "trendMetric": trend_metric or "",
     }
 
 
 def map_payload(body: dict) -> dict:
-    source = "msc" if str(body.get("source") or "").lower() == "msc" else "vss"
+    requested = str(body.get("source") or "").lower()
+    source = "msc_prices" if requested == "msc_prices" else ("msc" if requested == "msc" else "vss")
     filters = body.get("filters") or {}
     if not isinstance(filters, dict):
         filters = {}
     months = int(body.get("months") or 12)
     with_dots = body.get("dots", True) is not False
     with_ingredients = body.get("ingredients", True) is not False
+    db_path = VSS_DB if source == "vss" else MSC_DB
+    stamps = tuple(
+        (path.stat().st_mtime_ns, path.stat().st_size) if path.exists() else None
+        for path in (db_path, type(db_path)(str(db_path) + "-wal"), *([_HEAT] if source == "vss" else []))
+    )
     key = json.dumps({
         "source": source,
         "months": months,
         "filters": filters,
         "dots": with_dots,
         "ingredients": with_ingredients,
+        "db": stamps,
     }, sort_keys=True, ensure_ascii=False, default=str)
     now = time.time()
     if _MEMO["key"] == key and _MEMO["payload"] is not None and now - _MEMO["at"] < 90:
         return _MEMO["payload"]
-    if source == "msc":
+    if source == "msc_prices":
+        payload = _build_msc_prices(filters, months, with_dots=with_dots, with_ingredients=with_ingredients)
+    elif source == "msc":
         payload = _build_msc(filters, months, with_ingredients=with_ingredients)
         if not with_dots:
             payload = {**payload, "dots": [], "dotTotal": 0, "truncated": False}

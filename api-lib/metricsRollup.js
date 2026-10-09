@@ -261,7 +261,7 @@ export function shapeVss(rows, year, facility = null) {
   }
 }
 
-function shapeDav(countRow, tagRows, density, forms, news) {
+export function shapeDav(countRow, tagRows, density, forms, news) {
   const total = num(countRow?.cnt)
   const tags = { xanh: 0, vang: 0, cam: 0, xam: 0 }
   for (const row of tagRows || []) {

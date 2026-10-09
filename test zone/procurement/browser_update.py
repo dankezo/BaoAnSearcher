@@ -284,20 +284,25 @@ def run_price_pages(adapter,date_from,date_to,pages=20,full_scan=False):
     from sync import Downloader
     loader=Downloader(report=adapter.report,api=BrowserPriceApi(adapter),delay=.75,page_size=50)
     loader.stop=adapter.stop
-    loader.run(date_from,date_to,refresh=True,max_pages=None if full_scan else pages,full_scan=full_scan)
+    loader.run(date_from,date_to,refresh=True,max_pages=None if full_scan else pages,full_scan=full_scan,incremental=not full_scan)
 
-def run_pages(adapter,pages,stop,report,db=None,resume=False,recheck=True):
+def run_pages(adapter,pages,stop,report,db=None,resume=False,recheck=True,incremental=False):
     if not 1<=pages<=200:raise ValueError('Số trang phải từ 1 đến 200.')
     with connect(db) as con:
+        con.execute('CREATE TABLE IF NOT EXISTS browser_checked(tender_no TEXT PRIMARY KEY,checked_at TEXT NOT NULL)')
+        checkpoint=con.execute("SELECT MAX(updated) FROM browser_runs WHERE status='complete'").fetchone()[0]
+        cutoff=date.fromisoformat(checkpoint[:10])-timedelta(days=2) if checkpoint else date.today()-timedelta(days=2)
         previous=con.execute("SELECT * FROM browser_runs WHERE status IN ('running','paused') AND pages=? ORDER BY updated DESC LIMIT 1",(pages,)).fetchone() if resume else None
         run_id=previous['id'] if previous else uuid.uuid4().hex
         start=previous['next_page'] if previous else 0
         if previous:con.execute("UPDATE browser_runs SET status='running',updated=? WHERE id=?",(now(),run_id))
         else:con.execute('INSERT INTO browser_runs VALUES(?,?,0,?,?)',(run_id,pages,'running',now()))
     try:
+        reached_boundary=False
+        last_date=None
         for page_no in range(start,pages):
             if stop.is_set():raise Stopped()
-            report(f'Đang tải trang {page_no+1}/{pages} · 50 gói/trang…')
+            report(f'Đang tải trang {page_no+1} · từ mốc {cutoff} · 50 gói/trang…' if incremental else f'Đang tải trang {page_no+1}/{pages} · 50 gói/trang…')
             data=adapter.fetch(payload(page_no))
             rows=data['content']
             current=data.get('currentPage',data.get('number'))
@@ -306,22 +311,37 @@ def run_pages(adapter,pages,stop,report,db=None,resume=False,recheck=True):
             if int(data.get('pageSize',0))!=50:raise ValueError(f'Nguồn trả {int(data.get("pageSize",0))} gói/trang thay vì 50; đã dừng để tránh bỏ sót trang.')
             if not rows:
                 if page_no<total_pages:raise ValueError('Nguồn trả trang trống trong phạm vi còn dữ liệu. Hãy tải tiếp sau.')
+                reached_boundary=True
                 break
             if len(rows)>50 or any(r.get('isMedicine') not in (1,'1',True) for r in rows):raise ValueError('Phản hồi không đúng bộ lọc thuốc; đã dừng.')
             codes={tender_key(r.get('notifyNo') or r.get('notifyNoStand')) for r in rows}
+            dates=[]
+            if incremental:
+                for row in rows:
+                    try:published=date.fromisoformat(row['publicDate'][:10])
+                    except (KeyError,TypeError,ValueError):raise ValueError('Thiếu ngày công bố; chưa xác nhận đủ cửa sổ cập nhật.')
+                    if last_date and published>last_date:raise ValueError('Nguồn không xếp ngày mới nhất trước; chưa xác nhận đủ cửa sổ cập nhật.')
+                    dates.append(published);last_date=published
             with connect(db) as con:
                 seen={r[0] for r in con.execute('SELECT tender_no FROM browser_seen WHERE run_id=?',(run_id,))}
                 if codes and codes<=seen:raise ValueError('Nguồn lặp lại trang đã tải. Đã giữ tiến độ; thử tải tiếp sau.')
-                save_records(con,'tenders',rows)
+                save_records(con,'tenders',rows,only_changed=incremental)
+                con.executemany('INSERT OR REPLACE INTO browser_checked VALUES(?,?)',[(c,now()) for c in codes if c])
                 con.executemany('INSERT OR IGNORE INTO browser_seen VALUES(?,?)',[(run_id,c) for c in codes if c])
                 con.execute('UPDATE browser_runs SET next_page=?,updated=? WHERE id=?',(page_no+1,now(),run_id))
-            report(f'Đã lưu trang {page_no+1}/{min(pages,total_pages or pages)} · {len(seen|codes):,} mã gói trong lượt này')
-            if page_no+1>=total_pages and total_pages:break
+            report(f'Đã kiểm tra trang {page_no+1} · {len(seen|codes):,} mã gói trong lượt này' if incremental else f'Đã lưu trang {page_no+1}/{min(pages,total_pages or pages)} · {len(seen|codes):,} mã gói trong lượt này')
+            if (page_no+1>=total_pages and total_pages) or (incremental and all(d<cutoff for d in dates)):
+                reached_boundary=True
+                break
             if stop.wait(1):raise Stopped()
+        if incremental and not reached_boundary:
+            raise RuntimeError('Đã chạm giới hạn an toàn nhưng chưa tới mốc cập nhật; dữ liệu đã lưu, lượt này chưa hoàn tất.')
         if recheck:
-            with connect(db) as con:seen={r[0] for r in con.execute('SELECT tender_no FROM browser_seen WHERE run_id=?',(run_id,))}
+            with connect(db) as con:
+                seen={r[0] for r in con.execute('SELECT tender_no FROM browser_seen WHERE run_id=?',(run_id,))}
+                checked={r[0] for r in con.execute('SELECT tender_no FROM browser_checked WHERE checked_at>=?',(date.today().isoformat(),))} if incremental else set()
             _,records=search('tenders',size=1000000,db=db)
-            pending=[r for r in records if r.get('state') in ('open','awaiting','reviewing') and r.get('tender_no') and r['tender_no'] not in seen]
+            pending=[r for r in records if r.get('state') in ('open','awaiting','reviewing') and r.get('tender_no') and r['tender_no'] not in seen|checked]
             missing=0
             for i,obj in enumerate(pending):
                 if stop.is_set():raise Stopped()
@@ -329,15 +349,17 @@ def run_pages(adapter,pages,stop,report,db=None,resume=False,recheck=True):
                 result=adapter.fetch(payload(0,obj['tender_no']))
                 rows=[r for r in result['content'] if tender_key(r.get('notifyNo') or r.get('notifyNoStand'))==obj['tender_no']]
                 if rows:
-                    with connect(db) as con:save_records(con,'tenders',rows)
+                    with connect(db) as con:
+                        save_records(con,'tenders',rows,only_changed=incremental)
+                        con.execute('INSERT OR REPLACE INTO browser_checked VALUES(?,?)',(obj['tender_no'],now()))
                 else:missing+=1
                 if stop.wait(1):raise Stopped()
-            if missing:report(f'{missing} gói cũ không tìm thấy trong lần kiểm tra; giữ dữ liệu cũ, không tự đánh dấu đã có kết quả.')
+            if missing:raise RuntimeError(f'{missing} gói cũ chưa tìm thấy; giữ dữ liệu cũ và chưa xác nhận lượt cập nhật hoàn tất.')
         with connect(db) as con:
             con.execute("UPDATE browser_runs SET status='complete',updated=? WHERE id=?",(now(),run_id))
             con.execute("UPDATE browser_runs SET status='superseded' WHERE pages=? AND id!=? AND status IN ('running','paused')",(pages,run_id))
             done=con.execute('SELECT next_page FROM browser_runs WHERE id=?',(run_id,)).fetchone()[0]
-        report(f'Hoàn tất {done} trang trong phạm vi đã chọn. Đây là cửa sổ kết quả của nguồn, không phải toàn bộ lịch sử.')
+        report(f'Hoàn tất {done} trang từ mốc {cutoff} và kiểm tra gói đang hoạt động.' if incremental else f'Hoàn tất {done} trang trong phạm vi đã chọn. Đây là cửa sổ kết quả của nguồn, không phải toàn bộ lịch sử.')
     except BaseException:
         with connect(db) as con:con.execute("UPDATE browser_runs SET status='paused',updated=? WHERE id=?",(now(),run_id))
         raise
@@ -376,11 +398,11 @@ class BrowserUpdater:
                 if job is None:break
                 try:
                     if job[0]=='prices':
-                        mode='Quét tổng thể đơn giá bằng trình duyệt…' if job[4] else f'Đang cập nhật {job[3]} trang đơn giá bằng trình duyệt…'
+                        mode='Quét tổng thể đơn giá bằng trình duyệt…' if job[4] else 'Đang cập nhật đơn giá từ mốc hoàn tất, quét chồng 3 ngày…'
                         self.report(mode)
                         run_price_pages(adapter,job[1],job[2],job[3],job[4])
                     else:
-                        run_pages(adapter,job[1],self.stop,self.report,resume=job[2],recheck=job[3])
+                        run_pages(adapter,job[1],self.stop,self.report,resume=job[2],recheck=job[3],incremental=True)
                         if self.after and not self.stop.is_set():
                             self.report('Đang tải hồ sơ các gói đang mở trong cùng phiên đăng nhập…')
                             self.after(adapter.page, self.report, self.stop)

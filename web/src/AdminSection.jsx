@@ -51,7 +51,7 @@ function DataRegistryHub({ registry, loading, error, downloading, onOpen, onDown
       <header className="data-registry-head">
         <div>
           <span className="kicker">Data Management Hub</span>
-          <h1 id="data-registry-title">Trung tâm Quản trị Dữ liệu</h1>
+          <h1 id="data-registry-title">Trung tâm Dữ liệu Dữ liệu</h1>
           <p>Giám sát 4 nguồn lõi bằng snapshot metadata. Trang này không tải hay đếm bảng dữ liệu thô.</p>
         </div>
         <div className={`registry-overall ${healthy ? 'healthy' : syncing ? 'syncing' : 'warning'}`}>
@@ -158,12 +158,15 @@ export default function AdminSection({ localMode }) {
   const [showMscPassword, setShowMscPassword] = useState(false)
   const [platform, setPlatform] = useState({ state: 'idle', checks: {}, production: {} })
   const [productionSync, setProductionSync] = useState({ state: 'idle', verified: false })
+  const [cloudCrawl, setCloudCrawl] = useState({ available: false, transfer: {} })
   const [registry, setRegistry] = useState({ datasets: [] })
   const [registryLoading, setRegistryLoading] = useState(true)
   const [registryError, setRegistryError] = useState('')
   const [downloading, setDownloading] = useState('')
   const refreshInFlight = useRef(false)
   const refreshFailures = useRef(0)
+  const transferMonitoring = useRef(false)
+  const transferSeenRunning = useRef(false)
 
   const refresh = async () => {
     if (!localMode || refreshInFlight.current) return { ok: false, running: true }
@@ -235,6 +238,19 @@ export default function AdminSection({ localMode }) {
     }
   }
 
+  const pullCloudData = async () => {
+    const result = await api.cloudCrawlPull()
+    setMsg(result.message || '')
+    if (result.ok) {
+      transferMonitoring.current = true
+      transferSeenRunning.current = false
+      const next = await api.cloudCrawlStatus()
+      setCloudCrawl(next)
+      if (next.transfer?.state === 'running') transferSeenRunning.current = true
+    }
+    return result
+  }
+
   useEffect(() => {
     let stopped = false
     const load = async () => {
@@ -266,14 +282,35 @@ export default function AdminSection({ localMode }) {
       })
     }).catch(() => {})
     refreshPlatform(true)
+    api.cloudCrawlStatus().then((next) => {
+      setCloudCrawl(next)
+      if (next.transfer?.state === 'running') {
+        transferMonitoring.current = true
+        transferSeenRunning.current = true
+      }
+    }).catch(() => {})
     let stopped = false
     let timer = null
     const poll = async () => {
       const result = await refresh()
       refreshPlatform(false)
+      if (transferMonitoring.current) {
+        try {
+          const next = await api.cloudCrawlStatus()
+          setCloudCrawl(next)
+          const state = next.transfer?.state
+          if (state === 'running') transferSeenRunning.current = true
+          if (state === 'error' || (transferSeenRunning.current && state !== 'running')) {
+            transferMonitoring.current = false
+            transferSeenRunning.current = false
+            await refreshRegistry()
+            window.dispatchEvent(new Event('baoan-data-updated'))
+          }
+        } catch { /* keep polling while transfer status is unavailable */ }
+      }
       if (stopped) return
       const delay = result.ok
-        ? (result.running ? 3000 : 12000)
+        ? (result.running || transferMonitoring.current ? 3000 : 12000)
         : Math.min(30000, 2000 * (2 ** Math.min(refreshFailures.current, 4)))
       timer = window.setTimeout(poll, delay)
     }
@@ -321,17 +358,49 @@ export default function AdminSection({ localMode }) {
     <div className="section">
       <header className="section-head">
         <div>
-          <span className="kicker">Quản trị · Local API</span>
-          <h1>Quản trị dữ liệu &amp; crawl</h1>
+          <span className="kicker">Dữ liệu · Local API</span>
+          <h1>Dữ liệu dữ liệu &amp; crawl</h1>
           <p>Theo dõi 3 nguồn dữ liệu, chạy cập nhật có tiến độ, lưu tài khoản MSC để điền sẵn khi mở trình duyệt.</p>
         </div>
       </header>
 
       <ErrorNote>{err}</ErrorNote>
 
+      <div className="panel pad" style={{ marginBottom: 12 }}>
+        <div className="toolbar-title" style={{ marginBottom: 6 }}>
+          <span className="kicker">Cloud → máy local</span>
+          <h2>Tải dữ liệu production về máy này</h2>
+        </div>
+        <p className="muted" style={{ margin: '0 0 10px' }}>
+          Nhập DAV, MSC (đơn giá, gói thầu và hồ sơ gói) cùng VSS từ TiDB vào SQLite local; dữ liệu hiện có được giữ lại. DAV không có trong lượt crawl cloud thì được báo riêng.
+        </p>
+        <button type="button" className="btn" disabled={cloudCrawl.transfer?.state === 'running' || transferMonitoring.current} onClick={run(pullCloudData)}>
+          {cloudCrawl.transfer?.state === 'running' || transferMonitoring.current ? 'Đang tải dữ liệu…' : 'Tải dữ liệu production về máy này'}
+        </button>
+        {cloudCrawl.transfer?.message && <p className={`muted small${cloudCrawl.transfer?.counts?._errors?.length ? ' error' : ''}`} role="status" style={{ marginBottom: 0 }}>
+          {cloudCrawl.transfer?.counts?._errors?.length ? 'Tải chưa đầy đủ; xem các bảng bị lỗi bên dưới.' : cloudCrawl.transfer.message}
+        </p>}
+        {cloudCrawl.transfer?.counts?.completedAt && <p className="muted small" style={{ marginBottom: 0 }}>Lần tải gần nhất: {cloudCrawl.transfer.counts.completedAt}</p>}
+        {cloudCrawl.transfer?.counts && <p className="muted small" style={{ marginBottom: 0 }}>
+          {Object.entries(cloudCrawl.transfer.counts).filter(([key, value]) => key !== '_errors' && key !== 'completedAt' && typeof value === 'number').map(([key, value]) => `${key}: ${Number(value).toLocaleString('vi-VN')}`).join(' · ')}
+        </p>}
+        {!!cloudCrawl.transfer?.counts?._errors?.length && <ul className="admin-msg error" role="alert" style={{ marginBottom: 0 }}>
+          {cloudCrawl.transfer.counts._errors.map((failure) => <li key={failure}>{failure}</li>)}
+        </ul>}
+      </div>
+
       <DataRegistryHub registry={registry} loading={registryLoading} error={registryError} downloading={downloading} onOpen={openDataset} onDownload={downloadDataset} onRefresh={refreshRegistry} />
 
       <div className="admin-grid">
+        <StatusCard index="Cloud" title="Tự cập nhật trên cloud" source="GitHub Actions → TiDB" status={{ state: cloudCrawl.run?.status === 'in_progress' ? 'running' : cloudCrawl.run?.conclusion === 'failure' ? 'error' : 'idle', message: cloudCrawl.available ? `${cloudCrawl.enabled ? 'Đang bật' : 'Đang tắt'} · ${cloudCrawl.schedule}` : 'Chưa kết nối lịch cloud' }}>
+          <p className="muted small">Cloud crawler tự cập nhật MSC lúc 05:17 hằng ngày khi máy local tắt. TiDB là kho production; nút đồng bộ phía trên nhập các bảng DAV, MSC và VSS đang có trong TiDB về máy local.</p>
+          <button type="button" className="btn" disabled={!cloudCrawl.available} onClick={run(async () => { const result = await api.cloudCrawlControl(cloudCrawl.enabled ? 'disable' : 'enable'); setMsg(result.message); setCloudCrawl(await api.cloudCrawlStatus()); return result })}>{cloudCrawl.enabled ? 'Tắt tự cập nhật cloud' : 'Bật tự cập nhật cloud'}</button>
+          <button type="button" className="btn secondary" disabled={!cloudCrawl.available} onClick={run(async () => { const result = await api.cloudCrawlControl('run'); setMsg(result.message); setCloudCrawl(await api.cloudCrawlStatus()); return result })}>Chạy cloud ngay</button>
+          <button type="button" className="btn secondary" disabled={cloudCrawl.transfer?.state === 'running' || transferMonitoring.current} onClick={run(pullCloudData)}>Tải DAV + MSC + VSS về local</button>
+          <button type="button" className="btn ghost" onClick={run(async () => { setCloudCrawl(await api.cloudCrawlStatus()); return { ok: true } })}>Kiểm tra cloud</button>
+          {cloudCrawl.run?.html_url && <a href={cloudCrawl.run.html_url} target="_blank" rel="noreferrer">Xem lượt chạy gần nhất ↗</a>}
+          {cloudCrawl.transfer?.message && <p className="muted small" role="status">{cloudCrawl.transfer.message}</p>}
+        </StatusCard>
         <StatusCard index="01" title="DAV — Đăng ký thuốc" source="dichvucong.dav.gov.vn" status={status.dav}>
           <button type="button" className="btn" onClick={run(() => api.davCrawl({}))}>Tải cập nhật</button>
           <button type="button" className="btn secondary" onClick={run(() => api.davCrawl({ restart: true }))}>Từ đầu</button>
@@ -356,9 +425,9 @@ export default function AdminSection({ localMode }) {
             type="button"
             className="btn"
             disabled={!mscDates.from || !mscDates.to}
-            onClick={run(() => api.mscPricesBrowser({ dateFrom: mscDates.from, dateTo: mscDates.to, maxPages: 20 }))}
+            onClick={run(() => api.mscPricesBrowser({ dateFrom: mscDates.from, dateTo: mscDates.to }))}
           >
-            Cập nhật hằng ngày · 20 trang × 50 / nhóm (browser)
+            Cập nhật đơn giá mới / thay đổi (browser)
           </button>
           <button
             type="button"
@@ -384,10 +453,10 @@ export default function AdminSection({ localMode }) {
           >
             Quét đủ khoảng đã chọn
           </button>
-          <button type="button" className="btn secondary" onClick={run(() => api.mscTenders({ pages: 20 }))}>
-            Crawl gói thầu (browser)
+          <button type="button" className="btn secondary" onClick={run(() => api.mscTenders({ pages: 200 }))}>
+            Cập nhật gói mới / đang hoạt động (browser)
           </button>
-          <p className="muted small">Trình duyệt mở phiên MSC bình thường rồi lấy 50 dòng/trang. Lượt hằng ngày lấy 20 trang cho mỗi nhóm thuốc; quét đủ dùng Export trong chính phiên đó và chỉ xác nhận khi số dòng/ID khớp. Số tổng trên website nguồn có thể gồm cả trước 2024: dùng “toàn bộ lịch sử” khi cần đối chiếu con số đó. Nếu được hỏi, xác nhận captcha trong cửa sổ MSC.</p>
+          <p className="muted small">Cập nhật từ mốc lần hoàn tất, quét chồng 3 ngày và chỉ ghi dòng mới / thay đổi. Gói thầu dừng khi qua mốc đó; gói còn mở, chờ kết quả hoặc đang xét được kiểm tra riêng tối đa một lần/ngày. Hồ sơ thuốc tải lại khi thông báo đổi hoặc sau 24 giờ. Đơn giá tải đủ cửa sổ cập nhật cho từng nhóm, không cố lấy 20 trang. Các nút quét tổng thể vẫn dùng Export để đối chiếu lịch sử. Nếu được hỏi, xác nhận captcha trong cửa sổ MSC.</p>
         </StatusCard>
 
         <StatusCard index="02b" title="MSC — Hồ sơ gói đang mở" source="Tải danh mục thuốc từ trang nguồn và đối chiếu Bảo An" status={status.msc_scope}>
@@ -495,8 +564,8 @@ export default function AdminSection({ localMode }) {
               <input value={secrets.vss.cookie} onChange={(e) => setSecrets((s) => ({ ...s, vss: { ...s.vss, cookie: e.target.value } }))} placeholder="JSESSIONID=… hoặc session=…" />
             </Field>
             <Field
-              label="Tự cập nhật hàng ngày"
-                hint="Tin pháp luật từ MOH/DAV/Thư viện Pháp luật; DAV danh mục, MSC 20 trang đơn giá mới nhất, VSS 2 ngày. Chạy khi mở app và đăng nhập máy; mỗi nguồn pháp luật có lịch riêng."
+              label="Tự cập nhật hàng ngày trên máy local"
+                hint="Tin pháp luật từ MOH/DAV/Thư viện Pháp luật; DAV danh mục, MSC gói thầu và đơn giá theo mốc cập nhật, VSS 2 ngày. Chạy khi mở app và đăng nhập máy; mỗi nguồn pháp luật có lịch riêng."
             >
               <select
                 value={secrets.autoCrawl?.enabled ? '1' : '0'}

@@ -50,7 +50,7 @@ MSC_PRICE_COLUMNS = (
 MSC_TENDER_COLUMNS = (
     "source_id", "search",
     "tender_no", "name", "buyer", "province",
-    "published", "published_raw", "close_date", "close_date_raw",
+    "published", "published_raw", "close_date", "close_date_raw", "open_date",
     "status_label", "status_code", "bid_price", "bid_price_raw", "bid_form",
     "source_url", "collected_at", "name_f", "province_f",
 )
@@ -199,7 +199,7 @@ def build_vss_row(item: dict):
     soluong, soluong_raw = split_qty(_text(data, "soluong"))
     gia, gia_raw = split_money(_text(data, "gia"))
     thanhtien, thanhtien_raw = split_money(_text(data, "thanhtien"))
-    tungay, tungay_raw = split_date(_text(data, "tungay_hd") or item.get("tungay_hd"))
+    tungay, tungay_raw = split_date(_text(data, "tungay_hd") or _text(data, "tungay") or item.get("tungay_hd"))
     denngay, denngay_raw = split_date(_text(data, "denngay_hd") or item.get("denngay_hd"))
     congbo, congbo_raw = split_date(_text(data, "congbo"))
     hoatchat = _text(data, "hoatchat")
@@ -410,6 +410,7 @@ def build_msc_tender_row(item: dict, source_id: str, search_text: str | None, co
         "published": published,
         "published_raw": clip("published_raw", published_raw),
         "close_date": close_date,
+        "open_date": split_date(item.get("open_date"))[0],
         "close_date_raw": clip("close_date_raw", close_raw),
         "status_label": clip("status_label", item.get("status_label")),
         "status_code": clip("status_code", item.get("status_code")),

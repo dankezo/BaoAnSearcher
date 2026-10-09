@@ -1,0 +1,18 @@
+import {createServer} from 'vite';
+import assert from 'node:assert/strict';
+import {mkdirSync} from 'node:fs';
+const future=new Date(Date.now()+86400000).toISOString();
+const row={id:'DEMO',tender_no:'IB-DEMO-01',title:'Gói thầu DEMO',close_date:future,published:new Date().toISOString(),status_code:'',baoan_match:'exact',price:'1000'};
+const news=[{id:'news-demo',title:'Đề xuất kê đơn thuốc ngoại trú tối đa 90 ngày',published_at:'2026-09-21',legal_status:'draft',insight:{priority:50,impact:'DEMO',action:'DEMO'}}];
+const html=`<html><body><div id="root"></div><script type="module">import React from 'react';import{createRoot}from'react-dom/client';import Home from '/src/home/HomeDashboard.jsx';import '/src/styles.css';createRoot(document.getElementById('root')).render(React.createElement(Home,{localMode:false,user:{id:'drawer-DEMO'}}));</script></body></html>`;
+const server=await createServer({root:process.cwd(),server:{port:5193,strictPort:true},plugins:[{name:'home-drawer-fixture',enforce:'pre',resolveId(id){if(/supabaseCloud$|regulatoryService$|geminiService$/.test(id))return '\0drawer:'+id.split('/').at(-1)},load(id){if(!id.startsWith('\0drawer:'))return;if(id.includes('supabaseCloud'))return `export const cloudMscSearch=async()=>({items:[${JSON.stringify(row)}],hasMore:false});export const cloudMetricsSlice=async()=>({matchExact:1})`;if(id.includes('regulatoryService'))return `export const regulatoryRequest=async()=>({items:${JSON.stringify(news)},sources:[]})`;return `export const analyzeNews=async()=>({});export const analyzeLegal=async()=>({})`},configureServer(s){s.middlewares.use(async(req,res,next)=>{if(req.url!='/drawer-test')return next();res.setHeader('Content-Type','text/html');res.end(await s.transformIndexHtml('/drawer-test',html))})}}]});
+let browser;
+try{
+ await server.listen();const {chromium}=await import('file:///C:/Users/AD/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');browser=await chromium.launch({headless:true,channel:'msedge'});
+ const page=await browser.newPage({reducedMotion:'reduce',viewport:{width:1440,height:950}});const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto('http://localhost:5193/drawer-test');await page.getByRole('button',{name:/Gói thầu đang mở/}).click();
+ let panel=page.getByRole('dialog',{name:'Đang mở',exact:true});await panel.waitFor();let box=await panel.boundingBox();assert.equal(box.x,0);assert.ok(box.width>=900);assert.equal(box.height,950);
+ mkdirSync('../outputs/drawer-verification',{recursive:true});await page.screenshot({path:'../outputs/drawer-verification/desktop.png'});
+ await panel.getByRole('button',{name:/IB-DEMO-01/}).click();panel=page.getByRole('dialog',{name:'IB-DEMO-01',exact:true});await panel.waitFor();box=await panel.boundingBox();assert.equal(box.x,0);assert.ok(box.width>=900);await page.keyboard.press('Escape');
+ await page.locator('.home-watch-launch').click();panel=page.getByRole('dialog',{name:'Thêm mục theo dõi'});await panel.waitFor();box=await panel.boundingBox();assert.equal(box.x,0);assert.ok(box.width>=900);await page.keyboard.press('Escape');
+ await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:/Gói thầu đang mở/}).click();panel=page.getByRole('dialog',{name:'Đang mở',exact:true});await panel.waitFor();box=await panel.boundingBox();assert.equal(Math.round(box.width),390);assert.ok(box.y>0);assert.ok(box.height<844);await page.screenshot({path:'../outputs/drawer-verification/mobile.png'});assert.deepEqual(errors,[]);console.log('Desktop left drawers, watch dialog, package details and unchanged mobile bottom sheet: passed');
+}finally{await browser?.close();await server.close()}

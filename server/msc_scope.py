@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Cache Bảo An matches for open MSC tenders.
 
-One public get-detail call per notify id. Cached rows are never requested again.
+One public get-detail call per notify id, refreshed after a change or 24 hours.
 The drug list is lotDTOList (bảng phạm vi cung cấp), the same fields as the
 webform download, without logging in or downloading every template.
 """
@@ -13,7 +13,7 @@ import ssl
 import sys
 import threading
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .baoan_match import match_lots
@@ -333,15 +333,23 @@ def refresh(limit: int | None = 40, force: bool = False, report=None, fetch=None
     now = datetime.now()
     con = _connect()
     try:
-        known = {row[0] for row in con.execute("SELECT notify_id FROM scope_lots")}
+        known = {row[0]: row[1] for row in con.execute("SELECT notify_id,fetched_at FROM scope_lots")}
         pending = []
         seen = set()
         sources = {}
         for (norm,) in con.execute("SELECT normalized FROM records WHERE kind='tenders' ORDER BY collected_at DESC"):
             item = json.loads(norm)
             nid = notify_id(item)
-            if not _open(item, now) or not nid or nid in seen or (nid in known and not force):
+            if not _open(item, now) or not nid or nid in seen:
                 continue
+            if nid in known and not force:
+                try:
+                    fetched = datetime.fromisoformat(known[nid]).astimezone().replace(tzinfo=None)
+                    changed = datetime.fromisoformat(item['collected_at']).astimezone().replace(tzinfo=None)
+                    if fetched > now - timedelta(hours=24) and changed <= fetched:
+                        continue
+                except (KeyError, TypeError, ValueError):
+                    pass
             seen.add(nid)
             sources[nid] = item.get("source_url") or ""
             pending.append((nid, str(item.get("tender_no") or "")))

@@ -15,6 +15,8 @@ import csv
 import os
 import sys
 import tempfile
+import json
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -124,15 +126,37 @@ def publish_one(conn, client, bucket: str, code: str) -> None:
     print(f"published {code}: {count:,} rows, {size_mb:,.2f} MB", flush=True)
 
 
+def publish_analytics() -> None:
+    bucket = required('R2_BUCKET')
+    client = r2_client()
+    with tempfile.TemporaryDirectory(prefix='baoan-analytics-') as directory:
+        result = subprocess.run(['node', str(ROOT / 'scripts' / 'build_analytics_snapshots.mjs'), '--build', '--out', directory], cwd=ROOT, capture_output=True, text=True, encoding='utf-8', timeout=7200, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        if result.returncode:
+            raise RuntimeError('Analytics snapshot build failed; previous manifest retained.')
+        folder=Path(directory)
+        manifest=json.loads((folder/'manifest.json').read_text(encoding='utf-8'))
+        for item in manifest['entries']:
+            path=folder/item['path']
+            client.upload_file(str(path),bucket,'analytics/'+item['path'],ExtraArgs={'ContentType':'application/json; charset=utf-8','CacheControl':'public, max-age=31536000, immutable'})
+            client.head_object(Bucket=bucket,Key='analytics/'+item['path'])
+        # The manifest becomes visible only after every object has been verified.
+        client.upload_file(str(folder/'manifest.json'),bucket,'analytics/manifest.json',ExtraArgs={'ContentType':'application/json; charset=utf-8','CacheControl':'public, max-age=60'})
+        print(f"Published {len(manifest['entries'])} aggregate snapshots.",flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Publish TiDB CSV snapshots directly to Cloudflare R2.")
     parser.add_argument("--yes-remote", action="store_true", help="Export live TiDB data and upload to R2.")
     parser.add_argument("--only", choices=tuple(DATASETS), help="Publish one dataset.")
+    parser.add_argument("--analytics", action="store_true", help="Publish versioned aggregate analytics instead of raw CSV.")
     args = parser.parse_args()
     if not args.yes_remote:
         print("No data exported. Pass --yes-remote to create and upload R2 snapshots.")
         return
     load_env()
+    if args.analytics:
+        publish_analytics()
+        return
     bucket = required("R2_BUCKET")
     conn = connect(require_config())
     try:

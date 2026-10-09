@@ -1,9 +1,15 @@
 import unittest
 
-from scripts.tidb.rows import build_msc_price_row
+from scripts.tidb.rows import build_msc_price_row, build_msc_tender_row
 
 
 class TidbRowsTest(unittest.TestCase):
+    def test_opening_date_stays_distinct_from_publication_and_closing(self):
+        row = build_msc_tender_row({'published': '2026-08-01', 'open_date': '2026-09-01T08:00:00', 'close_date': '2026-09-02'}, 'source', None, None)
+        self.assertEqual(row['open_date'], '2026-09-01')
+        self.assertEqual(row['published'], '2026-08-01')
+        self.assertEqual(row['close_date'], '2026-09-02')
+
     def test_msc_price_key_is_stable_for_duplicate_source_rows(self):
         payload = {
             "name": "Hasanlovas 20",

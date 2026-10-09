@@ -96,8 +96,8 @@ class MapViewTest(unittest.TestCase):
             {"ingredient": "Khác", "province": "Huế", "quantity": 99, "unit_price": 1000,
              "published": now.isoformat(), "group_name": "N5"},
         ]
-        with patch.object(metric_slice, "_msc_rows", return_value=rows):
-            payload = metric_slice._msc_prices({"ingredient": "paracetamol"}, 12)
+        aggregates = [dict(row, qty=row['quantity'], revenue=row['quantity'] * row['unit_price'], cnt=1) for row in rows if row['ingredient'] == 'Paracetamol']
+        payload = metric_slice._shape_price_rows(aggregates, metric_slice._window(12))
         self.assertEqual(payload["revenue"], 13000)
         self.assertEqual(payload["prevRevenue"], 4000)
         self.assertAlmostEqual(payload["yoy"], 225.0)
@@ -141,11 +141,11 @@ class MapViewTest(unittest.TestCase):
         }]
         keys = [f"2026-{month:02d}" for month in range(1, 13)]
         rows = _package_provinces(named, {
-            "IB1": {"code": "01", "value": 1000, "buyer": "BV A", "published": "2026-08-03T08:00:00"},
-            "IB2": {"code": "01", "value": 2500, "buyer": "BV B", "published": "2026-08-21"},
-            "IB3": {"code": "01", "value": 400, "buyer": "BV A", "published": "2026-09-01"},
-            "OLD": {"code": "01", "value": 80, "buyer": "BV C", "published": "2025-01-01"},
-            "HCM": {"code": "79", "value": 9000, "buyer": "BV D", "published": "2026-09-02"},
+            "IB1": {"code": "01", "value": 1000, "buyer": "BV A", "published": "2026-08-03T08:00:00", "open_date": "2026-08-03T08:00:00"},
+            "IB2": {"code": "01", "value": 2500, "buyer": "BV B", "published": "2026-08-21", "open_date": "2026-08-21"},
+            "IB3": {"code": "01", "value": 400, "buyer": "BV A", "published": "2026-09-01", "open_date": "2026-09-01"},
+            "OLD": {"code": "01", "value": 80, "buyer": "BV C", "published": "2025-01-01", "open_date": "2025-01-01"},
+            "HCM": {"code": "79", "value": 9000, "buyer": "BV D", "published": "2026-09-02", "open_date": "2026-09-02"},
         }, keys)
         self.assertEqual(len(rows[0]["trend"]), 12)
         trend = {point["key"]: point["value"] for point in rows[0]["trend"]}
@@ -161,6 +161,13 @@ class MapViewTest(unittest.TestCase):
         self.assertEqual(rolled["2026-08"], 3500)
         self.assertEqual(rolled["2026-09"], 9400)
         self.assertEqual(len(summary["trend"]), 12)
+        counts = {point["key"]: point for point in rows[0]["countTrend"]}
+        self.assertEqual(len(counts), 12)
+        self.assertEqual(counts["2026-08"]["value"], 2)
+        self.assertEqual(counts["2026-09"]["value"], 1)
+        self.assertEqual(counts["2026-09"]["delta"], -1)
+        self.assertEqual(rows[1]["countTrend"][8]["value"], 1)
+        self.assertEqual(summary["countTrend"][8]["value"], 2)
         self.assertEqual(msc_trend_label("open"), "Giá trị gói mỗi tháng")
         self.assertEqual(msc_trend_label("Đang mời thầu"), "Giá trị gói mỗi tháng")
 

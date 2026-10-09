@@ -282,18 +282,125 @@ def refresh_vss(year: int | None = None) -> dict:
         con.close()
 
 
-def refresh_dav() -> dict:
+def summarize_dav(items) -> dict:
     note = "Toàn bộ danh mục"
+    by_sdk = defaultdict(set)
+    by_form = defaultdict(set)
+    tags = {"xanh": 0, "vang": 0, "cam": 0, "xam": 0}
+    new3 = new6 = new12 = expire6 = 0
+    now = datetime.now().timestamp() * 1000
+    month = 30.4375 * 24 * 3600 * 1000
+    total = 0
+    for flat in items:
+        total += 1
+        key = fold(flat.get("hoatChat") or "") or "—"
+        sdk = str(flat.get("soDangKy") or flat.get("id") or "")
+        by_sdk[key].add(sdk)
+        by_form[key].add(fold(flat.get("dangBaoChe") or ""))
+        tag = flat.get("tagId")
+        if tag == "TAG_XANH_LA":
+            tags["xanh"] += 1
+        elif tag == "TAG_CAM_CMO":
+            tags["cam"] += 1
+        elif tag == "TAG_XAM_LICH_SU":
+            tags["xam"] += 1
+        else:
+            tags["vang"] += 1
+        issued = flat.get("ngayCap")
+        if issued:
+            try:
+                # Windows rejects timestamps far outside 1970–3000.
+                stamp = datetime.fromisoformat(str(issued)[:10]).timestamp() * 1000
+            except (ValueError, OSError):
+                stamp = None
+            if stamp is not None and 0 <= now - stamp:
+                age = now - stamp
+                if age <= 3 * month:
+                    new3 += 1
+                if age <= 6 * month:
+                    new6 += 1
+                if age <= 12 * month:
+                    new12 += 1
+        left = flat.get("monthsLeft")
+        if left is not None and 0 <= float(left) <= 6:
+            expire6 += 1
+    blue = mid = red = 0
+    for values in by_sdk.values():
+        n = len(values)
+        if n <= 2:
+            blue += 1
+        elif n <= 5:
+            mid += 1
+        else:
+            red += 1
+    forms = {1: 0, 2: 0, 3: 0, "4+": 0}
+    for values in by_form.values():
+        n = len({v for v in values if v})
+        if n <= 1:
+            forms[1] += 1
+        elif n == 2:
+            forms[2] += 1
+        elif n == 3:
+            forms[3] += 1
+        else:
+            forms["4+"] += 1
+    form_total = sum(forms.values())
+    payload = {
+        "section": "dav",
+        "total": total,
+        "sampleSize": total,
+        "updatedAt": now_iso(),
+        "fixed": True,
+        "cards": [
+            {
+                "key": "density", "scope": "fixed", "title": "Mật độ SĐK/HC",
+                "mainValue": _fmt_int(blue), "unit": "hoạt chất 1–2 SĐK", "subtitle": note,
+                "subMetrics": [
+                    {"id": "sdk_1_2", "label": "1–2 SĐK", "count": _fmt_int(blue), "tone": "ok", "patch": {"ingredientCount": "1-2"}},
+                    {"id": "sdk_3_5", "label": "3–5 SĐK", "count": _fmt_int(mid), "tone": "warn", "patch": {"ingredientCount": "3-5"}},
+                    {"id": "sdk_red", "label": ">5 SĐK", "count": _fmt_int(red), "tone": "danger", "patch": {"ingredientCount": "6+"}},
+                ],
+            },
+            {
+                "key": "tags", "scope": "fixed", "title": "Tag hồ sơ",
+                "mainValue": _fmt_int(tags["xanh"]), "unit": "SĐK xanh", "subtitle": note,
+                "subMetrics": [
+                    {"id": "tag_xanh", "label": "Sẵn sàng dự thầu", "count": _fmt_int(tags["xanh"]), "tone": "ok", "patch": {"_tag": "TAG_XANH_LA"}},
+                    {"id": "tag_vang", "label": "Cần xác minh", "count": _fmt_int(tags["vang"]), "tone": "warn", "patch": {"_tag": "TAG_VANG_XAC_MINH"}},
+                    {"id": "tag_cam", "label": "Bẫy DM93", "count": _fmt_int(tags["cam"]), "tone": "danger", "patch": {"_tag": "TAG_CAM_CMO"}},
+                    {"id": "tag_xam", "label": "Đã hết hạn", "count": _fmt_int(tags["xam"]), "tone": "neutral", "patch": {"_tag": "TAG_XAM_LICH_SU"}},
+                ],
+            },
+            {
+                "key": "forms", "scope": "fixed", "title": "Dạng bào chế / hoạt chất",
+                "mainValue": _fmt_int(form_total), "unit": "HC", "subtitle": note,
+                "subMetrics": [
+                    {"id": "form_1", "label": "1 dạng", "count": _fmt_int(forms[1]), "tone": "ok", "patch": {"dosageFormCount": "1"}},
+                    {"id": "form_2", "label": "2 dạng", "count": _fmt_int(forms[2]), "tone": "warn", "patch": {"dosageFormCount": "2"}},
+                    {"id": "form_3", "label": "3 dạng", "count": _fmt_int(forms[3]), "tone": "warn", "patch": {"dosageFormCount": "3"}},
+                    {"id": "form_4", "label": "4+ dạng", "count": _fmt_int(forms["4+"]), "tone": "danger", "patch": {"dosageFormCount": "4"}},
+                ],
+            },
+            {
+                "key": "new", "scope": "fixed", "title": "SĐK mới cấp",
+                "mainValue": _fmt_int(new12), "unit": "trong 12 tháng", "subtitle": note,
+                "subMetrics": [
+                    {"id": "new_3", "label": "3 tháng", "count": _fmt_int(new3), "tone": "ok", "info": True},
+                    {"id": "new_6", "label": "6 tháng", "count": _fmt_int(new6), "tone": "ok", "info": True},
+                    {"id": "new_12", "label": "12 tháng", "count": _fmt_int(new12), "tone": "neutral", "info": True},
+                    {"id": "expire_6m", "label": "Sắp hết hạn", "count": _fmt_int(expire6), "tone": "danger", "info": True},
+                ],
+            },
+        ],
+    }
+    return payload
+
+
+def refresh_dav() -> dict:
     con = _con(DAV_DB)
     try:
-        by_sdk = defaultdict(set)
-        by_form = defaultdict(set)
-        tags = {"xanh": 0, "vang": 0, "cam": 0, "xam": 0}
-        new3 = new6 = new12 = expire6 = 0
+        items = []
         suggest = {field: set() for field in DAV_SUGGEST if field != "q"}
-        now = datetime.now().timestamp() * 1000
-        month = 30.4375 * 24 * 3600 * 1000
-        total = 0
         cur = con.execute("SELECT raw FROM drugs")
         while True:
             rows = cur.fetchmany(1000)
@@ -301,121 +408,21 @@ def refresh_dav() -> dict:
                 break
             for (raw,) in rows:
                 flat = dav.flatten(json.loads(raw))
-                total += 1
-                key = fold(flat.get("hoatChat") or "") or "—"
-                sdk = str(flat.get("soDangKy") or flat.get("id") or "")
-                by_sdk[key].add(sdk)
-                by_form[key].add(fold(flat.get("dangBaoChe") or ""))
-                tag = flat.get("tagId")
-                if tag == "TAG_XANH_LA":
-                    tags["xanh"] += 1
-                elif tag == "TAG_CAM_CMO":
-                    tags["cam"] += 1
-                elif tag == "TAG_XAM_LICH_SU":
-                    tags["xam"] += 1
-                else:
-                    tags["vang"] += 1
-                issued = flat.get("ngayCap")
-                if issued:
-                    try:
-                        # Windows rejects timestamps far outside 1970–3000.
-                        stamp = datetime.fromisoformat(str(issued)[:10]).timestamp() * 1000
-                    except (ValueError, OSError):
-                        stamp = None
-                    if stamp is not None and 0 <= now - stamp:
-                        age = now - stamp
-                        if age <= 3 * month:
-                            new3 += 1
-                        if age <= 6 * month:
-                            new6 += 1
-                        if age <= 12 * month:
-                            new12 += 1
-                left = flat.get("monthsLeft")
-                if left is not None and 0 <= float(left) <= 6:
-                    expire6 += 1
+                items.append(flat)
                 for field, attr in DAV_SUGGEST.items():
-                    if field == "q":
-                        continue
-                    value = str(flat.get(attr) or "").strip()
-                    if value:
-                        suggest[field].add(value)
-        blue = mid = red = 0
-        for values in by_sdk.values():
-            n = len(values)
-            if n <= 2:
-                blue += 1
-            elif n <= 5:
-                mid += 1
-            else:
-                red += 1
-        forms = {1: 0, 2: 0, 3: 0, "4+": 0}
-        for values in by_form.values():
-            n = len({v for v in values if v})
-            if n <= 1:
-                forms[1] += 1
-            elif n == 2:
-                forms[2] += 1
-            elif n == 3:
-                forms[3] += 1
-            else:
-                forms["4+"] += 1
-        form_total = sum(forms.values())
+                    if field != "q":
+                        value = str(flat.get(attr) or "").strip()
+                        if value:
+                            suggest[field].add(value)
+        payload = summarize_dav(items)
         con.execute("DELETE FROM suggest_values WHERE section = 'dav'")
         for field, values in suggest.items():
             con.executemany(
                 "INSERT OR IGNORE INTO suggest_values (section, field, value) VALUES ('dav', ?, ?)",
                 [(field, value) for value in values],
             )
-        payload = {
-            "section": "dav",
-            "total": total,
-            "sampleSize": total,
-            "updatedAt": now_iso(),
-            "fixed": True,
-            "cards": [
-                {
-                    "key": "density", "scope": "fixed", "title": "Mật độ SĐK/HC",
-                    "mainValue": _fmt_int(blue), "unit": "hoạt chất 1–2 SĐK", "subtitle": note,
-                    "subMetrics": [
-                        {"id": "sdk_1_2", "label": "1–2 SĐK", "count": _fmt_int(blue), "tone": "ok", "patch": {"ingredientCount": "1-2"}},
-                        {"id": "sdk_3_5", "label": "3–5 SĐK", "count": _fmt_int(mid), "tone": "warn", "patch": {"ingredientCount": "3-5"}},
-                        {"id": "sdk_red", "label": ">5 SĐK", "count": _fmt_int(red), "tone": "danger", "patch": {"ingredientCount": "6+"}},
-                    ],
-                },
-                {
-                    "key": "tags", "scope": "fixed", "title": "Tag hồ sơ",
-                    "mainValue": _fmt_int(tags["xanh"]), "unit": "SĐK xanh", "subtitle": note,
-                    "subMetrics": [
-                        {"id": "tag_xanh", "label": "Sẵn sàng dự thầu", "count": _fmt_int(tags["xanh"]), "tone": "ok", "patch": {"_tag": "TAG_XANH_LA"}},
-                        {"id": "tag_vang", "label": "Cần xác minh", "count": _fmt_int(tags["vang"]), "tone": "warn", "patch": {"_tag": "TAG_VANG_XAC_MINH"}},
-                        {"id": "tag_cam", "label": "Bẫy DM93", "count": _fmt_int(tags["cam"]), "tone": "danger", "patch": {"_tag": "TAG_CAM_CMO"}},
-                        {"id": "tag_xam", "label": "Đã hết hạn", "count": _fmt_int(tags["xam"]), "tone": "neutral", "patch": {"_tag": "TAG_XAM_LICH_SU"}},
-                    ],
-                },
-                {
-                    "key": "forms", "scope": "fixed", "title": "Dạng bào chế / hoạt chất",
-                    "mainValue": _fmt_int(form_total), "unit": "HC", "subtitle": note,
-                    "subMetrics": [
-                        {"id": "form_1", "label": "1 dạng", "count": _fmt_int(forms[1]), "tone": "ok", "patch": {"dosageFormCount": "1"}},
-                        {"id": "form_2", "label": "2 dạng", "count": _fmt_int(forms[2]), "tone": "warn", "patch": {"dosageFormCount": "2"}},
-                        {"id": "form_3", "label": "3 dạng", "count": _fmt_int(forms[3]), "tone": "warn", "patch": {"dosageFormCount": "3"}},
-                        {"id": "form_4", "label": "4+ dạng", "count": _fmt_int(forms["4+"]), "tone": "danger", "patch": {"dosageFormCount": "4"}},
-                    ],
-                },
-                {
-                    "key": "new", "scope": "fixed", "title": "SĐK mới cấp",
-                    "mainValue": _fmt_int(new12), "unit": "trong 12 tháng", "subtitle": note,
-                    "subMetrics": [
-                        {"id": "new_3", "label": "3 tháng", "count": _fmt_int(new3), "tone": "ok", "info": True},
-                        {"id": "new_6", "label": "6 tháng", "count": _fmt_int(new6), "tone": "ok", "info": True},
-                        {"id": "new_12", "label": "12 tháng", "count": _fmt_int(new12), "tone": "neutral", "info": True},
-                        {"id": "expire_6m", "label": "Sắp hết hạn", "count": _fmt_int(expire6), "tone": "danger", "info": True},
-                    ],
-                },
-            ],
-        }
         _save(con, "dav", payload)
-        write_metadata(con, "dav_total", total)
+        write_metadata(con, "dav_total", len(items))
         con.commit()
         return payload
     finally:

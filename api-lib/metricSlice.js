@@ -1,7 +1,8 @@
 import { mapPayload, mapWindow } from './mapPayload.js'
-import { groupDigit } from './metricsRollup.js'
+import { groupDigit, davTiflashSql, shapeDav } from './metricsRollup.js'
 import { baoanProducts } from './baoanCatalog.js'
 import { fold } from './turso.js'
+import { whereFor } from './db/searchSql.js'
 import { matchRows, packageMatchFromLines, publicLines, scopeFor } from './scopeMatch.js'
 
 function hint(table) {
@@ -65,24 +66,9 @@ export async function vssSlice(query, filters = {}, months = 12) {
 function priceWhere(filters, from, to) {
   // Metric comparisons only need the current 12 months plus the matching
   // previous period. Never read multi-year history for a filtered metric.
-  const clauses = ['published IS NOT NULL', 'published >= ?', 'published <= ?']
-  const args = [from, to]
-  const like = [
-    ['ingredient_f', filters.ingredient],
-    ['name_f', filters.name],
-    ['province_f', filters.province],
-  ]
-  for (const [col, raw] of like) {
-    const values = Array.isArray(raw) ? raw : (String(raw || '').trim() ? [raw] : [])
-    const needles = values.map((value) => fold(value)).filter(Boolean)
-    if (!needles.length) continue
-    clauses.push(`(${needles.map(() => `${col} LIKE ?`).join(' OR ')})`)
-    args.push(...needles.map((needle) => `%${needle}%`))
-  }
-  for (const word of fold(filters.q || '').split(/\s+/).filter(Boolean)) {
-    clauses.push('(name_f LIKE ? OR ingredient_f LIKE ? OR search LIKE ?)')
-    args.push(`%${word}%`, `%${word}%`, `%${word}%`)
-  }
+  const shared = whereFor('msc_prices', filters, 'tidb')
+  const clauses = [shared.where, 'published IS NOT NULL', 'published >= ?', 'published < DATE_ADD(?, INTERVAL 1 DAY)']
+  const args = [...shared.args, from, to]
   return { clauses, args }
 }
 
@@ -94,56 +80,66 @@ function hasActivePriceFilters(filters = {}) {
   })
 }
 
-async function mscPriceMetricRows(query, fromYm, toYm) {
-  const rows = await rowsOf(
-    query,
-    `SELECT ym, province, group_name, revenue, quantity AS qty, cnt
-       FROM agg_msc_price_monthly
-      WHERE ym >= ? AND ym <= ?
-      ORDER BY ym`,
-    [fromYm, toYm],
-  )
-  return rows.map((row) => ({ ...row, published: `${row.ym}-01` }))
+async function compactPriceRows(query, filters, window, rollup) {
+  const to = iso(window.now), curFrom = iso(window.curFrom), prevFrom = iso(window.prevFrom), prevEnd = iso(window.prevEnd)
+  const where = priceWhere(filters, prevFrom, to)
+  const base = rollup
+    ? `SELECT day, province, group_name, unit, revenue, quantity AS qty, cnt, min_price AS minPrice, max_price AS maxPrice
+         FROM agg_msc_price_daily_units WHERE day >= ? AND day <= ?`
+    : `SELECT ${hint('msc_prices')} DATE(published) AS day, province, group_name, unit,
+         COALESCE(unit_price,0) * COALESCE(quantity,0) AS revenue, COALESCE(quantity,0) AS qty,
+         1 AS cnt, unit_price AS minPrice, unit_price AS maxPrice
+         FROM msc_prices WHERE ${where.clauses.join(' AND ')}`
+  // The HTTP SQL API caps responses at 10k rows. Aggregate both dimensions
+  // before transport, including the partial current/previous month cutoff.
+  const rows = await rowsOf(query, `WITH filtered AS (${base}), eligible AS (
+      SELECT * FROM filtered WHERE day >= ? OR day <= ?
+    )
+    SELECT 'series' AS metric_scope, DATE_FORMAT(day,'%Y-%m-01') AS published,
+      '' AS province, COALESCE(group_name,'') AS group_name, COALESCE(unit,'') AS unit,
+      SUM(revenue) AS revenue, SUM(qty) AS qty, SUM(cnt) AS cnt,
+      MIN(minPrice) AS minPrice, MAX(maxPrice) AS maxPrice
+      FROM eligible GROUP BY DATE_FORMAT(day,'%Y-%m-01'), group_name, unit
+    UNION ALL
+    SELECT 'province' AS metric_scope, CASE WHEN day >= ? THEN ? ELSE ? END AS published,
+      COALESCE(province,'') AS province, COALESCE(group_name,'') AS group_name, '' AS unit,
+      SUM(revenue) AS revenue, SUM(qty) AS qty, SUM(cnt) AS cnt,
+      MIN(minPrice) AS minPrice, MAX(maxPrice) AS maxPrice
+      FROM eligible GROUP BY CASE WHEN day >= ? THEN ? ELSE ? END, province, group_name`,
+    [...(rollup ? [prevFrom, to] : where.args), curFrom, prevEnd, curFrom, curFrom, prevFrom, curFrom, curFrom, prevFrom])
+  if (rows.length >= 10000) throw new Error('Kết quả tổng hợp vượt giới hạn API; chưa thể tính metric đầy đủ.')
+  return rows
 }
 
 export async function mscPriceSlice(query, filters = {}, months = 12) {
   const window = mapWindow(months)
+  let rows = null, source = 'tiflash'
+  if (!hasActivePriceFilters(filters)) {
+    try {
+      rows = await compactPriceRows(query, filters, window, true)
+      if (rows.length) source = 'rollup'
+      else rows = null
+    } catch { rows = null }
+  }
+  if (!rows) rows = await compactPriceRows(query, filters, window, false)
+  const view = shapePriceRows(rows.filter(row => row.metric_scope !== 'province'), window, source)
+  const provinceRows = rows.filter(row => row.metric_scope === 'province')
+  if (provinceRows.length) {
+    const provinces = shapePriceRows(provinceRows, window, source)
+    view.topGrowth = provinces.topGrowth
+    view.topProvinces = provinces.topProvinces
+    for (const [group, metrics] of Object.entries(view.groupViews)) {
+      metrics.topGrowth = provinces.groupViews[group]?.topGrowth || []
+      metrics.topProvinces = provinces.groupViews[group]?.topProvinces || []
+    }
+  }
+  return view
+}
+
+export function shapePriceRows(rows, window, source = 'tiflash', includeGroups = true) {
   const to = iso(window.now)
   const curFrom = iso(window.curFrom)
   const prevFrom = iso(window.prevFrom)
-  let rows = null
-  let source = 'tiflash'
-
-  // The initial page has no filters. It uses the materialized monthly rollup,
-  // so opening MSC never runs an aggregation over the fact table.
-  if (!hasActivePriceFilters(filters)) {
-    try {
-      rows = await mscPriceMetricRows(query, prevFrom.slice(0, 7), to.slice(0, 7))
-      if (rows.length) source = 'rollup'
-      else rows = null
-    } catch {
-      // Migration may still be rolling out. The bounded TiFlash fallback keeps
-      // the existing page functional while the next sync materializes it.
-      rows = null
-    }
-  }
-  if (!rows) {
-    const where = priceWhere(filters, prevFrom, to)
-    rows = await rowsOf(
-      query,
-      `SELECT ${hint('msc_prices')}
-      COALESCE(province, '') AS province,
-      COALESCE(group_name, '') AS group_name,
-      DATE_FORMAT(published, '%Y-%m-%d') AS published,
-      SUM(COALESCE(unit_price, 0) * COALESCE(quantity, 0)) AS revenue,
-      SUM(COALESCE(quantity, 0)) AS qty,
-      COUNT(*) AS cnt
-    FROM msc_prices
-    WHERE ${where.clauses.join(' AND ')}
-    GROUP BY province, group_name, DATE_FORMAT(published, '%Y-%m-%d')`,
-      where.args,
-    )
-  }
   const prevEnd = iso(window.prevEnd)
   const series = new Map()
   const provinces = new Map()
@@ -166,11 +162,18 @@ export async function mscPriceSlice(query, filters = {}, months = 12) {
       currentRecords += num(row.cnt)
       prov.value += revenue
       const month = day.slice(0, 7)
-      const point = series.get(month) || { key: month, label: `T${Number(day.slice(5, 7))}`, qty: 0, revenue: 0 }
+      const point = series.get(month) || { key: month, label: `T${Number(day.slice(5, 7))}`, qty: 0, revenue: 0, breakdown: [] }
       point.qty += qty
       point.revenue += revenue
       series.set(month, point)
       const digit = groupDigit(row.group_name)
+      const unit = String(row.unit || '').trim() || 'ĐVT chưa rõ'
+      let part = point.breakdown.find((p) => p.group === digit && p.unit === unit)
+      if (!part) { part = { group: digit, unit, qty: 0, revenue: 0, minPrice: null, maxPrice: null }; point.breakdown.push(part) }
+      part.qty += qty
+      part.revenue += revenue
+      if (row.minPrice != null) part.minPrice = part.minPrice == null ? num(row.minPrice) : Math.min(part.minPrice, num(row.minPrice))
+      if (row.maxPrice != null) part.maxPrice = part.maxPrice == null ? num(row.maxPrice) : Math.max(part.maxPrice, num(row.maxPrice))
       if (digit) groups[Number(digit) - 1] += revenue
     } else {
       prov.prev += revenue
@@ -197,6 +200,7 @@ export async function mscPriceSlice(query, filters = {}, months = 12) {
     label: `T${Number(key.slice(5, 7))}`,
     qty: 0,
     revenue: 0,
+    breakdown: [],
   })
   const revNow = points.reduce((sum, point) => sum + point.revenue, 0)
   const qtyNow = points.reduce((sum, point) => sum + point.qty, 0)
@@ -218,6 +222,7 @@ export async function mscPriceSlice(query, filters = {}, months = 12) {
     revenue: revNow,
     prevRevenue,
     yoy,
+    ...(includeGroups ? { groupViews: Object.fromEntries(['1', '2', '3', '4', '5'].map((g) => [g, shapePriceRows(rows.filter((row) => groupDigit(row.group_name) === g), window, source, false)])) } : {}),
     coverage: {
       from: prevFrom,
       to,
@@ -238,14 +243,16 @@ export async function mscTenderSlice(query, filters = {}, months = 12) {
   const window = mapWindow(months)
   const from = iso(window.curFrom)
   const today = iso(window.now)
+  const shared = whereFor('tenders', filters, 'tidb')
   const rows = await rowsOf(
     query,
     `SELECT ${hint('msc_tenders')}
       tender_no, published, close_date, status_code, bid_price, name, buyer, province, source_url
     FROM msc_tenders
-    WHERE published >= ?`,
-    [from],
+    WHERE ${shared.where} AND (published IS NULL OR (published >= ? AND published < DATE_ADD(?, INTERVAL 1 DAY)))`,
+    [...shared.args, from, today],
   )
+  if (rows.length >= 10000) throw new Error('Kết quả gói thầu vượt giới hạn tổng hợp API.')
   let openCount = 0
   let openValue = 0
   let reviewCount = 0
@@ -256,26 +263,6 @@ export async function mscTenderSlice(query, filters = {}, months = 12) {
   let cached = 0
   const nowMs = window.now.getTime()
   for (const row of rows) {
-    const name = fold(row.name || '')
-    const province = fold(row.province || '')
-    const buyer = fold(row.buyer || '')
-    const tender = fold(row.tender_no || '')
-    const needles = [
-      ['name', name],
-      ['province', province],
-      ['buyer', buyer],
-      ['tender_no', tender],
-    ]
-    let drop = false
-    for (const [key, blob] of needles) {
-      const raw = filters[key]
-      const values = Array.isArray(raw) ? raw : (String(raw || '').trim() ? [raw] : [])
-      const want = values.map((value) => fold(value)).filter(Boolean)
-      if (want.length && !want.some((needle) => blob.includes(needle))) drop = true
-    }
-    const words = fold(filters.q || '').split(/\s+/).filter(Boolean)
-    if (words.some((word) => !`${name} ${province} ${buyer} ${tender}`.includes(word))) drop = true
-    if (drop) continue
     const code = String(row.status_code || '').trim().toUpperCase()
     const close = String(row.close_date || '').slice(0, 10)
     const opened = isOpen(row, today)
@@ -318,13 +305,14 @@ export async function mscMatchReport(query, filters = {}, level = 'all') {
   const window = mapWindow(Number(filters.metricMonths) || 12)
   const from = iso(window.curFrom)
   const today = iso(window.now)
+  const shared = whereFor('tenders', filters, 'tidb')
   const rows = await rowsOf(
     query,
     `SELECT ${hint('msc_tenders')}
       tender_no, name, buyer, province, published, close_date, status_code, source_url
     FROM msc_tenders
-    WHERE published >= ?`,
-    [from],
+    WHERE ${shared.where} AND (published IS NULL OR (published >= ? AND published < DATE_ADD(?, INTERVAL 1 DAY)))`,
+    [...shared.args, from, today],
   )
   const open = []
   for (const row of rows) {
@@ -343,6 +331,14 @@ export async function slicePayload(query, body = {}) {
   const section = String(body.section || '')
   const filters = body.filters && typeof body.filters === 'object' ? body.filters : {}
   const months = Number(body.months) || 12
+  if (section === 'dav') {
+    const shared = whereFor('dav', filters, 'tidb')
+    const results = await Promise.all(davTiflashSql().map(spec => rowsOf(query,
+      spec.sql.replace(/FROM dav_drugs(\s+WHERE\s+)?/g, (_match, hasWhere) => `FROM dav_drugs WHERE (${shared.where})${hasWhere ? ' AND ' : ' '}`), shared.args)))
+    const payload = shapeDav(results[0][0], results[1], results[2][0], results[3][0], results[4][0])
+    for (const card of payload.cards) card.subtitle = 'Theo bộ lọc hiện tại'
+    return payload
+  }
   if (section === 'vss') return vssSlice(query, filters, months)
   if (section === 'msc_prices') return mscPriceSlice(query, filters, months)
   if (section === 'msc_tenders') return mscTenderSlice(query, filters, months)

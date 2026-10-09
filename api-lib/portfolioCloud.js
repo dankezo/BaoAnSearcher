@@ -18,7 +18,57 @@ function day(value) {
     return `${y}-${m}-${d}`
   }
   const match = String(value || '').match(/(\d{4})-(\d{2})-(\d{2})/)
-  return match ? `${match[1]}-${match[2]}-${match[3]}` : ''
+  if (match) return `${match[1]}-${match[2]}-${match[3]}`
+  const vn = String(value || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  return vn ? `${vn[3]}-${vn[2].padStart(2, '0')}-${vn[1].padStart(2, '0')}` : ''
+}
+
+function awardWindow() {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
+  const [year, month, date] = today.split('-').map(Number)
+  const start = new Date(Date.UTC(year - 1, month - 1, date))
+  if (start.getUTCMonth() !== month - 1) start.setUTCDate(0)
+  return { from: start.toISOString().slice(0, 10), to: today }
+}
+
+function awardIdentity(item) {
+  return [sdkKey(item.registration), groupNumber(item.group), fold(item.unit), item.price ?? '', item.quantity ?? '',
+    fold(item.buyer), fold(item.province), day(item.date), String(item.tenderNo || '').trim()].join('|')
+}
+
+function dedupeAwards(items) {
+  const ordered = [...items].sort((a, b) => Number(b.source === 'MSC') - Number(a.source === 'MSC'))
+  const mscIds = new Set(ordered.filter(item => item.source === 'MSC').map(awardIdentity))
+  const seen = new Set()
+  return ordered.filter(item => {
+    const identity = awardIdentity(item)
+    if (item.source === 'VSS' && mscIds.has(identity)) return false
+    const key = `${identity}|${String(item.tenderNo || '').trim()}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function awards12m(rows) {
+  const { from, to } = awardWindow()
+  const items = dedupeAwards(rows).filter(item => item.date && item.date >= from && item.date <= to)
+  const totals = new Map()
+  const packages = new Set()
+  let revenue = 0
+  for (const item of items) {
+    if (item.price != null && item.quantity != null) revenue += item.price * item.quantity
+    if (item.unit && item.quantity != null) {
+      const key = fold(item.unit)
+      const slot = totals.get(key) || { unit: item.unit, quantity: 0 }
+      slot.quantity += item.quantity
+      totals.set(key, slot)
+    }
+    if (item.tenderNo) packages.add(`tender:${item.tenderNo}`)
+  }
+  return { revenue, quantityTotals: [...totals.values()], packages: packages.size, records: items.length, from, to }
 }
 
 function yearOf(value) {
@@ -48,6 +98,58 @@ function tokensOf(inn) {
 
 function isBaoAn(...names) {
   return names.some((name) => fold(name).includes('bao an'))
+}
+
+function groupNumber(value) {
+  const text = fold(value)
+  return text.match(/n\s*([1-5])\b/)?.[1] || text.match(/\b([1-5])\b/)?.[1] || ''
+}
+
+function normalizedStrength(value) {
+  return fold(value).replace(/,/g, '.').replace(/\s+/g, '').replace(/microgam|µg|μg/g, 'mcg')
+}
+
+function comparable(a, b) {
+  return a?.price > 0 && b?.price > 0
+    && Boolean(a.ingredient && fold(a.ingredient) === fold(b.ingredient))
+    && Boolean(a.strength && normalizedStrength(a.strength) === normalizedStrength(b.strength))
+    && Boolean(a.dosageForm && fold(a.dosageForm) === fold(b.dosageForm))
+    && Boolean(groupNumber(a.group) && groupNumber(a.group) === groupNumber(b.group))
+    && Boolean(a.unit && fold(a.unit) === fold(b.unit))
+}
+
+export function compareAwards(ownHistory, rivalHistory) {
+  const pairs = ownHistory.flatMap((own) => rivalHistory
+    .filter((rival) => comparable(own, rival))
+    .map((rival) => ({ own, rival })))
+  if (!pairs.length) {
+    const hasPrices = [...ownHistory, ...rivalHistory].some((item) => item.price > 0)
+    return { priceDeltaPct: null, comparisonNote: hasPrices
+      ? 'Chưa có cặp giá trúng thầu cùng hoạt chất, hàm lượng, dạng bào chế, nhóm và đơn vị để so sánh'
+      : 'Chưa có giá trúng thầu hợp lệ để so sánh' }
+  }
+  const { own, rival } = pairs.sort((a, b) => {
+    const aMin = [a.own.date, a.rival.date].sort()[0]
+    const bMin = [b.own.date, b.rival.date].sort()[0]
+    return bMin.localeCompare(aMin) || [b.own.date, b.rival.date].sort().at(-1).localeCompare([a.own.date, a.rival.date].sort().at(-1))
+  })[0]
+  return {
+    priceDeltaPct: (rival.price / own.price - 1) * 100,
+    comparisonNote: `So sánh ${own.ingredient} · ${own.strength} · ${own.dosageForm} · ${own.group} · ${own.unit} (${own.date}: ${own.price} VNĐ / ${rival.date}: ${rival.price} VNĐ)`,
+    comparisonOwnAward: own,
+    comparisonAward: rival,
+  }
+}
+
+export function mscProfileUrl(value) {
+  try {
+    const url = new URL(String(value || ''))
+    return url.protocol === 'https:' && url.hostname === 'muasamcong.mpi.gov.vn' && Boolean(url.searchParams.get('id'))
+      ? url.toString()
+      : ''
+  } catch {
+    return ''
+  }
 }
 
 async function rowsOf(query, sql, args) {
@@ -95,7 +197,7 @@ function awardFromMsc(row) {
     registration: row.registration || '',
     ingredient: row.ingredient || '',
     strength: row.strength || '',
-    dosageForm: '',
+    dosageForm: row.dosage_form || '',
     group: row.group_name || '',
     manufacturer: row.manufacturer || '',
     buyer: row.buyer || '',
@@ -104,17 +206,17 @@ function awardFromMsc(row) {
     unit: row.unit || '',
     price: num(row.unit_price) || null,
     quantity: row.quantity == null ? null : num(row.quantity),
-    sourceUrl: /^https:\/\/muasamcong\.mpi\.gov\.vn\//.test(row.source_url || '') ? row.source_url : '',
+    sourceUrl: mscProfileUrl(row.source_url),
   }
 }
 
 function awardFromVss(row) {
   return {
     source: 'VSS',
-    tenderNo: '',
+    tenderNo: row.goithau || row.tender_no || '',
     decision: '',
-    date: day(row.tungay_hd),
-    dateKind: 'Bắt đầu hợp đồng',
+    date: day(row.tungay_hd) || day(row.tungay_hd_raw) || day(row.congbo),
+    dateKind: row.tungay_hd || row.tungay_hd_raw ? 'Bắt đầu hợp đồng' : 'Ngày công bố',
     name: row.ten || '',
     registration: row.sodk || '',
     ingredient: row.hoatchat || '',
@@ -140,18 +242,21 @@ export async function buildPortfolio(query, productId = null, registration = nul
     memory.at = Date.now()
   }
   const cached = memory.payload
+  const extra = cached.heatmaps.__portfolio || {}
   if (registration != null && productId != null) {
     const detail = cached.heatmaps[productId] || { histories: {} }
     const items = detail.histories?.[registration] || []
     return { items, registration, productId }
   }
   const payload = {
-    kpis: kpis(cached.rows),
+    kpis: kpis(cached.rows, extra.awardRows || []),
     rows: cached.rows,
+    awardRows: extra.awardRows || [],
+    newRegistrations: extra.newRegistrations || [],
     meta: { backend: 'tidb', preparedFor: 'tidb' },
   }
   if (productId == null) {
-    payload.details = cached.heatmaps
+    payload.details = Object.fromEntries(Object.entries(cached.heatmaps).filter(([key]) => key !== '__portfolio'))
     return payload
   }
   const detail = cached.heatmaps[productId] || { provinces: [], facilities: [], histories: {} }
@@ -163,7 +268,7 @@ export async function buildPortfolio(query, productId = null, registration = nul
   }
 }
 
-function kpis(rows) {
+function kpis(rows, awardRows = []) {
   const total = rows.length || 1
   const years = rows.map((row) => Number(yearOf(row.expDate))).filter((year) => year >= 1990)
   const plants = new Map()
@@ -196,6 +301,7 @@ function kpis(rows) {
       topPct: top.count / total,
       shares: ranked.map((item) => ({ name: item.name, count: item.count, pct: item.count / total })),
     },
+    awards12m: awards12m(awardRows),
   }
 }
 
@@ -206,12 +312,13 @@ async function assemble(query) {
   for (const item of catalog) tokensOf(item.inn).forEach((token) => tokenSet.add(token))
   const tokens = [...tokenSet].slice(0, 24)
   const davOwn = regs.length
-    ? await rowsOf(query, `SELECT ${hint('dav_drugs')} so_dang_ky, ten_thuoc, hoat_chat, ham_luong, dang_bao_che, dong_goi, ngay_cap, ngay_het_han, cty_san_xuat, cty_dang_ky, so_quyet_dinh, con_hieu_luc FROM dav_drugs WHERE so_dang_ky IN (${regs.map(() => '?').join(',')})`, regs)
+    ? await rowsOf(query, `SELECT ${hint('dav_drugs')} so_dang_ky, so_dang_ky_cu, ten_thuoc, hoat_chat, ham_luong, dang_bao_che, dong_goi, ngay_cap, ngay_het_han, cty_san_xuat, cty_dang_ky, so_quyet_dinh, con_hieu_luc FROM dav_drugs WHERE so_dang_ky IN (${regs.map(() => '?').join(',')})`, regs)
     : []
   const davCells = tokens.length
-    ? await rowsOf(query, `SELECT ${hint('dav_drugs')} so_dang_ky, ten_thuoc, hoat_chat, ham_luong, dang_bao_che, ngay_cap, ngay_het_han, cty_san_xuat, cty_dang_ky, so_quyet_dinh, con_hieu_luc FROM dav_drugs WHERE con_hieu_luc = 1 AND (${tokens.map(() => 'hoat_chat_f LIKE ?').join(' OR ')})`, tokens.map((token) => `%${token}%`))
+    ? await rowsOf(query, `SELECT ${hint('dav_drugs')} so_dang_ky, so_dang_ky_cu, ten_thuoc, hoat_chat, ham_luong, dang_bao_che, ngay_cap, ngay_het_han, cty_san_xuat, cty_dang_ky, so_quyet_dinh, con_hieu_luc FROM dav_drugs WHERE con_hieu_luc = 1 AND (${tokens.map(() => 'hoat_chat_f LIKE ?').join(' OR ')})`, tokens.map((token) => `%${token}%`))
     : []
-  const bySdk = new Map(davOwn.map((row) => [sdkKey(row.so_dang_ky), row]))
+  const bySdk = new Map()
+  for (const row of davOwn) for (const reg of [row.so_dang_ky, row.so_dang_ky_cu]) if (reg) bySdk.set(sdkKey(reg), row)
   const cells = new Map()
   for (const row of davCells) {
     if (!row.con_hieu_luc || !row.so_dang_ky) continue
@@ -220,22 +327,49 @@ async function assemble(query) {
     cells.get(key).set(row.so_dang_ky, row)
   }
   const catalogRegs = new Set(regs.map(sdkKey))
-  const msc = regs.length
-    ? await rowsOf(query, `SELECT ${hint('msc_prices')} registration, name, ingredient, strength, unit_price, quantity, unit, group_name, manufacturer, buyer, province, tender_no, published, winner, source_url FROM msc_prices WHERE registration IN (${regs.map(() => '?').join(',')})`, regs)
+  const awardRegs = new Set(regs)
+  for (const item of catalog) {
+    const dav = bySdk.get(sdkKey(item.reg_number || ''))
+    const key = cellKey(dav?.hoat_chat || item.inn || '', dav?.ham_luong || item.strength || '', dav?.dang_bao_che || item.dosage_form || '')
+    for (const info of cells.get(key)?.values() || []) awardRegs.add(info.so_dang_ky)
+  }
+  const aliases = new Map()
+  for (const row of [...davOwn, ...davCells]) {
+    if (!row.so_dang_ky_cu) continue
+    const keys = [sdkKey(row.so_dang_ky), sdkKey(row.so_dang_ky_cu)].filter(Boolean)
+    for (const key of keys) aliases.set(key, keys)
+    if (awardRegs.has(row.so_dang_ky)) awardRegs.add(row.so_dang_ky_cu)
+  }
+  const awardRegistrations = [...awardRegs].filter(Boolean)
+  const msc = awardRegistrations.length
+    ? await rowsOf(query, `SELECT ${hint('msc_prices')} registration, name, ingredient, strength, dosage_form, unit_price, quantity, unit, group_name, manufacturer, buyer, province, tender_no, published, winner, source_url FROM msc_prices WHERE registration IN (${awardRegistrations.map(() => '?').join(',')})`, awardRegistrations)
     : []
-  const vss = regs.length
-    ? await rowsOf(query, `SELECT ${hint('vss_bids')} sodk, ten, hoatchat, hamluong, gia, soluong, donvitinh, nhomthau, nhasx, ten_cskcb, ten_tinh, ma_tinh, thanhtien, tungay_hd, nam FROM vss_bids WHERE sodk IN (${regs.map(() => '?').join(',')})`, regs)
+  const vss = awardRegistrations.length
+    ? await rowsOf(query, `SELECT ${hint('vss_bids')} sodk, ten, hoatchat, hamluong, gia, soluong, donvitinh, nhomthau, nhasx, ten_cskcb, ten_tinh, ma_tinh, thanhtien, tungay_hd, tungay_hd_raw, congbo, nam FROM vss_bids WHERE sodk IN (${awardRegistrations.map(() => '?').join(',')})`, awardRegistrations)
     : []
+  const tenderNumbers = [...new Set(msc.filter(row => !mscProfileUrl(row.source_url)).map(row => row.tender_no).filter(Boolean))]
+  const profiles = tenderNumbers.length
+    ? await rowsOf(query, `SELECT ${hint('msc_tenders')} tender_no, source_url FROM msc_tenders WHERE tender_no IN (${tenderNumbers.map(() => '?').join(',')})`, tenderNumbers)
+    : []
+  const profileByTender = new Map()
+  for (const row of profiles) {
+    const url = mscProfileUrl(row.source_url)
+    if (url) profileByTender.set(row.tender_no, url)
+  }
   const history = new Map()
   for (const row of msc) {
-    const key = sdkKey(row.registration)
-    if (!history.has(key)) history.set(key, [])
-    history.get(key).push(awardFromMsc(row))
+    const primary = sdkKey(row.registration)
+    for (const key of aliases.get(primary) || [primary]) {
+      if (!history.has(key)) history.set(key, [])
+      history.get(key).push(awardFromMsc({ ...row, source_url: mscProfileUrl(row.source_url) || profileByTender.get(row.tender_no) || '' }))
+    }
   }
   for (const row of vss) {
-    const key = sdkKey(row.sodk)
-    if (!history.has(key)) history.set(key, [])
-    history.get(key).push(awardFromVss(row))
+    const primary = sdkKey(row.sodk)
+    for (const key of aliases.get(primary) || [primary]) {
+      if (!history.has(key)) history.set(key, [])
+      history.get(key).push(awardFromVss(row))
+    }
   }
   for (const list of history.values()) {
     list.sort((a, b) => String(b.date).localeCompare(String(a.date)))
@@ -245,6 +379,9 @@ async function assemble(query) {
     : []
   const rows = []
   const heatmaps = {}
+  const awardRows = []
+  const newRegistrations = new Map()
+  const awardRange = awardWindow()
   for (const item of catalog) {
     const dav = bySdk.get(sdkKey(item.reg_number || ''))
     const inn = dav?.hoat_chat || item.inn || ''
@@ -273,6 +410,7 @@ async function assemble(query) {
     const live = Boolean(Number(dav?.con_hieu_luc))
     const tag = !live ? 'TAG_XAM_LICH_SU' : (left != null && left >= 18 ? 'TAG_XANH_LA' : 'TAG_VANG_XAC_MINH')
     const ownHistory = history.get(sdkKey(own)) || []
+    awardRows.push(...dedupeAwards(ownHistory).map(award => ({ ...award, productId: item.id, brandName: item.brand_name || '' })))
     const row = {
       id: item.id,
       brandName: item.brand_name || '',
@@ -294,7 +432,10 @@ async function assemble(query) {
       webUrl: item.web_url || '',
       strategyNote: item.strategy_note || '',
       competitorCount: rivals.length,
-      competitors: rivals.map((rival) => ({ ...rival, ...summarize(history.get(sdkKey(rival.regNumber)) || []) })),
+      competitors: rivals.map((rival) => {
+        const rivalHistory = history.get(sdkKey(rival.regNumber)) || []
+        return { ...rival, ...summarize(rivalHistory), ...compareAwards(ownHistory, rivalHistory) }
+      }),
       statusColor: rivals.length <= 2 ? 'GREEN' : rivals.length <= 4 ? 'YELLOW' : 'RED',
       wonBid: ownHistory.length > 0,
       dm93: false,
@@ -328,7 +469,35 @@ async function assemble(query) {
       facilities: [...facilities.values()].sort((a, b) => b.value - a.value).slice(0, 12),
       histories,
     }
+    const ownGroups = new Set(ownHistory.map(award => groupNumber(award.group)).filter(Boolean).map(group => `N${group}`))
+    for (const [rivalSdk, info] of cells.get(key) || []) {
+      const rivalKey = sdkKey(rivalSdk)
+      const grantDate = day(info.ngay_cap)
+      if (!rivalKey || catalogRegs.has(rivalKey) || !grantDate || grantDate < awardRange.from || grantDate > awardRange.to
+          || isBaoAn(info.cty_san_xuat, info.cty_dang_ky)) continue
+      const rivalHistory = history.get(rivalKey) || []
+      const rivalGroups = new Set(rivalHistory.map(award => groupNumber(award.group)).filter(Boolean).map(group => `N${group}`))
+      const matchedGroups = [...ownGroups].filter(group => rivalGroups.has(group)).sort()
+      if (ownGroups.size && rivalGroups.size && !matchedGroups.length) continue
+      const slot = newRegistrations.get(rivalKey) || {
+        regNumber: rivalSdk, name: info.ten_thuoc || '', inn: info.hoat_chat || inn,
+        strength: info.ham_luong || strength, dosageForm: info.dang_bao_che || dosage,
+        grantDate, ctyDangKy: info.cty_dang_ky || '', groups: new Set(), groupKnown: false, matches: new Map(),
+      }
+      matchedGroups.forEach(group => slot.groups.add(group))
+      slot.groupKnown = slot.groups.size > 0
+      slot.matches.set(item.id, {
+        id: item.id, brandName: item.brand_name || '', inn, strength, dosageForm: dosage, groups: [...ownGroups].sort(),
+      })
+      newRegistrations.set(rivalKey, slot)
+    }
     rows.push(row)
+  }
+  heatmaps.__portfolio = {
+    awardRows,
+    newRegistrations: [...newRegistrations.values()].map(row => ({
+      ...row, groups: [...row.groups].sort(), matches: [...row.matches.values()],
+    })).sort((a, b) => b.grantDate.localeCompare(a.grantDate)),
   }
   return { rows, heatmaps }
 }

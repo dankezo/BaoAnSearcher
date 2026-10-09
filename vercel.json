@@ -6,7 +6,7 @@
   "functions": {
     "api/**/*.js": {
       "regions": ["sin1"],
-      "maxDuration": 60,
+      "maxDuration": 300,
       "includeFiles": "web/public/data/suggest-static.json"
     }
   },

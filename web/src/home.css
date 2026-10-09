@@ -556,3 +556,32 @@
     margin: 8px auto 0;
   }
 }
+
+
+@media (max-width: 480px) {
+  .home-dash { gap: 10px; font-size: 14px; }
+  .home-hero h1 { font-size: 21px; }
+  .home-block { padding: 10px; }
+  .home-block h2 { font-size: 17px; }
+  .home-block-head { margin-bottom: 6px; gap: 5px; }
+  .home-metrics { gap: 5px; }
+  .home-radar-row { gap: 6px; }
+  .home-radar-card { min-height: 0; height: auto; padding: 8px; gap: 5px; }
+  .home-open-toggle { min-height: 64px; padding: 6px 8px; gap: 3px; }
+  .home-watch { min-height: 0; gap: 5px; }
+  .home-watch-launch { min-height: 44px; }
+  .home-metrics button { padding: 8px 7px; gap: 3px; min-height: 64px; }
+  .home-metrics strong, .home-open-toggle strong { font-size: 19px; }
+  .home-metrics span { font-size: 11px; }
+  .home-tender, .home-legal-card, .home-critical-card { padding: 10px; }
+  .home-tender p, .home-legal-card p, .home-acc-title { font-size: 14px; }
+  .home-note { font-size: 12px; overflow-wrap: anywhere; }
+  .home-detail { font-size: 14px; overflow-wrap: anywhere; }
+  .home-sheet-body { padding: 10px; }
+}
+
+.home-source-status{font-size:12px;color:var(--muted);padding:6px 0}.home-source-status summary{cursor:pointer;color:#9a6700}.home-source-status p{margin:5px 0;overflow-wrap:anywhere}
+
+@media(min-width:1024px){.home-sheet-left-desktop{align-items:stretch;justify-content:flex-start}.home-sheet-left-desktop .home-sheet{width:min(960px,85vw);height:100%;max-height:none;border-radius:0 14px 14px 0;animation:home-sheet-enter-left .2s var(--ease,ease-out)}.home-sheet-left-desktop .home-sheet-handle{display:none}}
+@keyframes home-sheet-enter-left{from{transform:translateX(-36px);opacity:.6}to{transform:translateX(0);opacity:1}}
+@media(prefers-reduced-motion:reduce){.home-sheet-left-desktop .home-sheet{animation:none}}

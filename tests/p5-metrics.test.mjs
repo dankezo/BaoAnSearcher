@@ -95,11 +95,11 @@ test('MSC price default metric reads the monthly rollup and returns twelve month
   const calls = []
   const payload = await mscPriceSlice(async (sql) => {
     calls.push(sql)
-    assert.match(sql, /FROM agg_msc_price_monthly/)
+    assert.match(sql, /FROM agg_msc_price_daily_units/)
     return {
       rows: [
-        { ym: '2025-11', province: 'Hà Nội', group_name: 'Nhóm 1', revenue: '10', qty: '2', cnt: 1 },
-        { ym: '2026-10', province: 'Hà Nội', group_name: 'Nhóm 1', revenue: '20', qty: '3', cnt: 2 },
+        { published: '2025-11-01', province: 'Hà Nội', group_name: 'Nhóm 1', revenue: '10', qty: '2', cnt: 1 },
+        { published: '2026-10-01', province: 'Hà Nội', group_name: 'Nhóm 1', revenue: '20', qty: '3', cnt: 2 },
       ],
     }
   }, {}, 12)

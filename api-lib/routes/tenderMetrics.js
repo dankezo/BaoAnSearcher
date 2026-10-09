@@ -62,6 +62,7 @@ export default async function handler(req, res) {
   }
   const timing = beginTiming(`${req.method} /api/tender/metrics`)
   let section = 'dav'
+  let isSlice = false
   try {
     const auth0 = performance.now()
     const { accessToken } = await requireUser(req)
@@ -71,7 +72,8 @@ export default async function handler(req, res) {
     const force = Boolean(body.force || req.query?.force)
     const backend = searchBackend()
     const query = (sql, args) => tidbDb.query(sql, args)
-    if (body.slice || body.mode === 'slice' || section === 'msc_match') {
+    isSlice = Boolean(body.slice || body.mode === 'slice' || section === 'msc_match')
+    if (isSlice) {
       const db0 = performance.now()
       const payload = await slicePayload(query, { ...body, section })
       timing.noteDb(performance.now() - db0)
@@ -116,6 +118,8 @@ export default async function handler(req, res) {
     if (e.status === 401 || e.status === 403 || e.status === 400) {
       return json(res, e.status, { error: e.message || String(e) }, timing)
     }
+    if (isSlice) return json(res, 503, { error: 'Chưa tính được chỉ số theo bộ lọc. Vui lòng thử lại.' }, timing)
+    if (section === 'portfolio') return json(res, 503, { error: 'Chưa tải được danh mục và lịch sử trúng thầu. Vui lòng thử lại.' }, timing)
     return json(res, 200, emptyMetrics(section), timing)
   }
 }

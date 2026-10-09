@@ -5,9 +5,25 @@ import { groupDigit } from './metricsRollup.js'
 import { fold } from './turso.js'
 
 const NOTIFY = /notifyId=([0-9a-f-]{36})/i
+let cloudScopes = []
+let cloudScopesUntil = 0
+let cloudScopesRequest = null
+
+export async function refreshCloudScopes(db) {
+  if (db?.dialect !== 'tidb' || Date.now() < cloudScopesUntil) return
+  if (!cloudScopesRequest) {
+    cloudScopesRequest = db.query('SELECT notify_id, tender_no, lots FROM msc_scope_lots').then((result) => {
+      cloudScopes = (result.rows || []).map((row) => ({ id: row.notify_id, tender_no: row.tender_no, lots: typeof row.lots === 'string' ? JSON.parse(row.lots) : row.lots }))
+      cloudScopesUntil = Date.now() + 60_000
+    }).finally(() => { cloudScopesRequest = null })
+  }
+  await cloudScopesRequest
+}
 
 function rows() {
-  return Array.isArray(scopeRows) ? scopeRows : []
+  const merged = new Map((Array.isArray(scopeRows) ? scopeRows : []).map((row) => [row.id || row.tender_no, row]))
+  for (const row of cloudScopes) merged.set(row.id || row.tender_no, row)
+  return [...merged.values()]
 }
 
 export function notifyId(item) {

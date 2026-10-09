@@ -1,0 +1,98 @@
+name: Daily public data crawl
+on:
+  schedule:
+    - cron: '17 22 * * *' # 05:17 Asia/Bangkok / Vietnam
+  workflow_dispatch:
+    inputs:
+      only:
+        description: Sources (prices,tenders,vss)
+        default: tenders,prices
+        type: string
+      days:
+        description: Replay days (1–30)
+        default: '3'
+        type: string
+      runner:
+        description: Runner platform
+        default: ubuntu-latest
+        type: choice
+        options: [windows-latest, ubuntu-latest]
+permissions:
+  contents: read
+concurrency:
+  group: daily-public-data
+  cancel-in-progress: false
+jobs:
+  crawl:
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [prices, tenders, vss]
+    env:
+      TIDB_DATABASE_URL: ${{ secrets.TIDB_DATABASE_URL }}
+      TIDB_HOST: ${{ secrets.TIDB_HOST }}
+      TIDB_PORT: ${{ secrets.TIDB_PORT }}
+      TIDB_USER: ${{ secrets.TIDB_USER }}
+      TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
+      TIDB_DATABASE: ${{ secrets.TIDB_DATABASE }}
+      CLOUDFLARE_CRAWL_WORKER_URL: ${{ secrets.CLOUDFLARE_CRAWL_WORKER_URL }}
+      CLOUDFLARE_CRAWL_WORKER_KEY: ${{ secrets.CLOUDFLARE_CRAWL_WORKER_KEY }}
+      VSS_EXPORT_RELAY_URL: ${{ secrets.VSS_EXPORT_RELAY_URL }}
+      VSS_EXPORT_RELAY_KEY: ${{ secrets.VSS_EXPORT_RELAY_KEY }}
+      CRAWL_ONLY: ${{ inputs.only || 'tenders,prices' }}
+      CRAWL_DAYS: ${{ inputs.days || '3' }}
+      PYTHONUNBUFFERED: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r server/requirements.txt
+        if: contains(env.CRAWL_ONLY, matrix.source)
+      - run: pip install -r "test zone/procurement/requirements.txt"
+        if: matrix.source == 'tenders' && contains(env.CRAWL_ONLY, matrix.source)
+      - run: python -m playwright install --with-deps chromium
+        if: matrix.source == 'tenders' && contains(env.CRAWL_ONLY, matrix.source) && env.CLOUDFLARE_CRAWL_WORKER_URL == ''
+      - run: python scripts/cloud_daily.py --yes-remote --only "$CRAWL_SOURCE" --days "$CRAWL_DAYS"
+        if: contains(env.CRAWL_ONLY, matrix.source)
+        env:
+          CRAWL_SOURCE: ${{ matrix.source }}
+  analytics-snapshots:
+    needs: crawl
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TIDB_DATABASE_URL: ${{ secrets.TIDB_DATABASE_URL }}
+      TIDB_HOST: ${{ secrets.TIDB_HOST }}
+      TIDB_PORT: ${{ secrets.TIDB_PORT }}
+      TIDB_USER: ${{ secrets.TIDB_USER }}
+      TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
+      TIDB_DATABASE: ${{ secrets.TIDB_DATABASE }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        if: env.R2_BUCKET != ''
+      - uses: actions/setup-node@v4
+        if: env.R2_BUCKET != ''
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        if: env.R2_BUCKET != ''
+        with:
+          python-version: '3.12'
+      - run: npm ci --ignore-scripts
+        if: env.R2_BUCKET != ''
+      - run: pip install boto3 python-dotenv
+        if: env.R2_BUCKET != ''
+      - run: python scripts/tidb/publish_r2_snapshots.py --yes-remote --analytics
+        if: env.R2_BUCKET != ''

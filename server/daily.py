@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""One daily pass: refresh DAV, the 20 newest MSC price pages, and VSS for 2 days.
+"""One daily pass: DAV, incremental MSC tenders/prices, and VSS for 2 days.
 
 Runs when the local app starts, and from DAILY_UPDATE.cmd at Windows logon.
 """
@@ -77,14 +77,15 @@ def _run_dav() -> None:
 
 
 def _run_msc() -> None:
+    if not msc.start_tender_browser(pages=200).get('ok'):
+        raise RuntimeError('MSC đang có lượt tải khác; chưa bắt đầu lượt cập nhật hằng ngày.')
+    _require_idle("msc", _wait(getattr(msc, "_thread", None), 7200))
+    _require_idle("msc_scope", True)
     end = datetime.now(VN).date()
-    # Freshness pass only: restart from page 1 and take the 20 newest pages.
-    # The complete historical crawler is a separate time-sliced action in Admin.
     start = end - timedelta(days=19)
-    msc.start_price_sync(start.isoformat(), end.isoformat(), refresh=True, max_pages=20)
+    if not msc.start_price_sync(start.isoformat(), end.isoformat(), refresh=True, incremental=True).get('ok'):
+        raise RuntimeError('MSC đang có lượt tải khác; chưa cập nhật đơn giá hằng ngày.')
     _require_idle("msc", _wait(getattr(msc, "_thread", None), 3600))
-    from .msc_scope import refresh_async
-    refresh_async(80)
 
 
 def _run_vss() -> None:

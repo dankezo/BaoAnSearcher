@@ -12,6 +12,8 @@ SCHEMA_FILES = (
     ROOT / "tidb" / "004_data_registry_meta.sql",
     ROOT / "tidb" / "005_msc_price_metric_rollup.sql",
     ROOT / "tidb" / "006_dav_groups_and_msc_identity.sql",
+    ROOT / "tidb" / "007_msc_price_daily_units.sql",
+    ROOT / "tidb" / "008_msc_open_date.sql",
 )
 
 

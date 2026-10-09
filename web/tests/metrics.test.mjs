@@ -3,6 +3,8 @@ import { test } from 'node:test'
 import Module from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import React from 'react'
+import { act, create } from 'react-test-renderer'
 
 const result = await build({
   stdin: { contents: 'export * from "./src/metrics.jsx"; export { fetchAllPages } from "./src/components.jsx"', resolveDir: fileURLToPath(new URL('..', import.meta.url)), loader: 'jsx' },
@@ -17,6 +19,18 @@ const {
   scopeMscMetricsRows, scopeVssMetricsRows,
   buildProvinceTable, buildProvinceYoYTable, fetchAllPages,
 } = compiled.exports
+
+const visualBundle = await build({
+  entryPoints: [`${fileURLToPath(new URL('..', import.meta.url))}/src/metrics.jsx`],
+  bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic',
+  external: ['react', 'react/jsx-runtime'], define: { 'import.meta.env': '{}' },
+})
+const visualModule = new Module('metrics-render-test')
+visualModule.paths = Module._nodeModulePaths(fileURLToPath(new URL('..', import.meta.url)))
+visualModule._compile(visualBundle.outputFiles[0].text, 'metrics-render-test.cjs')
+const { MscPriceSlice, MonthTrend, pricePointTooltip, trendRangeLabel } = visualModule.exports
+
+const textOf = node => typeof node === 'string' ? node : Array.isArray(node) ? node.map(textOf).join('') : node?.children ? textOf(node.children) : node?.props ? textOf(node.props.children) : ''
 
 test('DAV keeps density/tags/forms/new-sdk cards on full sample (all years)', () => {
   const now = Date.now()
@@ -110,4 +124,93 @@ test('Switching panes cancels obsolete background pagination', async () => {
   let calls = 0
   await assert.rejects(fetchAllPages(async () => { calls++; cancelled = true; return { total: 10, items: [1] } }, { size: 1, shouldCancel: () => cancelled }), { name: 'AbortError' })
   assert.equal(calls, 1)
+})
+
+test('price tooltip keeps units separate, calculates weighted price, and uses exact revenue', () => {
+  const point = { breakdown: [
+    { group: '1', unit: 'viên', qty: 30_000, revenue: 37_500_000, minPrice: 1_000, maxPrice: 1_500 },
+    { group: '2', unit: 'lọ', qty: 8, revenue: 20_000, minPrice: 2_500, maxPrice: 2_500 },
+    { group: '', unit: 'ống', qty: 3, revenue: 10, minPrice: 3, maxPrice: 4 },
+  ] }
+  const total = pricePointTooltip(point)
+  assert.match(total.total, /30\.000 viên/)
+  assert.match(total.total, /8 lọ/)
+  assert.match(total.total, /3 ống/)
+  assert.equal(total.lines.length, 3)
+  assert.match(total.lines[0], /^N1: 30\.000 viên × 1\.250 \(giá BQ\) = 37\.500\.000 VNĐ$/)
+  assert.match(total.lines[1], /^N2: 8 lọ × 2\.500 = 20\.000 VNĐ$/)
+  assert.match(total.lines[2], / = 10 VNĐ$/)
+  const selected = pricePointTooltip(point, '1')
+  assert.equal(selected.lines.length, 1)
+  assert.match(selected.lines[0], /^30\.000 viên × 1\.250 \(giá BQ\)/)
+  assert.doesNotMatch(selected.lines[0], /^N1:/)
+  assert.equal(trendRangeLabel(), 'Xu hướng 12 tháng gần nhất')
+})
+
+test('group selection switches the metric view, retains baseline, and resets outside', async () => {
+  const handlers = {}
+  const previousDocument = globalThis.document
+  globalThis.document = {
+    addEventListener: (name, handler) => { handlers[name] = handler },
+    removeEventListener: name => { delete handlers[name] },
+  }
+  let provincePicks = 0
+  const point = (revenue, key) => ({ key, revenue, breakdown: [{ group: '1', unit: 'viên', qty: 10, revenue, minPrice: 1, maxPrice: 1 }] })
+  const view = {
+    revenue: 100_000, months: 12, yoy: 0, groups: [100_000, 0, 0, 0, 0],
+    topProvinces: [{ name: 'Tổng tỉnh', value: 100_000 }],
+    coverage: { records: 2, previousRecords: 1, from: '2025-11', to: '2026-10' },
+    series: [point(100_000, '2026-09'), point(100_000, '2026-10')],
+    groupViews: { '1': {
+      revenue: 30_000, months: 12, yoy: 0, groups: [30_000, 0, 0, 0, 0],
+      topProvinces: [{ name: 'Nhóm tỉnh', value: 30_000 }],
+      coverage: { records: 1, previousRecords: 1, from: '2025-11', to: '2026-10' },
+      series: [point(30_000, '2026-09'), point(30_000, '2026-10')],
+    } },
+  }
+  let root
+  try {
+    await act(async () => { root = create(React.createElement('div', null,
+      React.createElement(MscPriceSlice, { view, loading: false, onProvince: () => { provincePicks++ } }),
+      React.createElement('table', { id: 'price-table' }, React.createElement('tbody', null, React.createElement('tr', null, React.createElement('td', null, 'Bảng giữ nguyên')))),
+    )) })
+    const pick = () => root.root.findAllByType('button').find(button => textOf(button.props.children).trim() === 'N1')
+    await act(async () => pick().props.onClick())
+    assert.equal(pick().props['aria-pressed'], true)
+    let text = textOf(root.toJSON())
+    assert.match(text, /30\.000/)
+    assert.equal(textOf(root.root.findByProps({ id: 'price-table' })), 'Bảng giữ nguyên')
+    assert.match(JSON.stringify(root.toJSON()), /Tổng ·/)
+    assert.equal(provincePicks, 0)
+    await act(async () => handlers.pointerdown({ target: {} }))
+    assert.equal(pick().props['aria-pressed'], false)
+    text = textOf(root.toJSON())
+    assert.match(text, /100\.000/)
+    assert.equal(provincePicks, 0)
+  } finally {
+    await act(async () => root?.unmount())
+    if (previousDocument === undefined) delete globalThis.document
+    else globalThis.document = previousDocument
+  }
+})
+
+
+test('price point remains open after clicking and leaving, with separate quantity rows', async () => {
+  const previousDocument = global.document
+  global.document = {addEventListener(){},removeEventListener(){}}
+  let view
+  try {
+    await act(async () => { view=create(React.createElement(MonthTrend,{series:[{key:'2026-04',revenue:101000,breakdown:[{group:'1',unit:'viên',qty:100,revenue:100000},{group:'2',unit:'lọ',qty:2,revenue:1000}]}]})) })
+    let point=view.root.findByProps({className:'price-trend-point'})
+    await act(async () => { point.props.onClick() })
+    const region=view.root.findByProps({'aria-label':'Chi tiết điểm doanh thu'})
+    assert.match(textOf(region),/Tháng 2026-04/)
+    assert.match(textOf(region),/Đã giữ điểm/)
+    assert.equal(region.findAllByType('tbody')[0].findAllByType('tr').length,2)
+    assert.equal(region.findAllByType('thead')[0].findAllByType('th').length,4)
+    await act(async () => { view.root.findByProps({className:'price-trend'}).props.onMouseLeave();point.props.onBlur({relatedTarget:null}) })
+    assert.equal(view.root.findAllByProps({'aria-label':'Chi tiết điểm doanh thu'}).length,1)
+    await act(async () => { view.root.findByProps({'aria-label':'Đóng chi tiết điểm'}).props.onClick() })
+    assert.equal(view.root.findAllByProps({'aria-label':'Chi tiết điểm doanh thu'}).length,0)
+  } finally { await act(async()=>view?.unmount());global.document=previousDocument }
 })

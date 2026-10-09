@@ -4,6 +4,7 @@ import { json } from '../auth.js'
 import { checked } from '../../lib/regulatory/store.js'
 import { crawlSource } from '../../lib/regulatory/crawler.js'
 import { analyzeDaily } from '../../lib/regulatory/ai.js'
+import {seedSources} from '../../lib/regulatory/seed.js'
 
 export const config = { maxDuration: 300 }
 export function authorized(header, secret) {
@@ -20,7 +21,8 @@ export default async function handler(req,res) {
     // Authenticated operational retry; leases and HTTP cache still apply.
     const refresh = new URL(req.url, 'https://localhost').searchParams.get('refresh') === '1'
     const deadline=Date.now()+200000
-    const sources=checked(await db.from('regulatory_sources').select('*').eq('enabled',true).order('id').limit(6))
+    await seedSources(db)
+    const sources=checked(await db.from('regulatory_sources').select('*').eq('enabled',true).order('last_attempt',{ascending:true,nullsFirst:true}).limit(20))
     const results=[]
     for(const source of sources) {
       if(Date.now()>deadline-20000) break
@@ -28,7 +30,7 @@ export default async function handler(req,res) {
       // Longer admin-selected intervals remain respected. Cache/lease still apply.
       const today = new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh'}).format(new Date())
       const attemptedToday = source.last_attempt && new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh'}).format(new Date(source.last_attempt))===today
-      results.push(await crawlSource(db,source,{force:refresh||(source.interval_hours<=24&&!attemptedToday),deadline:Math.min(deadline,Date.now()+100000)}))
+      results.push(await crawlSource(db,source,{force:refresh||(source.interval_hours<=24&&!attemptedToday),limit:6,deadline:Math.min(deadline,Date.now()+60000)}))
     }
     const ai=await analyzeDaily(db)
     checked(await db.from('regulatory_http_cache').delete().lt('checked_at',new Date(Date.now()-14*86400000).toISOString()))
