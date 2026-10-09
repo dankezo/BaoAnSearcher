@@ -36,7 +36,7 @@ export interface DetailRow {
   date:string|null; expiry:string|null; tender_no:string|null; source_url:string|null; status:string|null
   [key:string]:string|null
 }
-export interface DetailPage {source:Source;page:number;items:DetailRow[];hasMore:boolean;reason?:string}
+export interface DetailPage {source:Source;page:number;items:DetailRow[];hasMore:boolean;reason?:string;registrantUnavailable?:boolean}
 export interface NewsContext {id:string;title:string;summary?:string;source_url:string;published_at?:string;issued_at?:string;legal_status?:string;category?:string}
 export interface InsightItem {detail:string;source:Source|'regulatory';documentId?:string}
 export interface StrategicInsight {method:'ai'|'rules';provider?:string;model?:string;reason?:string;generatedAt:string;evidence:InsightItem[];inference:InsightItem[];verification:InsightItem[];actions:InsightItem[];news?:NewsContext[];newsStatus?:'available'|'unavailable';newsSummary?:{documentId:string;impact:string;action:string}|null}

@@ -198,6 +198,21 @@ export async function detail(adapter, input) {
   if (p.unavailable) return { items: [], hasMore: false, page, source, reason: 'Nguồn không hỗ trợ bộ lọc này.' }
   const date = source === 'dav' ? '1=1' : q.months==='all'?'(date IS NULL OR (date >= ? AND date <= ?))':'date >= ? AND date <= ?'
   const args = [...p.args, ...(source === 'dav' ? [] : [q.start, q.end])]
+  if(input.panel==='products') {
+    if(!['msc_prices','vss'].includes(source)) bad('Sản phẩm cần dữ liệu thuốc MSC hoặc VSS.')
+    const dimension=['name','strength','form','unit','registration','group_key']
+    const items=await adapter.query(source,`SELECT MIN(id) AS id, ${dimension.join(',')}, SUM(amount) AS amount, SUM(quantity) AS quantity FROM (${base}) canonical WHERE ${p.sql} AND ${date} GROUP BY ${dimension.join(',')} ORDER BY CAST(SUM(amount) AS DECIMAL(28,3)) DESC, ${dimension.join(',')} LIMIT 30`,args)
+    // Only DAV identifies the registrant. Never substitute the winning contractor.
+    const keys=value=>[...new Set([fold(value),...String(value||'').split(/[();,]/).map(fold)].filter(Boolean))]
+    const registrations=[...new Set(items.flatMap(row=>keys(row.registration)))]
+    let registrantUnavailable=false
+    if(registrations.length)try {
+      const dav=await adapter.relation('dav',{...q,mode:'macro',entity:'',filters:{}},'detail')
+      const records=await adapter.query('dav',`SELECT DISTINCT registration, registrant FROM (${dav}) dav_products WHERE registration_key IN (${registrations.map(()=>'?').join(',')}) AND registrant IS NOT NULL AND registrant <> ''`,registrations)
+      for(const row of items){const names=[...new Set(records.filter(record=>keys(record.registration).some(key=>keys(row.registration).includes(key))).map(record=>record.registrant))];row.registrant=names.join('; ')||null}
+    }catch{registrantUnavailable=true}
+    return {source,page:0,items,hasMore:false,panel:'products',registrantUnavailable}
+  }
   if(input.panel==='competition') {
     if(!['msc_prices','vss'].includes(source)) bad('Ma trận cần dữ liệu thuốc MSC hoặc VSS.')
     const dimension=['ingredient','strength','form','group_key','company','unit']

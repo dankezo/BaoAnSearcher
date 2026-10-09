@@ -9,22 +9,23 @@ import {normalizeQuery,sourceQuery} from '../api-lib/analytics/core.js'
 
 function mockAdapter(){
  const calls=[],relations=[]
- return {calls,relations,relation:async(source,q,purpose)=>{relations.push({source,q,purpose});return `SELECT * FROM ${source}_facts`},query:async(source,sql,args)=>{calls.push({source,sql,args});return sql.includes(' AS total FROM')?[{total:2}]:source==='msc_tenders'?[{tender_no:'IB-1',package_name:'Package headline',package_status:'Đã có kết quả',package_bid_price:'99.90'}]:[{id:'IB-1',tender_no:'IB-1',date:'2026-10-01',name:'Drug name',amount:'12.50',quantity:'2',line_count:2} ]}}
+ return {calls,relations,relation:async(source,q,purpose)=>{relations.push({source,q,purpose});return `SELECT * FROM ${source}_facts`},query:async(source,sql,args)=>{calls.push({source,sql,args});return sql.includes(' AS total FROM')?[{total:2}]:source==='msc_tenders'?[{tender_no:'IB-1',package_name:'Package headline',package_status:'Đã có kết quả',package_bid_price:'99.90'}]:[{id:'IB-1',tender_no:'IB-1',date:'2026-10-01',name:'Drug name',amount:'12.50',quantity:'2',line_count:2,total_distinct_packages:2} ]}}
 }
 
 test('MSC awards scope once, group stable tender packages and sum decimal facts',async()=>{
  const adapter=mockAdapter()
  const result=await recentAwards(adapter,{mode:'company',role:'all',entityMatch:'contains',entity:'A%_ Pharma',months:'all',source:'msc_prices',sort:'amount'})
- const [count,list]=adapter.calls
+ const [list]=adapter.calls
  assert.equal(result.totalDistinctPackages,2)
- assert.match(count.sql,/COUNT\(DISTINCT NULLIF\(tender_no,''\)\)/)
- assert.match(count.sql,/date IS NULL/);assert.deepEqual(count.args.slice(0,3),['%a!%!_ pharma%','%a!%!_ pharma%','1900-01-01']);assert.match(count.args[3],/^\d{4}-\d{2}-\d{2}$/)
+ assert.match(list.sql,/OVER \(\) AS total_distinct_packages/)
+ assert.equal(adapter.calls.filter(call=>call.source==='msc_prices').length,1)
+ assert.match(list.sql,/date IS NULL/);assert.deepEqual(list.args.slice(0,3),['%a!%!_ pharma%','%a!%!_ pharma%','1900-01-01']);assert.match(list.args[3],/^\d{4}-\d{2}-\d{2}$/)
  assert.match(list.sql,/COALESCE\(NULLIF\(tender_no,''\),id\) AS id/)
  assert.match(list.sql,/GROUP BY COALESCE\(NULLIF\(tender_no,''\),id\)/)
  assert.match(list.sql,/SUM\(amount\) AS amount/);assert.match(list.sql,/SUM\(quantity\) AS quantity/)
  assert.match(list.sql,/COUNT\(\*\) AS line_count/);assert.match(list.sql,/MAX\(date\) AS date/)
- assert.match(list.sql,/ORDER BY CAST\(SUM\(amount\) AS DECIMAL\(28,3\)\) DESC/)
- assert.equal(list.args.length,4);assert.equal(list.args[2],'1900-01-01');assert.equal(list.args[3],count.args[3])
+ assert.match(list.sql,/ORDER BY CAST\(amount AS DECIMAL\(28,3\)\) DESC/)
+ assert.equal(list.args.length,4);assert.equal(list.args[2],'1900-01-01');assert.match(list.args[3],/^\d{4}-\d{2}-\d{2}$/)
  assert.equal(result.items[0].name,'Drug name');assert.equal(result.items[0].package_name,'Package headline')
  assert.equal(result.items[0].status,'Đã có kết quả');assert.equal(result.items[0].package_bid_price,'99.90')
  const headers=adapter.calls.find(call=>call.source==='msc_tenders')
@@ -93,5 +94,10 @@ test('related awards intersect parent medicine, clicked facility and dates befor
    const company=run(source,{...scope,mode:'company',entity:'Đối thủ',role:'all',entityMatch:'contains'})
    assert.ok(company.items.length>0&&company.items.every(row=>row.ingredient==='Ambroxol'))
   }
+  execFileSync('python',['-X','utf8','-c',"import json,sqlite3,sys;from pathlib import Path;c=sqlite3.connect(Path(sys.argv[1])/'msc_prices.sqlite3');r=json.loads(c.execute(\"SELECT normalized FROM records WHERE source_id='0'\").fetchone()[0]);[(r.update(tender_no='EXTRA-'+str(i) if i<60 else ''),c.execute('INSERT INTO records VALUES(?,?,?,?)',('prices','extra-'+str(i),json.dumps(r,ensure_ascii=False),'ambroxol benh vien demo'))) for i in range(61)];c.commit();c.close()",folder])
+  const runPage=page=>JSON.parse(execFileSync('node',['scripts/analytics_local.mjs'],{input:JSON.stringify({action:'awards',body:{query,scope,source:'msc_prices',page}}),encoding:'utf8',env:{...process.env,ANALYTICS_DB_DIR:folder},timeout:30000}))
+  const secondPage=runPage(1),pastEnd=runPage(2)
+  assert.equal(secondPage.totalDistinctPackages,62);assert.equal(secondPage.items.length,13)
+  assert.equal(pastEnd.totalDistinctPackages,62);assert.equal(pastEnd.items.length,0)
  }finally{rmSync(folder,{recursive:true,force:true})}
 })

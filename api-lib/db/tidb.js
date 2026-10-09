@@ -32,7 +32,15 @@ function client() {
 }
 
 export async function query(sql, args = []) {
-  const rs = await client().execute(sql, args)
+  const current=client()
+  let rs
+  try{rs=await current.execute(sql,args)}catch(error){
+    // The HTTP driver retains a session that TiDB can invalidate. Retry reads once
+    // on a new connection; never replay writes or unrelated database errors.
+    if(Number(error.details?.code)!==61100002||!/^\s*SELECT\b/i.test(sql))throw error
+    if(connection===current)connection=null
+    rs=await client().execute(sql,args)
+  }
   const rows = Array.isArray(rs) ? rs : (rs?.rows || [])
   return { rows }
 }

@@ -12,22 +12,25 @@ type AwardsPage={source:AwardSource;sort:AwardSort;page:number;items:DetailRow[]
 type OpenPackage=(row:DetailRow)=>void
 type OpenEntity=(mode:'drug'|'company'|'territory',name:string,role?:AnalyticsQuery['role'],field?:'ingredient'|'name'|'registration'|'province'|'facility'|'region')=>void
 
-async function loadAwards(query:AnalyticsQuery,source:AwardSource,sort:AwardSort,page:number,scope?:AnalyticsQuery):Promise<AwardsPage>{
- return request<AwardsPage>('/api/analytics/awards',{query,source,sort,page,...(scope?{scope}:{})})
+async function loadAwards(query:AnalyticsQuery,source:AwardSource,sort:AwardSort,page:number,scope?:AnalyticsQuery,signal?:AbortSignal):Promise<AwardsPage>{
+ return request<AwardsPage>('/api/analytics/awards',{query,source,sort,page,...(scope?{scope}:{})},signal)
 }
 
 export default function RecentAwards({query,scope,onOpenPackage,onEntity,onRelated}:{query:AnalyticsQuery;scope?:AnalyticsQuery;onOpenPackage?:OpenPackage;onEntity?:OpenEntity;onRelated?:(q:AnalyticsQuery)=>void}){
  void onEntity
  const [source,setSource]=useState<AwardSource>('msc_prices'),[sort,setSort]=useState<AwardSort>('recent'),[page,setPage]=useState(0)
  const [data,setData]=useState<AwardsPage>(),[error,setError]=useState(''),[loading,setLoading]=useState(false)
- const generation=useRef(0)
- useEffect(()=>{setPage(0);setData(undefined)},[query,scope,source,sort])
+ const generation=useRef(0),selection=useRef('')
+ const [retry,setRetry]=useState(0)
  useEffect(()=>{
+  const key=JSON.stringify([query,scope,source,sort])
+  if(selection.current!==key){selection.current=key;setData(undefined);if(page){setPage(0);return}}
   const id=++generation.current
+  const controller=new AbortController()
   setLoading(true);setError('')
-  loadAwards(query,source,sort,page,scope).then(value=>{if(generation.current===id)setData(value)}).catch(reason=>{if(generation.current===id)setError(reason.message)}).finally(()=>{if(generation.current===id)setLoading(false)})
-  return()=>{generation.current++}
- },[query,scope,source,sort,page])
+  loadAwards(query,source,sort,page,scope,controller.signal).then(value=>{if(generation.current===id)setData(value)}).catch(reason=>{if(generation.current===id&&!controller.signal.aborted)setError(reason instanceof TypeError?'Kết nối bị gián đoạn khi tải kết quả trúng thầu.':reason.name==='TimeoutError'?'Tải kết quả trúng thầu quá thời gian chờ.':reason.message)}).finally(()=>{if(generation.current===id)setLoading(false)})
+  return()=>{generation.current++;controller.abort()}
+ },[query,scope,source,sort,page,retry])
  const rows=data?.items||[]
  const entity=(value:string|null|undefined,mode:'drug'|'company'|'territory',role:AnalyticsQuery['role']='winner',field:'ingredient'|'name'|'registration'|'province'|'facility'='ingredient')=><EntityValue value={value} parentQuery={query} mode={mode} role={role} field={field} onRelated={onRelated}/>
  return <Card exportable={!!rows.length} title="Kết quả trúng thầu gần đây" hint="Các dòng trúng thầu MSC hoặc VSS trong kỳ và bộ lọc hiện tại. Số gói riêng chỉ có cho MSC theo mã TBMT; VSS không cung cấp mã gói ổn định.">
@@ -38,7 +41,7 @@ export default function RecentAwards({query,scope,onOpenPackage,onEntity,onRelat
   </div>
   {data?.totalDistinctPackages!=null&&<p className="muted small">{count(data.totalDistinctPackages)} mã TBMT riêng trong phạm vi lọc</p>}
   {data?.packageCountUnavailableReason&&<p className="muted small">{data.packageCountUnavailableReason}</p>}
-  {loading&&<p role="status">Đang tải kết quả trúng thầu…</p>}{error&&<p role="alert">{error}</p>}{data?.reason&&<p>{data.reason}</p>}
+  {loading&&<p role="status">Đang tải kết quả trúng thầu…</p>}{error&&<p role="alert">{error} <button className="btn ghost" onClick={()=>setRetry(value=>value+1)}>Thử lại</button></p>}{data?.reason&&<p>{data.reason}</p>}
   {!!rows.length&&<div className="analytics-table"><table><thead><tr><th>Ngày / Mã gói</th><th>Gói thầu / Thuốc · SĐK</th><th>Hoạt chất</th><th>Nhà thầu</th><th>Nhà sản xuất</th><th>Cơ sở / Tỉnh</th><th>Giá trị</th></tr></thead><tbody>{rows.map((row,index)=>{
    const progress=rows.length<2?1:1-index/(rows.length-1),background=`linear-gradient(90deg, rgba(22,163,74,${0.04+progress*0.11}), rgba(220,252,231,${0.08+progress*0.18}))`
    return <tr key={row.id} onDoubleClick={()=>onOpenPackage?.({...row,source})} title={onOpenPackage?'Nhấp đúp để mở chi tiết gói':''} style={{background}}>

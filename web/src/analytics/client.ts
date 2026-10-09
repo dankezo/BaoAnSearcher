@@ -12,7 +12,8 @@ export async function request<T>(path:string,body?:unknown,signal?:AbortSignal):
   const auxiliary=path.endsWith('/awards')||path.endsWith('/company-profile')&&!(body as {refresh?:boolean})?.refresh
   const cacheKey=`baoan.analytics.aux.v2.${s.user.id}`,key=JSON.stringify([path,body])
   if(auxiliary)try{const records=JSON.parse(sessionStorage.getItem(cacheKey)||'{}');if(Object.hasOwn(records,key))return records[key]}catch{}
-  const response=await fetch(`${import.meta.env.VITE_API_BASE||''}${path}`,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',Authorization:`Bearer ${s.access_token}`},body:body?JSON.stringify(body):undefined,signal:signal||AbortSignal.timeout(90000)})
+  const timeout=AbortSignal.timeout(90000)
+  const response=await fetch(`${import.meta.env.VITE_API_BASE||''}${path}`,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',Authorization:`Bearer ${s.access_token}`},body:body?JSON.stringify(body):undefined,signal:signal?AbortSignal.any([signal,timeout]):timeout})
   if(!response.ok){const v=await response.json().catch(()=>({}));throw new Error(v.error||v.detail||'Chưa tải được dữ liệu phân tích.')}
   const result=await response.json()
   if(auxiliary)try{const records=JSON.parse(sessionStorage.getItem(cacheKey)||'{}');records[key]=result;const keys=Object.keys(records);for(const old of keys.slice(0,Math.max(0,keys.length-32)))delete records[old];sessionStorage.setItem(cacheKey,JSON.stringify(records))}catch{}
@@ -28,6 +29,7 @@ async function cached<T>(path:string,body:unknown):Promise<T>{
 export const loadOverview=(q:AnalyticsQuery)=>cached<AnalyticsOverview>('/api/analytics/overview',q)
 export const loadDetail=(q:AnalyticsQuery,source:Source,page:number)=>cached<DetailPage>('/api/analytics/detail',{query:q,source,page})
 export const loadCompetition=(q:AnalyticsQuery,source:Source,page:number)=>cached<DetailPage>('/api/analytics/detail',{query:q,source,page,panel:'competition'})
+export const loadProducts=(q:AnalyticsQuery,source:Source)=>cached<DetailPage>('/api/analytics/detail',{query:q,source,panel:'products'})
 export const loadInsight=(q:AnalyticsQuery,refresh=false,snapshot?:AnalyticsOverview)=>{const body={query:q,...(snapshot?{snapshot:{version:snapshot.version,query:snapshot.query,generatedAt:snapshot.generatedAt,sources:Object.fromEntries(Object.entries(snapshot.sources).map(([source,stats])=>[source,{...stats,rows:stats.rows.filter(row=>!['price_coordinate','unit_month','month_group'].includes(row.kind))}])),missing:snapshot.missing}}:{}),...(refresh?{refreshAt:Date.now()}:{})};return refresh?request<StrategicInsight>('/api/analytics/ai-insight',body):cached<StrategicInsight>('/api/analytics/ai-insight',body)}
 export const loadSuggestions=(q:string,signal:AbortSignal)=>request<{items:EntitySuggestion[]}>(`/api/analytics/suggest?q=${encodeURIComponent(q)}`,undefined,signal)
 export async function presets():Promise<Preset[]>{

@@ -19,14 +19,15 @@ export default function PackageWorkspace({relatedQuery,scope,packageRow,onOpenPa
  const awardsQuery=useMemo(()=>relatedQuery||{...DEFAULT_QUERY,months:'all' as const,comparison:'none' as const},[relatedQuery])
  useEffect(()=>{
   let active=true
+  const controller=new AbortController()
   setDetail(undefined);setError('')
   if(!selected||source!=='msc_prices'||!tenderNo){setLoading(false);return()=>{active=false}}
   setLoading(true)
-  request<DetailPage>('/api/analytics/detail',{query:{...DEFAULT_QUERY,months:'all',comparison:'none'},source:'msc_prices',page:0,tenderNo})
+  request<DetailPage>('/api/analytics/detail',{query:{...DEFAULT_QUERY,months:'all',comparison:'none'},source:'msc_prices',page:0,tenderNo},controller.signal)
    .then(value=>{if(active)setDetail(value)})
    .catch(reason=>{if(active)setError(reason instanceof Error?reason.message:'Chưa tải được chi tiết gói thầu.')})
    .finally(()=>{if(active)setLoading(false)})
-  return()=>{active=false}
+  return()=>{active=false;controller.abort()}
  },[selected?.id,source,tenderNo])
  const sourceUrl=selected?.source_url&&/^https?:\/\//.test(selected.source_url)?selected.source_url:''
  const isVss=source==='vss',multipleLines=Number(selected?.line_count||1)>1

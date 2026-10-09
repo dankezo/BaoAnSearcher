@@ -24,20 +24,21 @@ export async function recentAwards(adapter,input={},options={}){
  // ALL time includes undated rows. Keep the date predicate parameterized for bounded windows.
  const date=query.months==='all'?'(date >= ? AND date <= ? OR date IS NULL)':'date >= ? AND date <= ?'
  const args=[...p.args,query.start,query.end]
- const packageCount=source==='msc_prices'
-  ? await adapter.query(source,`SELECT COUNT(DISTINCT NULLIF(tender_no,'')) AS total FROM (${base}) canonical WHERE ${p.sql} AND ${date}`,args)
-  : null
  const order=source==='msc_prices'
-  ? (sort==='amount'?`CAST(SUM(amount) AS DECIMAL(28,3)) DESC, (MAX(date) IS NULL) ASC, MAX(date) DESC, COALESCE(NULLIF(tender_no,''),id) ASC`:`(MAX(date) IS NULL) ASC, MAX(date) DESC, COALESCE(NULLIF(tender_no,''),id) ASC`)
+  ? (sort==='amount'?'CAST(amount AS DECIMAL(28,3)) DESC, (date IS NULL) ASC, date DESC, id ASC':'(date IS NULL) ASC, date DESC, id ASC')
   : (sort==='amount'?'CAST(amount AS DECIMAL(28,3)) DESC, (date IS NULL) ASC, date DESC, id ASC':'(date IS NULL) ASC, date DESC, id ASC')
  let sql
  if(source==='msc_prices'){
   const representatives=[`MAX(date) AS date`,...['ingredient','company','manufacturer'].map(field=>`COUNT(DISTINCT NULLIF(${field},'')) AS ${field}_count`),...FIELDS.map(field=>`MIN(${field}) AS ${field}`)].join(', ')
-  sql=`SELECT COALESCE(NULLIF(tender_no,''),id) AS id, ${representatives}, SUM(amount) AS amount, SUM(quantity) AS quantity, COUNT(*) AS line_count FROM (${base}) canonical WHERE ${p.sql} AND ${date} GROUP BY COALESCE(NULLIF(tender_no,''),id) ORDER BY ${order} LIMIT ${PAGE_SIZE+1} OFFSET ${page*PAGE_SIZE}`
+  // Count the grouped TBMT identities in the same scan, before LIMIT/OFFSET.
+  sql=`SELECT awards.*, COUNT(NULLIF(tender_no,'')) OVER () AS total_distinct_packages FROM (SELECT COALESCE(NULLIF(tender_no,''),id) AS id, ${representatives}, SUM(amount) AS amount, SUM(quantity) AS quantity, COUNT(*) AS line_count FROM (${base}) canonical WHERE ${p.sql} AND ${date} GROUP BY COALESCE(NULLIF(tender_no,''),id)) awards ORDER BY ${order} LIMIT ${PAGE_SIZE+1} OFFSET ${page*PAGE_SIZE}`
  }else{
   sql=`SELECT *, 1 AS line_count FROM (${base}) canonical WHERE ${p.sql} AND ${date} ORDER BY ${order} LIMIT ${PAGE_SIZE+1} OFFSET ${page*PAGE_SIZE}`
  }
  const rows=await adapter.query(source,sql,args),items=rows.slice(0,PAGE_SIZE)
+ let packageCount=source==='msc_prices'?Number(rows[0]?.total_distinct_packages||0):null
+ // A page beyond the last row still needs the total, but normal pages use one scan.
+ if(source==='msc_prices'&&page>0&&!rows.length)packageCount=Number((await adapter.query(source,`SELECT COUNT(DISTINCT NULLIF(tender_no,'')) AS total FROM (${base}) canonical WHERE ${p.sql} AND ${date}`,args))[0]?.total||0)
  let packageHeaders=[]
  if(source==='msc_prices'&&items.length){
   const tenderNos=[...new Set(items.map(row=>row.tender_no).filter(Boolean))]
@@ -51,6 +52,6 @@ export async function recentAwards(adapter,input={},options={}){
  }
  if(source==='msc_prices')await enrichTenderSources(adapter,query,items,packageHeaders)
  return {source,sort,page,items,hasMore:rows.length>PAGE_SIZE,
-  totalDistinctPackages:source==='msc_prices'?Number(packageCount?.[0]?.total||0):null,
+  totalDistinctPackages:packageCount,
   packageIdentityAvailable:source==='msc_prices',packageCountUnavailableReason:source==='vss'?VSS_REASON:undefined}
 }
