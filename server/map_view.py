@@ -9,6 +9,8 @@ The feed has no latitude, longitude, street address, or wardName.
 Dots stay province-level; the client offsets them from the real province centroid.
 """
 from __future__ import annotations
+from datetime import datetime
+from contextlib import closing
 
 import json
 import sqlite3
@@ -437,7 +439,13 @@ def _rollup(items: list[dict], keys: list[str], *, code: str, name: str, region:
     return result
 
 
-def _vss_rows(filters: dict):
+def _vss_rows(filters: dict, start=None, end=None):
+    if start is not None and end is not None:
+        if not VSS_DB.exists(): return []
+        where,args = _vss_where(filters,start,end)
+        with closing(sqlite3.connect(f"file:{VSS_DB}?mode=ro",uri=True)) as con:
+            con.create_function('fold',1,fold)
+            return con.execute(f"SELECT coalesce(ma_tinh,''),substr(tungay_hd,1,7),coalesce(nhomthau,''),sum(cast(json_extract(raw,'$.thanhtien') AS real)),count(*),max(json_extract(raw,'$.ten_tinh')) FROM bids {where} GROUP BY 1,2,3",args).fetchall()
     rows = _heat_rows(filters)
     if rows is None:
         rows = _vss_sql(filters)
@@ -500,7 +508,7 @@ def _vss_where(filters: dict, start, end):
         clauses.append("coalesce(tungay_hd,'') >= ?")
         args.append(str(filters["tuNgay"])[:10])
     if filters.get("denNgay"):
-        clauses.append("coalesce(denngay_hd,'') <= ?")
+        clauses.append("coalesce(tungay_hd,'') <= ?")
         args.append(str(filters["denNgay"])[:10] + " 23:59:59")
     years = filters.get("nam") or []
     if isinstance(years, (str, int)):
@@ -591,19 +599,30 @@ def _vss_facilities(filters: dict, start, end, limit: int = 220, with_dots: bool
 
 def _build_vss(filters: dict, months: int, *, with_dots: bool = True, with_ingredients: bool = True) -> dict:
     months, now, cur_from, prev_from, prev_end = _window(months)
+    selected_range = None
+    if filters.get('tuNgay') or filters.get('denNgay'):
+        cur_from = datetime.strptime(filters['tuNgay'],'%Y-%m-%d') if filters.get('tuNgay') else datetime(1900,1,1)
+        now = datetime.strptime(filters['denNgay'],'%Y-%m-%d') if filters.get('denNgay') else now
+        if cur_from > now: raise ValueError('HĐ từ ngày phải trước hoặc bằng ngày kết thúc.')
+        import calendar
+        previous=lambda d:d.replace(year=d.year-1,day=min(d.day,calendar.monthrange(d.year-1,d.month)[1]))
+        prev_from,prev_end = previous(cur_from),previous(now)
+        selected_range={'from':filters.get('tuNgay') or None,'to':filters.get('denNgay') or now.strftime('%Y-%m-%d')}
+        filters={**filters,'tuNgay':'','denNgay':''}
     keys = _month_keys(cur_from, now)
     province_codes = _code_set(filters)
     region_name = str(filters.get("region") or "").strip()
     group_need = _group_set(filters)
     name_needles = _name_needles(filters)
-    sql_filters = {"hoatchat": filters.get("hoatchat") or ""}
+    sql_filters = filters
     buckets = _seed_buckets(province_codes, region_name)
-    for code, ym, grp, value, cnt, name in _vss_rows(sql_filters):
+    rows=([(row,'current') for row in _vss_rows(sql_filters,cur_from,now)]+[(row,'previous') for row in _vss_rows(sql_filters,prev_from,prev_end)]) if selected_range else [(row,None) for row in _vss_rows(sql_filters)]
+    for (code, ym, grp, value, cnt, name),period in rows:
         stamp = _parse_dt(f"{ym}-01" if ym and len(str(ym)) == 7 else "")
         if stamp is None:
             continue
-        current = _in_span(stamp, cur_from, now)
-        previous = _in_span(stamp, prev_from, prev_end)
+        current = period=='current' if period else _in_span(stamp, cur_from, now)
+        previous = period=='previous' if period else _in_span(stamp, prev_from, prev_end)
         if not current and not previous:
             continue
         key = str(code or "").strip()
@@ -688,6 +707,14 @@ def _build_vss(filters: dict, months: int, *, with_dots: bool = True, with_ingre
         rows.sort(key=lambda item: item["value"], reverse=True)
     dots = [dot for dot in dots if dot["id"] in national_ids]
     summary = _rollup(provinces, keys, code="", name="Bộ lọc hiện tại", region=region_name)
+    summary['range']=selected_range
+    summary['quantities']=[]
+    if VSS_DB.exists():
+        where,args=_vss_where(filters,cur_from,now)
+        with closing(sqlite3.connect(f"file:{VSS_DB}?mode=ro",uri=True)) as con:
+            con.create_function('fold',1,fold)
+            quantities=con.execute(f"SELECT max(trim(json_extract(raw,'$.donvitinh'))),sum(cast(json_extract(raw,'$.soluong') AS real)) FROM bids {where} GROUP BY lower(trim(coalesce(json_extract(raw,'$.donvitinh'),''))) ORDER BY 2 DESC",args).fetchall()
+            summary['quantities']=[{'unit':unit,'quantity':quantity} for unit,quantity in quantities]
     lists = _vss_ingredients(filters, cur_from, now) if with_ingredients else {"national": [], "areas": {}}
     return _payload(
         "vss", months, summary, provinces, regions, dots, len(dots), lists,

@@ -48,6 +48,9 @@ export function StatCards({
     )
   }
   const yoyClass = stats.yoy == null ? 'flat' : stats.yoy < 0 ? 'neg' : 'pos'
+  const range=stats.range
+  const day=value=>value?value.split('-').reverse().join('/'):'đầu dữ liệu'
+  const quantities=stats.quantities||[]
   const slices = GROUP_COLORS.map((color, index) => {
     const value = Number(stats.groups?.[index]) || 0
     return {
@@ -68,8 +71,8 @@ export function StatCards({
       )}
       <dl>
         <div>
-          <dt>Giá trị {months} tháng</dt>
-          <dd>{fmtVndCompact(stats.value)}</dd>
+          <dt>{range?`Giá trị ${range.from?`từ ${day(range.from)} `:''}đến ${day(range.to)}`:`Giá trị ${months} tháng`}</dt>
+          <dd>{fmtVndCompact(stats.value)}{quantities.length>0&&<span className="stat-quantities"> / {quantities.slice(0,2).map(row=>`${fmtInt(row.quantity)} ${row.unit||'chưa rõ ĐVT'}`).join(' · ')}</span>}{quantities.length>2&&<details className="stat-quantity-detail"><summary>+ {quantities.length-2} đơn vị khác</summary><dl>{quantities.slice(2).map(row=><div key={row.unit||'unknown'}><dt>{row.unit||'Chưa rõ ĐVT'}</dt><dd>{fmtInt(row.quantity)}</dd></div>)}</dl></details>}</dd>
         </div>
         <div>
           <dt>Tăng/giảm cùng kỳ</dt>
@@ -84,7 +87,7 @@ export function StatCards({
           <dd title={CSYT_TIP}>{fmtInt(stats.facilities ?? 0)}</dd>
         </div>
         <div className="map-argus-trend">
-          <dt>{trendLabel || `Xu hướng ${months} tháng`}</dt>
+          <dt>{trendLabel || (range?'Xu hướng trong khoảng HĐ':`Xu hướng ${months} tháng`)}</dt>
           <dd><Sparkline points={trendMetric === 'packages' ? stats.countTrend : stats.trend} unit={trendMetric === 'packages' ? 'gói' : 'VNĐ'} /></dd>
         </div>
       </dl>

@@ -158,6 +158,10 @@ def open_db(source):
         return item.get('factoryProvince' if role=='factory' else 'officeProvince')
     connection.create_function('COMPANY_PROVINCE',2,company_province,deterministic=True)
     connection.create_function('CONCAT', -1, lambda *x: ''.join(str(v or '') for v in x), deterministic=True)
+    if source == 'vss':
+        from server.sdk_forms import _load, norm_sdk
+        forms = _load()
+        connection.create_function('SDK_FORM',1,lambda sdk:forms.get(norm_sdk(sdk)),deterministic=True)
     connection.create_aggregate('SUM', 1, DecimalSum)
     connection.create_aggregate('DMIN', 1, DecimalMin)
     connection.create_aggregate('DMAX', 1, DecimalMax)

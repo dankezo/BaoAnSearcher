@@ -47,13 +47,20 @@ function num(value) {
   return Number.isFinite(n) ? n : 0
 }
 
-export function mapWindow(months, now = new Date()) {
+export function mapWindow(months, now = new Date(), filters = {}) {
   const span = [3, 6, 12].includes(Number(months)) ? Number(months) : 12
   const index = now.getFullYear() * 12 + now.getMonth() - (span - 1)
   const curFrom = new Date(Math.floor(index / 12), index % 12, 1)
   const prevFrom = new Date(Math.floor((index - 12) / 12), (index - 12) % 12, 1)
   const prevEnd = new Date(now)
   prevEnd.setFullYear(prevEnd.getFullYear() - 1)
+  if(filters.tuNgay||filters.denNgay){
+    const parse=value=>{const d=new Date(`${value}T00:00:00`);if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isFinite(d.getTime())||isoDate(d)!==value)throw Object.assign(new Error('Ngày hợp đồng không hợp lệ.'),{status:400});return d}
+    const start=filters.tuNgay?parse(filters.tuNgay):new Date(1900,0,1),end=filters.denNgay?parse(filters.denNgay):now
+    if(start>end)throw Object.assign(new Error('HĐ từ ngày phải trước hoặc bằng ngày kết thúc.'),{status:400})
+    const previous=d=>new Date(d.getFullYear()-1,d.getMonth(),Math.min(d.getDate(),new Date(d.getFullYear()-1,d.getMonth()+1,0).getDate()))
+    return {months:span,now:end,curFrom:start,prevFrom:previous(start),prevEnd:previous(end),range:{from:filters.tuNgay||null,to:filters.denNgay||isoDate(now)}}
+  }
   return { months: span, now, curFrom, prevFrom, prevEnd }
 }
 
@@ -197,8 +204,8 @@ export function shapeMapRows(rows, filters, window, facilityCounts = new Map()) 
   }
   for (const row of rows || []) {
     const stamp = stampOf(row.ym)
-    const current = inSpan(stamp, window.curFrom, window.now)
-    const previous = inSpan(stamp, window.prevFrom, window.prevEnd)
+    const current = row.period?row.period==='current':inSpan(stamp, window.curFrom, window.now)
+    const previous = row.period?row.period==='previous':inSpan(stamp, window.prevFrom, window.prevEnd)
     if (!current && !previous) continue
     const code = padCode(row.ma_tinh)
     if (!buckets.has(code)) continue
@@ -269,7 +276,7 @@ export async function mapPayload(query, body = {}) {
   // not a tender's announced package value.
   const source = requested === 'msc_prices' ? 'msc_prices' : (requested === 'msc' || requested === 'msc_tenders' ? 'msc' : 'vss')
   const filters = body.filters && typeof body.filters === 'object' ? body.filters : {}
-  const window = mapWindow(body.months)
+  const window = mapWindow(body.months,new Date(),source==='vss'?filters:{})
   const withDots = body.dots !== false
   const withIngredients = body.ingredients !== false
   if (source === 'msc') return mscPayload(query, filters, window, withDots)
@@ -278,6 +285,7 @@ export async function mapPayload(query, body = {}) {
 }
 
 async function vssPayload(query, filters, window, withDots, withIngredients) {
+  if(window.range)filters={...filters,tuNgay:'',denNgay:''}
   const fromYm = ymOf(window.prevFrom)
   const toYm = ymOf(window.now)
   const needle = fold(filters.hoatchat || '').trim()
@@ -285,7 +293,11 @@ async function vssPayload(query, filters, window, withDots, withIngredients) {
   let moneyRows = []
   const factKeys = ['hoatchat', 'q', 'sodk', 'loai_thau', 'duongdung', 'nuocsx', 'ten_tinh', 'tuNgay', 'denNgay', 'nam']
   const needsFacts = factKeys.some(key => Array.isArray(filters[key]) ? filters[key].length : String(filters[key] || '').trim())
-  if (!needsFacts && (!filters.loai || filters.loai === 'Tân dược')) {
+  if(window.range){
+    const periods=[['current',window.curFrom,window.now],['previous',window.prevFrom,window.prevEnd]]
+    const parts=periods.map(([period,from,to])=>{const where=vssWhere(filters,from,to);return {sql:`SELECT ${hint('vss_bids')} '${period}' AS period,COALESCE(ma_tinh,'') AS ma_tinh,COALESCE(nhomthau,'') AS nhomthau,DATE_FORMAT(tungay_hd,'%Y-%m') AS ym,SUM(COALESCE(thanhtien,0)) AS sum_thanhtien,COUNT(*) AS cnt FROM vss_bids WHERE ${where.clauses.join(' AND ')} GROUP BY ma_tinh,nhomthau,DATE_FORMAT(tungay_hd,'%Y-%m')`,args:where.args}})
+    moneyRows=await rowsOf(query,parts.map(part=>part.sql).join(' UNION ALL '),parts.flatMap(part=>part.args))
+  } else if (!needsFacts && (!filters.loai || filters.loai === 'Tân dược')) {
     moneyRows = await rowsOf(
       query,
       `SELECT ma_tinh, nhomthau, ym, SUM(sum_thanhtien) AS sum_thanhtien, SUM(cnt) AS cnt
@@ -328,6 +340,8 @@ GROUP BY ma_tinh`,
   }
   const counts = new Map(facilities.map((row) => [row.ma_tinh, num(row.facilities)]))
   const shaped = shapeMapRows(moneyRows, filters, window, counts)
+  shaped.summary.range=window.range||null
+  shaped.summary.quantities=await rowsOf(query,`SELECT ${hint('vss_bids')} MAX(TRIM(donvitinh)) AS unit,SUM(COALESCE(soluong,0)) AS quantity FROM vss_bids WHERE ${span.clauses.join(' AND ')} GROUP BY LOWER(TRIM(COALESCE(donvitinh,''))) ORDER BY quantity DESC`,span.args)
   let dots = []
   if (withDots) {
     try {

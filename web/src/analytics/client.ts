@@ -10,7 +10,7 @@ async function session() {
 export async function request<T>(path:string,body?:unknown,signal?:AbortSignal):Promise<T> {
   const s=await session()
   const auxiliary=path.endsWith('/awards')||path.endsWith('/company-profile')&&!(body as {refresh?:boolean})?.refresh
-  const cacheKey=`baoan.analytics.aux.v2.${s.user.id}`,key=JSON.stringify([path,body])
+  const cacheKey=`baoan.analytics.aux.v3.${s.user.id}`,key=JSON.stringify([path,body])
   if(auxiliary)try{const records=JSON.parse(sessionStorage.getItem(cacheKey)||'{}');if(Object.hasOwn(records,key))return records[key]}catch{}
   const timeout=AbortSignal.timeout(90000)
   const response=await fetch(`${import.meta.env.VITE_API_BASE||''}${path}`,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',Authorization:`Bearer ${s.access_token}`},body:body?JSON.stringify(body):undefined,signal:signal?AbortSignal.any([signal,timeout]):timeout})

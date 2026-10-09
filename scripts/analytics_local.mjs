@@ -37,6 +37,7 @@ const adapter={
     const raw=source==='dav'||source==='vss'?'raw':'normalized', table=source==='dav'?'drugs':source==='vss'?'bids':'records'
     const nested={ingredient:['thongTinThuocCoBan.hoatChatChinh','hoatChatChinh','hoatChat'],strength:['thongTinThuocCoBan.hamLuong','hamLuong'],form:['thongTinThuocCoBan.dangBaoChe','dangBaoChe'],date:['thongTinDangKyThuoc.ngayCapSoDangKy','ngayCapSoDangKy','ngayCap'],expiry:['thongTinDangKyThuoc.ngayHetHanSoDangKy','ngayHetHanSoDangKy','ngayHetHan'],manufacturer:['congTySanXuat.tenCongTySanXuat','tenCongTySanXuat','ctySanXuat'],registrant:['congTyDangKy.tenCongTyDangKy','tenCongTyDangKy','ctyDangKy']}
     const rawValue=f=>{
+      if(source==='vss'&&f==='form')return `COALESCE(NULLIF(TRIM(json_extract(raw,'$.dangbaoche')),''),SDK_FORM(json_extract(raw,'$.sodk')))`
       if(f==='updated_at')return `COALESCE(json_extract(${raw},'$.collected_at'),json_extract(${raw},'$.created_date'),json_extract(${raw},'$.lastModificationTime'),json_extract(${raw},'$.creationTime'))`
       const paths=source==='dav'&&nested[f]?nested[f]:[source==='dav'?({name:'tenThuoc',registration:'soDangKy'}[f]||f):mappings[source][f]||f]
       const values=paths.map(p=>`json_extract(${raw},'$.${p}')`)

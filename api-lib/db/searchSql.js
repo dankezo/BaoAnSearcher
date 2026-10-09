@@ -1,5 +1,6 @@
 import { fold } from '../turso.js'
 import { scopeTenderNos } from '../scopeMatch.js'
+import {sdkFormsSql,sdkKeySql} from './sdkForms.js'
 
 const VSS_SELECT = [
   'fingerprint', 'search', 'hoatchat', 'sodk', 'ten', 'duongdung', 'hamluong', 'donvitinh',
@@ -166,8 +167,8 @@ function specFor(kind, dialect = 'turso') {
     }
   }
   return {
-    table: 'vss_bids',
-    select: VSS_SELECT,
+    table: `vss_bids LEFT JOIN (${sdkFormsSql(dialect)}) vss_forms ON ${sdkKeySql('vss_bids.sodk',dialect)} = vss_forms.sdk_form_key`,
+    select: `${VSS_SELECT}, vss_forms.dav_form AS dangbaoche`,
     date: 'tungay_hd',
     id: 'fingerprint',
     order: 'tungay_hd DESC, fingerprint',
@@ -282,7 +283,7 @@ export function whereFor(kind, filters, dialect) {
       args.push(String(f.tuNgay).slice(0, 10))
     }
     if (f.denNgay) {
-      indexed.push('(tungay_hd IS NULL OR tungay_hd <= ?)')
+      indexed.push(`(tungay_hd IS NULL OR tungay_hd < ${dialect==='tidb'?"DATE_ADD(?, INTERVAL 1 DAY)":"date(?, '+1 day')"})`)
       args.push(String(f.denNgay).slice(0, 10))
     }
   }

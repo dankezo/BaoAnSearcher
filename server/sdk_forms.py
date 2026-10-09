@@ -5,11 +5,14 @@ from __future__ import annotations
 import re
 import sqlite3
 import threading
+import os
+from pathlib import Path
 
 from .common import DAV_DB
 
 _lock = threading.Lock()
 _by_sdk: dict[str, str] | None = None
+_stamp = None
 
 
 def norm_sdk(value) -> str:
@@ -17,15 +20,17 @@ def norm_sdk(value) -> str:
 
 
 def _load() -> dict[str, str]:
-    global _by_sdk
-    if _by_sdk is not None:
+    global _by_sdk, _stamp
+    path = Path(os.environ['ANALYTICS_DB_DIR'])/'dav.sqlite3' if os.environ.get('ANALYTICS_DB_DIR') else DAV_DB
+    stamp = (str(path), path.stat().st_mtime_ns if path.exists() else None)
+    if _by_sdk is not None and _stamp == stamp:
         return _by_sdk
     with _lock:
-        if _by_sdk is not None:
+        if _by_sdk is not None and _stamp == stamp:
             return _by_sdk
-        found: dict[str, str] = {}
-        if DAV_DB.exists():
-            con = sqlite3.connect(f"file:{DAV_DB}?mode=ro", uri=True)
+        found = {}
+        if path.exists():
+            con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
             try:
                 rows = con.execute(
                     """
@@ -45,12 +50,13 @@ def _load() -> dict[str, str]:
                         continue
                     for raw in (sdk, old):
                         key = norm_sdk(raw)
-                        if key and key not in found:
-                            found[key] = text
+                        if key:
+                            found.setdefault(key, set()).add(text)
             finally:
                 con.close()
-        _by_sdk = found
-        return found
+        _by_sdk = {key:next(iter(values)) for key,values in found.items() if len(values)==1}
+        _stamp = stamp
+        return _by_sdk
 
 
 def form_for(sdk) -> str:

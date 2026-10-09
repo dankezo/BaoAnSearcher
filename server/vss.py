@@ -1351,7 +1351,7 @@ def search_bids(filters: dict, page: int = 0, size: int = 50, cursor: str | None
         clauses.append("coalesce(tungay_hd,'') >= ?")
         args.append(filters["tuNgay"])
     if filters.get("denNgay"):
-        clauses.append("coalesce(denngay_hd,'') <= ?")
+        clauses.append("coalesce(tungay_hd,'') <= ?")
         args.append(filters["denNgay"] + " 23:59:59" if len(filters["denNgay"]) == 10 else filters["denNgay"])
 
     cursor_value = _decode_cursor(cursor)
@@ -1382,7 +1382,7 @@ def search_bids(filters: dict, page: int = 0, size: int = 50, cursor: str | None
         items = items[:size]
     from .sdk_forms import form_for
     for item in items:
-        item["dangbaoche"] = form_for(item.get("sodk"))
+        item["dangbaoche"] = item.get("dangbaoche") or form_for(item.get("sodk"))
     next_cursor = None
     if has_more and rows:
         last = rows[size - 1]

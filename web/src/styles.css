@@ -3422,3 +3422,5 @@ table.data .registration-column input { min-width:0; }
 .price-point-rows th,.price-point-rows td { padding:5px 7px; text-align:right; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
 .price-point-rows th:first-child,.price-point-rows td:first-child { text-align:left; overflow-wrap:anywhere; }
 .price-point-rows td small { display:block; color:var(--muted); font-size:10px; }
+.stat-quantities{font-size:13px;font-weight:400;line-height:1.5;color:var(--muted,#64748b)}.stat-quantity-detail{font-size:12px;font-weight:400;margin-top:5px}.stat-quantity-detail summary{cursor:pointer;color:var(--muted,#64748b)}.stat-quantity-detail dl{display:grid;grid-template-columns:1fr!important;max-height:220px;overflow:auto;padding:6px 0}.stat-quantity-detail dl>div{display:flex!important;justify-content:space-between;gap:12px}.stat-quantity-detail dd,.stat-quantity-detail dt{font-size:12px!important;margin:0!important}
+.map-argus>dl>div{align-items:flex-start}.map-argus>dl>div>dt{flex:1;min-width:0}.map-argus>dl>div>dd{min-width:0;flex:0 1 60%;overflow-wrap:anywhere}

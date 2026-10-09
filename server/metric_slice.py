@@ -209,7 +209,7 @@ def _vss_sql(filters: dict):
         clauses.append("coalesce(tungay_hd,'') >= ?")
         args.append(str(filters["tuNgay"])[:10])
     if filters.get("denNgay"):
-        clauses.append("coalesce(denngay_hd,'') <= ?")
+        clauses.append("coalesce(tungay_hd,'') <= ?")
         args.append(str(filters["denNgay"])[:10] + " 23:59:59")
     years = filters.get("nam") or []
     if isinstance(years, (str, int)):

@@ -1,6 +1,7 @@
 import { query } from '../db/tidb.js'
 import {readFileSync} from 'node:fs'
 import {suggestionItems,suggestionFields} from './suggestions.js'
+import {sdkFormsSql,sdkKeySql} from '../db/sdkForms.js'
 const tables = { msc_prices: 'msc_prices', msc_tenders: 'msc_tenders', vss: 'vss_bids', dav: 'dav_drugs' }
 export const mappings = {
   msc_prices: { id:'source_id',name:'name',ingredient:'ingredient',strength:'strength',form:'dosage_form',route:'route',registration:'registration',manufacturer:'manufacturer',company:'winner',province:'province',facility:'buyer',group_name:'group_name',unit:'unit',price:'unit_price',quantity:'quantity',date:'published',tender_no:'tender_no',source_url:'source_url',updated_at:'updated_at' },
@@ -38,6 +39,7 @@ export const cloudAdapter = {
     if(source==='dav')try{const geo=await query("SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='company_profiles'");geography=Number(geo.rows[0]?.count)>0;if(geography)cloudAdapter.geoSources=['dav']}catch{}
     const expr = field => {
       const col = map[field]
+      if(field==='form'&&source==='vss')return columns.has(col)?`COALESCE(NULLIF(TRIM(\`${col}\`),''),vss_forms.dav_form)`:'vss_forms.dav_form'
       if(field==='province'&&source==='dav'&&geography){const company=q.companyFocus==='manufacturer'?'cty_san_xuat':'cty_dang_ky',location=q.companyFocus==='manufacturer'?'factory_province':'office_province',match=columns.has(company+'_f')?`cp.name_key = LOWER(TRIM(\`${company}_f\`)) COLLATE utf8mb4_bin`:`cp.name_key COLLATE utf8mb4_unicode_ci = REPLACE(REGEXP_REPLACE(LOWER(TRIM(CONVERT(\`${company}\` USING utf8mb4))), '[[:space:]]+', ' '), 'đ', 'd') COLLATE utf8mb4_unicode_ci`;return `CONVERT((SELECT cp.${location} FROM company_profiles cp WHERE ${match} LIMIT 1) USING utf8mb4) COLLATE utf8mb4_unicode_ci`}
       if (field === 'amount' && source === 'msc_prices') return columns.has('unit_price') && columns.has('quantity') ? '`unit_price` * `quantity`' : 'NULL'
       if (!columns.has(col)) return 'NULL'
@@ -53,6 +55,7 @@ export const cloudAdapter = {
     }
     selected.push(`CASE WHEN ${expr('group_name')} REGEXP '[1-5]' THEN REGEXP_SUBSTR(${expr('group_name')}, '[1-5]') ELSE '' END AS group_key`)
     let sql = `SELECT /*+ READ_FROM_STORAGE(TIFLASH[${table}]) */ ${selected.join(', ')} FROM ${table}`
+    if(source==='vss')sql+=` LEFT JOIN (${sdkFormsSql()}) vss_forms ON ${sdkKeySql('vss_bids.sodk')} = vss_forms.sdk_form_key`
     if(source==='msc_tenders')sql=`SELECT * FROM (SELECT tender_rows.*,ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(tender_no,''),id) ORDER BY date DESC,updated_at DESC,id DESC) AS latest FROM (${sql}) tender_rows) latest_rows WHERE latest=1`
     relations.set(relationKey, sql)
     return sql

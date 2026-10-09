@@ -185,13 +185,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     const stale = () => id !== reqSeq.current
     const size = resolvePageSize(pageSizeRef.current)
     const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
-    setCardKey(JSON.stringify({
-      hoatchat: active.hoatchat || '',
-      ma_tinh: active.ma_tinh || [],
-      ten_tinh: active.ten_tinh || [],
-      nhomthau: active.nhomthau || [],
-      q: active.q || '',
-    }))
+    setCardKey(JSON.stringify(active))
     if (skipShortTextSearch(active, VSS_TEXT_KEYS, { ...EMPTY_FILTERS, loai: 'Tân dược' })) {
       setInfoNote(SHORT_SEARCH_NOTE)
       setLoading(false)
