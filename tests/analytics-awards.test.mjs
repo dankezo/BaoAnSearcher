@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
+import {mkdtempSync,rmSync} from 'node:fs'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
+import {execFileSync} from 'node:child_process'
 import {recentAwards} from '../api-lib/analytics/awards.js'
 import {normalizeQuery,sourceQuery} from '../api-lib/analytics/core.js'
 
@@ -66,4 +70,27 @@ test('MSC links resolve to package profiles by TBMT and never fall back to gener
  assert.equal(result.items[0].source_url,profile)
  const missing=await recentAwards(mockAdapter(),{mode:'macro',source:'msc_prices'})
  assert.equal(missing.items[0].source_url,'')
+})
+
+
+test('related awards intersect parent medicine, clicked facility and dates before counting and grouping',()=>{
+ const folder=mkdtempSync(join(tmpdir(),'baoan-related-awards-'))
+ try{
+  execFileSync('python',['-m','tests.analytics_fixture',folder],{env:{...process.env,PYTHONUTF8:'1'}})
+  // Add an unrelated VSS ingredient at the same facility, mirroring MSC's existing Diosmin row.
+  execFileSync('python',['-X','utf8','-c',"import json,sqlite3,sys;from pathlib import Path;c=sqlite3.connect(Path(sys.argv[1])/'vss.sqlite3');r=json.loads(c.execute('SELECT raw FROM bids LIMIT 1').fetchone()[0]);r.update(hoatchat='Diosmin',ten='Diosmin DEMO');c.execute('INSERT INTO bids VALUES(?,?,?)',('unrelated',json.dumps(r,ensure_ascii=False),'diosmin demo benh vien demo'));c.commit();c.close()",folder])
+  const scope={mode:'drug',entity:'Ambroxol',months:12,start:'2026-02-01',end:'2026-03-31',comparison:'yoy',filters:{}}
+  const query={...scope,mode:'territory',entity:'Bệnh viện DEMO',territoryField:'facility'}
+  const run=(source,q=query)=>JSON.parse(execFileSync('node',['scripts/analytics_local.mjs'],{input:JSON.stringify({action:'awards',body:{query:q,scope,source}}),encoding:'utf8',env:{...process.env,ANALYTICS_DB_DIR:folder},timeout:30000}))
+  for(const source of ['msc_prices','vss']){
+   const result=run(source)
+   assert.ok(result.items.length>0)
+   assert.ok(result.items.every(row=>row.ingredient==='Ambroxol'&&row.facility==='Bệnh viện DEMO'))
+   assert.equal(result.items.length,source==='msc_prices'?2:1)
+   if(source==='msc_prices')assert.equal(result.totalDistinctPackages,2)
+   assert.equal(run(source,{...query,entity:'Bệnh viện không khớp'}).items.length,0)
+   const company=run(source,{...scope,mode:'company',entity:'Đối thủ',role:'all',entityMatch:'contains'})
+   assert.ok(company.items.length>0&&company.items.every(row=>row.ingredient==='Ambroxol'))
+  }
+ }finally{rmSync(folder,{recursive:true,force:true})}
 })

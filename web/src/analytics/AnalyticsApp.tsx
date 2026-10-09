@@ -107,6 +107,6 @@ export default function AnalyticsApp({deep=false,localMode=false,onOpenDeep}:{de
       <div className="analytics-detail-grid">{sourceNames.map(source=><DetailTable key={source} query={data.query} source={source} onEntity={openEntity} onRelated={showRelated} onOpenPackage={['msc_prices','vss'].includes(source)?row=>{setRelatedQuery(query);setPackageRow({...row,source})}:undefined} isRival={data.query.mode==='company'?rival:undefined}/>)}</div>
       <Card title="Các chỉ số cần bổ sung nguồn" exportable={false}><ul>{Object.values(data.missing).map(reason=><li key={reason}>{reason}</li>)}</ul><p>Giá trị VSS thể hiện kết quả trúng thầu; không thể suy ra tiền giải ngân. Bảo đảm dự thầu chưa được phân loại từ giá gói.</p></Card>
     </div>}
-    <PackageWorkspace relatedQuery={relatedQuery} packageRow={packageRow} onOpenPackage={setPackageRow} onClose={()=>{setRelatedQuery(undefined);setPackageRow(undefined)}}/>
+    <PackageWorkspace relatedQuery={relatedQuery} scope={query} packageRow={packageRow} onOpenPackage={setPackageRow} onClose={()=>{setRelatedQuery(undefined);setPackageRow(undefined)}}/>
   </div>
 }

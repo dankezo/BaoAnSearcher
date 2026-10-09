@@ -21,7 +21,7 @@ export default async function handler(req,res) {
   if(action==='suggest') return json(res,200,await memo(`suggest:${String(req.query?.q||new URL(req.url,'https://localhost').searchParams.get('q')||'')}`,()=>suggest(cloudAdapter,req.query?.q||new URL(req.url,'https://localhost').searchParams.get('q')||'')))
   const body=await readQuery(req)
   const q=normalizeQuery(body.query||body)
-  if(action==='awards') return json(res,200,await memo(`awards:${queryKey(q)}:${body.source}:${body.sort}:${body.page||0}`,()=>recentAwards(cloudAdapter,q,body)))
+  if(action==='awards') return json(res,200,await memo(`awards:${queryKey(q)}:${body.scope?queryKey(body.scope):''}:${body.source}:${body.sort}:${body.page||0}`,()=>recentAwards(cloudAdapter,q,body)))
   if(action==='company-profile') return json(res,200,await companyProfiles(q,Boolean(body.refresh),body.legalName))
   if(action==='detail') return json(res,200,await memo(`detail:${queryKey(q)}:${body.source}:${body.page||0}:${body.panel||'rows'}:${body.tenderNo||''}`,()=>detail(cloudAdapter,{...body,query:q})))
   const data=action==='ai-insight'&&body.snapshot?savedOverview(body.snapshot,body.query):await memo(`overview:${queryKey(q)}`,async()=>q.mode==='territory'?await overview(cloudAdapter,q):await readSnapshot(q)||await overview(cloudAdapter,q))

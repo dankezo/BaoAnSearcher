@@ -12,25 +12,26 @@ type AwardsPage={source:AwardSource;sort:AwardSort;page:number;items:DetailRow[]
 type OpenPackage=(row:DetailRow)=>void
 type OpenEntity=(mode:'drug'|'company'|'territory',name:string,role?:AnalyticsQuery['role'],field?:'ingredient'|'name'|'registration'|'province'|'facility'|'region')=>void
 
-async function loadAwards(query:AnalyticsQuery,source:AwardSource,sort:AwardSort,page:number):Promise<AwardsPage>{
- return request<AwardsPage>('/api/analytics/awards',{query,source,sort,page})
+async function loadAwards(query:AnalyticsQuery,source:AwardSource,sort:AwardSort,page:number,scope?:AnalyticsQuery):Promise<AwardsPage>{
+ return request<AwardsPage>('/api/analytics/awards',{query,source,sort,page,...(scope?{scope}:{})})
 }
 
-export default function RecentAwards({query,onOpenPackage,onEntity,onRelated}:{query:AnalyticsQuery;onOpenPackage?:OpenPackage;onEntity?:OpenEntity;onRelated?:(q:AnalyticsQuery)=>void}){
+export default function RecentAwards({query,scope,onOpenPackage,onEntity,onRelated}:{query:AnalyticsQuery;scope?:AnalyticsQuery;onOpenPackage?:OpenPackage;onEntity?:OpenEntity;onRelated?:(q:AnalyticsQuery)=>void}){
  void onEntity
  const [source,setSource]=useState<AwardSource>('msc_prices'),[sort,setSort]=useState<AwardSort>('recent'),[page,setPage]=useState(0)
  const [data,setData]=useState<AwardsPage>(),[error,setError]=useState(''),[loading,setLoading]=useState(false)
  const generation=useRef(0)
- useEffect(()=>{setPage(0);setData(undefined)},[query,source,sort])
+ useEffect(()=>{setPage(0);setData(undefined)},[query,scope,source,sort])
  useEffect(()=>{
   const id=++generation.current
   setLoading(true);setError('')
-  loadAwards(query,source,sort,page).then(value=>{if(generation.current===id)setData(value)}).catch(reason=>{if(generation.current===id)setError(reason.message)}).finally(()=>{if(generation.current===id)setLoading(false)})
+  loadAwards(query,source,sort,page,scope).then(value=>{if(generation.current===id)setData(value)}).catch(reason=>{if(generation.current===id)setError(reason.message)}).finally(()=>{if(generation.current===id)setLoading(false)})
   return()=>{generation.current++}
- },[query,source,sort,page])
+ },[query,scope,source,sort,page])
  const rows=data?.items||[]
  const entity=(value:string|null|undefined,mode:'drug'|'company'|'territory',role:AnalyticsQuery['role']='winner',field:'ingredient'|'name'|'registration'|'province'|'facility'='ingredient')=><EntityValue value={value} parentQuery={query} mode={mode} role={role} field={field} onRelated={onRelated}/>
  return <Card exportable={!!rows.length} title="Kết quả trúng thầu gần đây" hint="Các dòng trúng thầu MSC hoặc VSS trong kỳ và bộ lọc hiện tại. Số gói riêng chỉ có cho MSC theo mã TBMT; VSS không cung cấp mã gói ổn định.">
+  {scope?.entity&&<p className="muted small">Phạm vi: <strong>{scope.entity}</strong>{query.entity&&query.entity!==scope.entity&&<> · {query.entity}</>}</p>}
   <div className="analytics-controls" role="group" aria-label="Nguồn kết quả trúng thầu">
    {(['msc_prices','vss'] as AwardSource[]).map(value=><button key={value} type="button" className={`btn ${source===value?'':'ghost'}`} aria-pressed={source===value} onClick={()=>setSource(value)}>{SOURCE_LABELS[value]}</button>)}
    <label>Sắp xếp <select value={sort} onChange={event=>setSort(event.target.value as AwardSort)}><option value="recent">Mới nhất</option><option value="amount">Giá trị cao nhất</option></select></label>

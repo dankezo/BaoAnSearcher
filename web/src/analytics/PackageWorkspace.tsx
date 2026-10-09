@@ -11,7 +11,7 @@ type WorkspaceRow=DetailRow&{source?:PackageSource}
 const PackageDialog=Dialog as typeof Dialog & ((props:Parameters<typeof Dialog>[0]&{className?:string})=>ReturnType<typeof Dialog>)
 const show=(value:unknown)=>value==null||value===''?'—':String(value)
 
-export default function PackageWorkspace({relatedQuery,packageRow,onOpenPackage,onClose}:{relatedQuery?:AnalyticsQuery;packageRow?:DetailRow;onOpenPackage:(row:DetailRow)=>void;onClose:()=>void}){
+export default function PackageWorkspace({relatedQuery,scope,packageRow,onOpenPackage,onClose}:{relatedQuery?:AnalyticsQuery;scope?:AnalyticsQuery;packageRow?:DetailRow;onOpenPackage:(row:DetailRow)=>void;onClose:()=>void}){
  const [detail,setDetail]=useState<DetailPage>(),[loading,setLoading]=useState(false),[error,setError]=useState('')
  const selected=packageRow as WorkspaceRow|undefined
  const source=selected?.source||'msc_prices'
@@ -33,7 +33,7 @@ export default function PackageWorkspace({relatedQuery,packageRow,onOpenPackage,
  return <PackageDialog open={Boolean(relatedQuery||packageRow)} onClose={onClose} title={isVss?'Chi tiết bản ghi VSS':`Gói thầu ${tenderNo||'liên quan'}`} className="analytics-package-dialog">
   <div className={`analytics-package-layout ${packageRow?'has-package':''}`}>
    <section className="analytics-package-awards" aria-label="Các kết quả trúng thầu liên quan">
-    {relatedQuery?<RecentAwards query={awardsQuery} onOpenPackage={onOpenPackage}/>:<p className="muted">Chọn một dòng trúng thầu để xem chi tiết.</p>}
+    {relatedQuery?<RecentAwards query={awardsQuery} scope={scope} onOpenPackage={onOpenPackage}/>:<p className="muted">Chọn một dòng trúng thầu để xem chi tiết.</p>}
    </section>
    {packageRow&&selected&&<section className="analytics-package-detail" aria-label={isVss?'Chi tiết bản ghi VSS':'Chi tiết gói thầu MSC'}>
     <h2>{isVss?'Bản ghi VSS':`Mã TBMT ${tenderNo||'Chưa có mã'}`}</h2>

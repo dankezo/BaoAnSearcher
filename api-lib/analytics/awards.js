@@ -13,6 +13,12 @@ export async function recentAwards(adapter,input={},options={}){
  if(!['msc_prices','vss'].includes(source))fail('Nguồn kết quả trúng thầu không hợp lệ.')
  if(!['recent','amount'].includes(sort))fail('Cách sắp xếp kết quả trúng thầu không hợp lệ.')
  const {base,p}=await sourceQuery(adapter,query,source,'detail')
+ const scopeInput=options.scope||input.scope
+ if(scopeInput){
+  const scope=normalizeQuery(scopeInput),{p:parent}=await sourceQuery(adapter,scope,source,'detail')
+  p.sql=`(${p.sql}) AND (${parent.sql}) AND (date >= ? AND date <= ?${scope.months==='all'?' OR date IS NULL':''})`
+  p.args.push(...parent.args,scope.start,scope.end);p.unavailable ||= parent.unavailable
+ }
  if(p.unavailable)return {source,sort,page,items:[],hasMore:false,totalDistinctPackages:source==='vss'?null:0,
   packageCountUnavailableReason:source==='vss'?VSS_REASON:undefined,packageIdentityAvailable:source==='msc_prices',reason:'Nguồn không hỗ trợ bộ lọc này.'}
  // ALL time includes undated rows. Keep the date predicate parameterized for bounded windows.
