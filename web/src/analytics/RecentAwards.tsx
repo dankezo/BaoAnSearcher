@@ -43,9 +43,9 @@ export default function RecentAwards({query,scope,onOpenPackage,onEntity,onRelat
    const progress=rows.length<2?1:1-index/(rows.length-1),background=`linear-gradient(90deg, rgba(22,163,74,${0.04+progress*0.11}), rgba(220,252,231,${0.08+progress*0.18}))`
    return <tr key={row.id} onDoubleClick={()=>onOpenPackage?.({...row,source})} title={onOpenPackage?'Nhấp đúp để mở chi tiết gói':''} style={{background}}>
     <td>{row.date||'—'}<small>{row.tender_no||'Chưa có mã TBMT'}</small>{row.source_url&&/^https?:\/\//.test(row.source_url)&&<a href={row.source_url} target="_blank" rel="noreferrer" onClick={event=>event.stopPropagation()}>Nguồn ↗</a>}</td>
-    <td>{row.package_name||row.name||'—'}{Number(row.line_count||1)===1&&<small>{entity(row.registration,'drug','winner','registration')}</small>}{row.line_count&&<small>{row.line_count} dòng thuốc liên quan</small>}</td>
-    <td>{entity(row.ingredient,'drug')}<small>{[row.strength,row.form].filter(Boolean).join(' · ')}</small></td>
-    <td>{entity(row.company,'company')}</td><td>{entity(row.manufacturer,'company','manufacturer')}</td>
+    <td>{row.package_name||(Number(row.line_count||1)>1?`${row.line_count} dòng thuốc`:row.name)||'—'}{Number(row.line_count||1)===1&&<small>{entity(row.registration,'drug','winner','registration')}</small>}{row.line_count&&<small>{row.line_count} dòng thuốc liên quan</small>}</td>
+    <td>{Number(row.ingredient_count)>1?`${count(row.ingredient_count)} hoạt chất`:entity(row.ingredient,'drug')}{Number(row.line_count||1)===1&&<small>{[row.strength,row.form].filter(Boolean).join(' · ')}</small>}</td>
+    <td>{Number(row.company_count)>1?`${count(row.company_count)} nhà thầu`:entity(row.company,'company')}</td><td>{Number(row.manufacturer_count)>1?`${count(row.manufacturer_count)} nhà sản xuất`:entity(row.manufacturer,'company','manufacturer')}</td>
     <td>{entity(row.facility,'territory','winner','facility')}<small>{entity(row.province,'territory','winner','province')}</small></td><td><strong>{money(row.amount)}</strong></td>
    </tr>
   })}</tbody></table></div>}

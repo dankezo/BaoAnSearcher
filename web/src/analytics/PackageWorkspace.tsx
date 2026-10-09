@@ -29,7 +29,7 @@ export default function PackageWorkspace({relatedQuery,scope,packageRow,onOpenPa
   return()=>{active=false}
  },[selected?.id,source,tenderNo])
  const sourceUrl=selected?.source_url&&/^https?:\/\//.test(selected.source_url)?selected.source_url:''
- const isVss=source==='vss'
+ const isVss=source==='vss',multipleLines=Number(selected?.line_count||1)>1
  return <PackageDialog open={Boolean(relatedQuery||packageRow)} onClose={onClose} title={isVss?'Chi tiết bản ghi VSS':`Gói thầu ${tenderNo||'liên quan'}`} className="analytics-package-dialog">
   <div className={`analytics-package-layout ${packageRow?'has-package':''}`}>
    <section className="analytics-package-awards" aria-label="Các kết quả trúng thầu liên quan">
@@ -39,11 +39,11 @@ export default function PackageWorkspace({relatedQuery,scope,packageRow,onOpenPa
     <h2>{isVss?'Bản ghi VSS':`Mã TBMT ${tenderNo||'Chưa có mã'}`}</h2>
     <dl className="analytics-package-facts">
      <div><dt>Nguồn</dt><dd>{SOURCE_LABELS[source]}</dd></div><div><dt>Ngày</dt><dd>{show(selected.date)}</dd></div>
-     <div><dt>Thuốc / gói</dt><dd>{show(selected.package_name||selected.name)}</dd></div><div><dt>Số đăng ký</dt><dd>{show(selected.registration)}</dd></div>
-     <div><dt>Hoạt chất</dt><dd>{show(selected.ingredient)}</dd></div><div><dt>Hàm lượng · dạng</dt><dd>{[selected.strength,selected.form].filter(Boolean).join(' · ')||'—'}</dd></div>
-     <div><dt>Nhà thầu</dt><dd>{show(selected.company)}</dd></div><div><dt>Nhà sản xuất</dt><dd>{show(selected.manufacturer)}</dd></div>
+     <div><dt>Thuốc / gói</dt><dd>{show(selected.package_name||(multipleLines?'Các dòng thuốc phù hợp trong gói':selected.name))}</dd></div><div><dt>Số đăng ký</dt><dd>{multipleLines?'Xem từng dòng thuốc bên dưới':show(selected.registration)}</dd></div>
+     <div><dt>Hoạt chất</dt><dd>{Number(selected.ingredient_count)>1?`${count(selected.ingredient_count)} hoạt chất`:show(selected.ingredient)}</dd></div><div><dt>Hàm lượng · dạng</dt><dd>{multipleLines?'Xem từng dòng thuốc bên dưới':[selected.strength,selected.form].filter(Boolean).join(' · ')||'—'}</dd></div>
+     <div><dt>Nhà thầu</dt><dd>{Number(selected.company_count)>1?`${count(selected.company_count)} nhà thầu`:show(selected.company)}</dd></div><div><dt>Nhà sản xuất</dt><dd>{Number(selected.manufacturer_count)>1?`${count(selected.manufacturer_count)} nhà sản xuất`:show(selected.manufacturer)}</dd></div>
      <div><dt>Cơ sở · địa bàn</dt><dd>{[selected.facility,selected.province].filter(Boolean).join(' · ')||'—'}</dd></div>
-     <div><dt>Số lượng × đơn giá</dt><dd>{count(selected.quantity)} × {money(selected.price)}</dd></div>
+     {!multipleLines&&<div><dt>Số lượng × đơn giá</dt><dd>{count(selected.quantity)} × {money(selected.price)}</dd></div>}
      {selected.package_bid_price&&<div><dt>Giá gói công bố</dt><dd>{money(selected.package_bid_price)}</dd></div>}<div><dt>Giá trị trúng thầu trong phạm vi lọc</dt><dd>{money(selected.amount)}</dd></div><div><dt>Trạng thái</dt><dd>{show(selected.status)}</dd></div>
     </dl>
     {sourceUrl&&<p><a href={sourceUrl} target="_blank" rel="noreferrer">Mở nguồn gốc ↗</a></p>}

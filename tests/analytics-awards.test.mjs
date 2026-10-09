@@ -9,7 +9,7 @@ import {normalizeQuery,sourceQuery} from '../api-lib/analytics/core.js'
 
 function mockAdapter(){
  const calls=[],relations=[]
- return {calls,relations,relation:async(source,q,purpose)=>{relations.push({source,q,purpose});return `SELECT * FROM ${source}_facts`},query:async(source,sql,args)=>{calls.push({source,sql,args});return sql.includes('COUNT(DISTINCT')?[{total:2}]:source==='msc_tenders'?[{tender_no:'IB-1',package_name:'Package headline',package_status:'Đã có kết quả',package_bid_price:'99.90'}]:[{id:'IB-1',tender_no:'IB-1',date:'2026-10-01',name:'Drug name',amount:'12.50',quantity:'2',line_count:2} ]}}
+ return {calls,relations,relation:async(source,q,purpose)=>{relations.push({source,q,purpose});return `SELECT * FROM ${source}_facts`},query:async(source,sql,args)=>{calls.push({source,sql,args});return sql.includes(' AS total FROM')?[{total:2}]:source==='msc_tenders'?[{tender_no:'IB-1',package_name:'Package headline',package_status:'Đã có kết quả',package_bid_price:'99.90'}]:[{id:'IB-1',tender_no:'IB-1',date:'2026-10-01',name:'Drug name',amount:'12.50',quantity:'2',line_count:2} ]}}
 }
 
 test('MSC awards scope once, group stable tender packages and sum decimal facts',async()=>{
@@ -45,7 +45,7 @@ test('award package matching retains the shared sourceQuery predicate and parame
  const {p}=await sourceQuery(adapter,q,'msc_prices','detail')
  const result=await recentAwards(adapter,{query:q,source:'msc_prices'})
  assert.ok(p.args.includes("x' or 1=1 --"))
- const list=adapter.calls.find(call=>call.source==='msc_prices'&&!call.sql.includes('COUNT(DISTINCT'))
+ const list=adapter.calls.find(call=>call.source==='msc_prices'&&!call.sql.includes(' AS total FROM'))
  assert.ok(list.args.includes("x' or 1=1 --"));assert.ok(!list.sql.includes("x' OR 1=1"))
  assert.equal(list.args.at(-2),'2026-05-01');assert.equal(list.args.at(-1),'2026-10-08')
  assert.equal(result.items.length,1)
@@ -79,6 +79,7 @@ test('related awards intersect parent medicine, clicked facility and dates befor
   execFileSync('python',['-m','tests.analytics_fixture',folder],{env:{...process.env,PYTHONUTF8:'1'}})
   // Add an unrelated VSS ingredient at the same facility, mirroring MSC's existing Diosmin row.
   execFileSync('python',['-X','utf8','-c',"import json,sqlite3,sys;from pathlib import Path;c=sqlite3.connect(Path(sys.argv[1])/'vss.sqlite3');r=json.loads(c.execute('SELECT raw FROM bids LIMIT 1').fetchone()[0]);r.update(hoatchat='Diosmin',ten='Diosmin DEMO');c.execute('INSERT INTO bids VALUES(?,?,?)',('unrelated',json.dumps(r,ensure_ascii=False),'diosmin demo benh vien demo'));c.commit();c.close()",folder])
+  execFileSync('python',['-X','utf8','-c',"import json,sqlite3,sys;from pathlib import Path;c=sqlite3.connect(Path(sys.argv[1])/'msc_prices.sqlite3');r=json.loads(c.execute(\"SELECT normalized FROM records WHERE source_id='0'\").fetchone()[0]);r.update(manufacturer='Second manufacturer DEMO',winner='Second winner DEMO',unit_price='200',quantity='7',unit='Chai',registration='Second-SDK');c.execute('INSERT INTO records VALUES(?,?,?,?)',('prices','duplicate-coordinate',json.dumps(r,ensure_ascii=False),'ambroxol benh vien demo doi thu demo'));c.commit();c.close()",folder])
   const scope={mode:'drug',entity:'Ambroxol',months:12,start:'2026-02-01',end:'2026-03-31',comparison:'yoy',filters:{}}
   const query={...scope,mode:'territory',entity:'Bệnh viện DEMO',territoryField:'facility'}
   const run=(source,q=query)=>JSON.parse(execFileSync('node',['scripts/analytics_local.mjs'],{input:JSON.stringify({action:'awards',body:{query:q,scope,source}}),encoding:'utf8',env:{...process.env,ANALYTICS_DB_DIR:folder},timeout:30000}))
@@ -87,7 +88,7 @@ test('related awards intersect parent medicine, clicked facility and dates befor
    assert.ok(result.items.length>0)
    assert.ok(result.items.every(row=>row.ingredient==='Ambroxol'&&row.facility==='Bệnh viện DEMO'))
    assert.equal(result.items.length,source==='msc_prices'?2:1)
-   if(source==='msc_prices')assert.equal(result.totalDistinctPackages,2)
+   if(source==='msc_prices'){assert.equal(result.totalDistinctPackages,2);const mixed=result.items.find(row=>row.tender_no==='DEMO-0');assert.equal(Number(mixed.manufacturer_count),2);assert.equal(Number(mixed.company_count),2);assert.equal(Number(mixed.ingredient_count),1);assert.equal(Number(mixed.amount),1700.75)}
    assert.equal(run(source,{...query,entity:'Bệnh viện không khớp'}).items.length,0)
    const company=run(source,{...scope,mode:'company',entity:'Đối thủ',role:'all',entityMatch:'contains'})
    assert.ok(company.items.length>0&&company.items.every(row=>row.ingredient==='Ambroxol'))

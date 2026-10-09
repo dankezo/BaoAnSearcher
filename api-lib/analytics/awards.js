@@ -32,7 +32,7 @@ export async function recentAwards(adapter,input={},options={}){
   : (sort==='amount'?'CAST(amount AS DECIMAL(28,3)) DESC, (date IS NULL) ASC, date DESC, id ASC':'(date IS NULL) ASC, date DESC, id ASC')
  let sql
  if(source==='msc_prices'){
-  const representatives=[`MAX(date) AS date`,...FIELDS.map(field=>`MIN(${field}) AS ${field}`)].join(', ')
+  const representatives=[`MAX(date) AS date`,...['ingredient','company','manufacturer'].map(field=>`COUNT(DISTINCT NULLIF(${field},'')) AS ${field}_count`),...FIELDS.map(field=>`MIN(${field}) AS ${field}`)].join(', ')
   sql=`SELECT COALESCE(NULLIF(tender_no,''),id) AS id, ${representatives}, SUM(amount) AS amount, SUM(quantity) AS quantity, COUNT(*) AS line_count FROM (${base}) canonical WHERE ${p.sql} AND ${date} GROUP BY COALESCE(NULLIF(tender_no,''),id) ORDER BY ${order} LIMIT ${PAGE_SIZE+1} OFFSET ${page*PAGE_SIZE}`
  }else{
   sql=`SELECT *, 1 AS line_count FROM (${base}) canonical WHERE ${p.sql} AND ${date} ORDER BY ${order} LIMIT ${PAGE_SIZE+1} OFFSET ${page*PAGE_SIZE}`

@@ -4,6 +4,7 @@ Apply these checks when changing deep analysis or overview. Use the existing Rea
 
 - Empty search shows guidance and sends no overview, AI or detail request. An explicit empty Apply opens the whole-market report.
 - Resolve each new search independently of the previous subject. Exact province names precede company names containing that province. A company is one subject across supplier, manufacturer and registration data; preserve distinct legal names. Ambiguity requires choosing a suggestion, never a silent stale mode.
+- Multi-line award summaries show distinct ingredient, contractor and manufacturer counts. Do not show a combined quantity multiplied by one representative unit price, or present one formulation/registration as the whole package. Keep quantities and prices in the line-level detail table.
 - Related awards intersect the clicked company/facility/territory with the active report subject and dates, before package counting/grouping. Display both subjects in the modal; opening a full package may show its other medicines. Verify this against both MSC and VSS.
 - Keep the entity context near the search. Put report tabs beside the heading, with switch, close and new-report controls. Preserve tabs per signed-in account within the browser session.
 - Keep period/filter actions in one desktop row, with horizontal scrolling on narrow screens. Expose advanced filters and AI evidence on demand. Show up to two useful findings and one concrete action before expanded AI details.
