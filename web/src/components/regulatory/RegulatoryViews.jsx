@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import ReadingText from './ReadingText'
 import { regulatoryRequest } from '../../services/regulatoryService'
 import { categories, statuses, isNew } from '../../../../lib/regulatory/domain.js'
 
@@ -65,7 +66,7 @@ export function LegalSearch({ query, news = false }) {
         <div className="rh-toolbar"><span className="rh-code">{d.code || 'Chưa trích xuất số hiệu'}</span><span className="rh-badge">{d.category}</span>{isNew(d) && <span className="rh-badge checked">Mới</span>}</div>
         <h3>{d.title}</h3><p className="rh-summary">{d.summary || 'Chưa có tóm tắt; xem văn bản gốc.'}</p><div className="rh-dates"><span>Ban hành: {date(d.issued_at)}</span>{news && <span>Đăng tin: {date(d.published_at)}</span>}<span>Hiệu lực từ: {date(d.effective_at)}</span><span className="rh-badge">{statuses[d.legal_status] || statuses.unknown}</span></div>
         <Provenance item={d} /><div className="rh-toolbar"><button disabled={pending === d.id} onClick={async () => { setPending(d.id); setError(''); try { await regulatoryRequest({}, { action: 'read', id: d.id, read: !d.read_at }); setRefresh(v => v + 1) } catch (e) { setError(e.message) } finally { setPending(null) } }}>{d.read_at ? 'Đã đọc · Đánh dấu chưa đọc' : 'Đánh dấu đã đọc'}</button><button onClick={() => setSelected(selected === d.id ? null : d.id)} aria-expanded={selected === d.id}>Chi tiết & liên quan</button>{state.canEdit && <button onClick={() => setEditor(d)}>Sửa</button>}</div>
-        {selected === d.id && <><p>{d.summary}</p><p>{d.review_note || 'Chưa đối chiếu pháp lý.'}</p>{d.expires_at && <p>Hết hiệu lực từ: {date(d.expires_at)}</p>}<Related id={d.id} /></>}
+        {selected === d.id && <><ReadingText text={d.summary} /><ReadingText text={d.review_note || 'Chưa đối chiếu pháp lý.'} />{d.expires_at && <p>Hết hiệu lực từ: {date(d.expires_at)}</p>}<Related id={d.id} /></>}
       </article>)}</div>{!state.items.length && <p className="rh-empty">{news ? 'Chưa có tin phù hợp. Xem tình trạng thu thập tại Nguồn tin & quản trị.' : 'Không tìm thấy văn bản phù hợp. Thử rút gọn từ khóa.'}</p>}
       <div className="rh-toolbar"><button disabled={page === 0} onClick={() => setPage(p => p - 1)}>← Trước</button><button disabled={(page + 1) * 20 >= state.total} onClick={() => setPage(p => p + 1)}>Sau →</button></div>
     </>}</section>
@@ -97,7 +98,7 @@ export function MorningBrief({ onSearch, onSources, onAllNews }) {
       <h3>{editorialTitle(d)}</h3><p className="rh-story-reason">{d.insight.reason}</p>
       <div className="rh-impact"><strong>Ảnh hưởng đến thầu</strong><p>{d.insight.impact}</p><strong>Việc cần kiểm tra</strong><p>{d.insight.action}</p></div>
       <div className="rh-story-meta">{d.insight.method==='ai'?'AI gợi ý · cần chuyên viên đối chiếu':'Sàng lọc theo quy tắc · chưa dùng diễn giải AI'}</div>
-      <details><summary>Căn cứ & văn bản</summary><h4>{d.title}</h4>{d.insight.evidence_quote && <blockquote>{d.insight.evidence_quote}</blockquote>}<p>{d.summary}</p><p>Hiệu lực: {statuses[d.legal_status]}</p><Provenance item={d} /><button onClick={()=>onSearch(d.code||d.title)}>Tra cứu & liên quan</button></details>
+      <details><summary>Căn cứ & văn bản</summary><h4>{d.title}</h4>{d.insight.evidence_quote && <blockquote><ReadingText text={d.insight.evidence_quote} /></blockquote>}<ReadingText text={d.summary} /><p>Hiệu lực: {statuses[d.legal_status]}</p><Provenance item={d} /><button onClick={()=>onSearch(d.code||d.title)}>Tra cứu & liên quan</button></details>
       <div className="rh-story-source">{link(d.source_url,`${d.source_name||'Nguồn gốc'} · ${d.code||'Xem bài'}`)}</div>
     </article>)}</div>}
     {items.length>leadCount && <section className="rh-news-desk"><h3>Cập nhật khác</h3>{items.slice(leadCount).map(d=><details key={d.id} className="rh-news-row"><summary><span>{d.category}</span><strong>{d.title}</strong><time>{date(d.issued_at||d.published_at)}</time></summary><p>{d.insight.reason}</p><p><strong>Ảnh hưởng:</strong> {d.insight.impact}</p><p><strong>Kiểm tra:</strong> {d.insight.action}</p><small>{d.insight.method==='ai'?'AI gợi ý, chưa duyệt':'Sàng lọc theo quy tắc'}</small><Provenance item={d}/></details>)}</section>}

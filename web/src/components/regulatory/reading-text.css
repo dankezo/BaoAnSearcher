@@ -1,0 +1,7 @@
+.reading-text { min-width: 0; max-width: 68ch; font-size: 16px; line-height: 1.8; overflow-wrap: anywhere; }
+.reading-text p, .home-detail .reading-text p { margin: 0 0 1em; line-height: 1.8; white-space: pre-line; }
+.reading-text p:last-child { margin-bottom: 0; }
+.reading-text strong { font-weight: 700; }
+.home-detail h4 { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
+.home-detail > section + section { border-top: 1px solid var(--line); padding-top: 16px; }
+.home-detail li { margin: 8px 0; }

@@ -6,7 +6,7 @@ import { build } from 'esbuild'
 import React from 'react'
 import { create, act } from 'react-test-renderer'
 const dir = fileURLToPath(new URL('..', import.meta.url))
-const bundle = await build({ entryPoints:[`${dir}/src/components/regulatory/RegulatoryViews.jsx`], bundle:true, write:false, platform:'node', format:'cjs', jsx:'automatic', external:['react'], plugins:[{ name:'fixture', setup(b) {
+const bundle = await build({ entryPoints:[`${dir}/src/components/regulatory/RegulatoryViews.jsx`], bundle:true, write:false, platform:'node', format:'cjs', jsx:'automatic', external:['react'], loader:{'.css':'empty'}, plugins:[{ name:'fixture', setup(b) {
   b.onResolve({filter:/regulatoryService$/},()=>({ path:'service',namespace:'fixture' }))
   b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export const regulatoryRequest = (...args) => globalThis.regulatoryFixture(...args)'}))
 } }] })

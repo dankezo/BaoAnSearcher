@@ -5,6 +5,7 @@ import { StatusBadge } from '../bidStatus'
 import { regulatoryRequest } from '../services/regulatoryService'
 import { analyzeLegal, analyzeNews } from '../services/geminiService'
 import { cloudMetricsSlice, cloudMscSearch } from '../supabaseCloud'
+import ReadingText from '../components/regulatory/ReadingText'
 import { editorialTitle } from '../components/regulatory/RegulatoryViews'
 import { LEGAL_CORE, LEGAL_FILTERS, LEGAL_STATUS, filterLegal } from './legalCatalog'
 import { natureOf, sourceBadge, splitBrief } from './briefSplit'
@@ -409,9 +410,9 @@ function DocBody({ item }) {
     <div className="home-detail">
       <p className="home-badge">{sourceBadge(item)}</p>
       <h3>{item.title}</h3>
-      <p>{item.summary || 'Chưa có tóm tắt. Đọc bài gốc.'}</p>
-      {item.insight?.evidence_quote && <blockquote>{item.insight.evidence_quote}</blockquote>}
-      <p>{item.insight?.reason}</p>
+      <section><h4>Nội dung</h4><ReadingText text={item.summary || 'Chưa có tóm tắt. Đọc bài gốc.'} /></section>
+      {item.insight?.evidence_quote && <section><h4>Trích dẫn nguồn</h4><blockquote><ReadingText text={item.insight.evidence_quote} /></blockquote></section>}
+      {item.insight?.reason && <section><h4>Vì sao đáng chú ý</h4><ReadingText text={item.insight.reason} /></section>}
       {item.source_url && <a className="home-link" href={item.source_url} target="_blank" rel="noreferrer">Mở bài gốc</a>}
     </div>
   )
@@ -430,13 +431,13 @@ function AiBody({ item, ai, onRefresh }) {
       <button type="button" className="home-text" onClick={onRefresh} disabled={ai.loading}>{ai.loading ? 'Đang đối chiếu lại…' : 'Phân tích cập nhật'}</button>
       <p className="home-note">Gợi ý cho lãnh đạo · {item.code || sourceBadge(item)} · cần đối chiếu bản gốc</p>
       <h3>{data.headline_vietnamese}</h3>
-      <p>{data.executive_summary}</p>
+      <ReadingText text={data.executive_summary} />
       <div className={`home-callout ${data.tender_impact.nature === 'RISK_TRAP' ? 'risk' : 'chance'}`}>
         <strong>{data.tender_impact.group_affected} · {data.priority}</strong>
-        <p>{data.tender_impact.detail}</p>
+        <ReadingText text={data.tender_impact.detail} />
       </div>
-      <div className="home-callout action"><strong>Lệnh điều hành</strong><p>{data.action_order}</p></div>
-      {Object.entries({ evidence: 'Sự kiện và căn cứ', catalog_impact: 'Tác động đến Bảo An', opportunities: 'Cơ hội', risks: 'Rủi ro', priority_actions: 'Việc cần làm', verification: 'Cần xác minh' }).map(([key, title]) => data[key]?.length ? <section key={key}><strong>{title}</strong><ul>{data[key].map((entry, index) => <li key={index}>{entry.detail}{entry.source_urls?.map(url => <a key={url} href={url} target="_blank" rel="noreferrer"> [Nguồn]</a>)}</li>)}</ul></section> : null)}
+      <div className="home-callout action"><strong>Lệnh điều hành</strong><ReadingText text={data.action_order} /></div>
+      {Object.entries({ evidence: 'Sự kiện và căn cứ', catalog_impact: 'Tác động đến Bảo An', opportunities: 'Cơ hội', risks: 'Rủi ro', priority_actions: 'Việc cần làm', verification: 'Cần xác minh' }).map(([key, title]) => data[key]?.length ? <section key={key}><strong>{title}</strong><ul>{data[key].map((entry, index) => <li key={index}><ReadingText text={entry.detail} />{entry.source_urls?.map(url => <a key={url} href={url} target="_blank" rel="noreferrer"> [Nguồn]</a>)}</li>)}</ul></section> : null)}
       {data.sources?.length > 0 && <section><strong>Nguồn đối chiếu</strong><ol>{data.sources.map(source => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a></li>)}</ol></section>}
 
     </div>
@@ -510,14 +511,14 @@ function LegalAi({ data }) {
   const tone = (text) => (risk.test(text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd')) ? 'risk' : 'chance')
   return (
     <div className="home-detail">
-      <p>{data.doc_summary}</p>
-      <p className="home-note">{data.transition_warning}</p>
-      <div className={`home-callout ${tone(matrix.group_2_import)}`}><strong>Nhóm 2 · nhập khẩu / CMO</strong><p>{matrix.group_2_import}</p></div>
-      <div className={`home-callout ${tone(matrix.group_4_domestic)}`}><strong>Nhóm 4 · gia công nội</strong><p>{matrix.group_4_domestic}</p></div>
-      <div className={`home-callout ${tone(matrix.bhyt_reimbursement)}`}><strong>Thanh toán BHYT</strong><p>{matrix.bhyt_reimbursement}</p></div>
+      <ReadingText text={data.doc_summary} />
+      <ReadingText className="home-note" text={data.transition_warning} />
+      <div className={`home-callout ${tone(matrix.group_2_import)}`}><strong>Nhóm 2 · nhập khẩu / CMO</strong><ReadingText text={matrix.group_2_import} /></div>
+      <div className={`home-callout ${tone(matrix.group_4_domestic)}`}><strong>Nhóm 4 · gia công nội</strong><ReadingText text={matrix.group_4_domestic} /></div>
+      <div className={`home-callout ${tone(matrix.bhyt_reimbursement)}`}><strong>Thanh toán BHYT</strong><ReadingText text={matrix.bhyt_reimbursement} /></div>
       <div className="home-callout action">
         <strong>Chỉ đạo hành động</strong>
-        <ul>{data.executive_recommendations.map(item => <li key={item}>{item}</li>)}</ul>
+        <ul>{data.executive_recommendations.map(item => <li key={item}><ReadingText text={item} /></li>)}</ul>
       </div>
     </div>
   )
