@@ -345,7 +345,7 @@ function NewsBlock({ onOpenAdmin }) {
       {sourceErrors.length > 0 && <details className="home-source-status"><summary>{sourceErrors.length} nguồn chưa cập nhật được · xem trạng thái</summary>{sourceErrors.map(source => <p key={source.id}><b>{source.name}</b>: {source.last_error}{source.last_success ? ` · Lần thành công: ${sourceTime(source.last_success)}` : ''}</p>)}</details>}
       {state.loading && <p role="status">Đang mở bản tin…</p>}
       {state.error && <p className="home-alert" role="alert">{state.error} <button type="button" onClick={() => setRefresh(n => n + 1)}>Thử lại</button></p>}
-      {!state.loading && !state.error && !critical.length && <p className="home-empty">Chưa có tin cấp 1 trong 90 ngày. Xem tin phụ hoặc cào lại ở Dữ liệu.</p>}
+      {!state.loading && !state.error && !critical.length && <p className="home-empty">Chưa có tin nổi bật trong 90 ngày. Xem các tin bên dưới hoặc cập nhật ở Dữ liệu.</p>}
       <div className="home-critical">
         {critical.map(item => {
           const nature = natureOf(item)
@@ -353,7 +353,7 @@ function NewsBlock({ onOpenAdmin }) {
             <article key={item.id} className={`home-critical-card ${nature === 'RISK_TRAP' ? 'risk' : 'chance'}`}>
               <div className="home-tender-line">
                 <span className="home-badge">{sourceBadge(item)}</span>
-                <span>{nature === 'RISK_TRAP' ? 'Cảnh báo' : nature === 'OPPORTUNITY' ? 'Cơ hội thầu' : 'Theo dõi'}</span>
+                <span>{item.legal_status === 'draft' ? 'Đề xuất · chưa áp dụng' : nature === 'RISK_TRAP' ? 'Cảnh báo' : 'Đáng chú ý'}</span>
               </div>
               <h3>{editorialTitle(item)}</h3>
               {!!item.catalog_touch?.exact?.length && (
@@ -531,7 +531,7 @@ export default function HomeDashboard({ localMode, user, onOpenMsc, onOpenAdmin 
           <span className="home-kicker">Bảo An Pharma</span>
           <h1>Bàn điều hành thầu</h1>
         </div>
-        <p>Một hàng ba thẻ tóm tắt. Bấm một thẻ để mở danh sách và thao tác ngay trong cửa sổ trượt lên.</p>
+        <p>Theo dõi gói thầu, tin ngành dược và chính sách liên quan. Bấm một thẻ để xem chi tiết.</p>
       </header>
       <TenderRadar localMode={localMode} user={user} onOpenMsc={onOpenMsc} />
       <div className="home-lower">

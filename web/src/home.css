@@ -28,7 +28,7 @@
 }
 .home-lower {
   display: grid;
-  grid-template-columns: minmax(0, 1.22fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -394,7 +394,7 @@
 .home-badge.status-active { background: var(--ok-soft); color: var(--ok); }
 .home-badge.status-transitional { background: var(--warn-soft); color: var(--warn); }
 .home-badge.status-draft { background: #fde7d4; color: #9a4d12; }
-.home-critical { display: grid; gap: 10px; }
+.home-critical { display: grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr)); gap: 12px; }
 .home-critical-card { cursor: default; border-width: 2px; }
 .home-critical-card.chance { border-color: var(--ok); }
 .home-critical-card.risk { border-color: var(--danger); }

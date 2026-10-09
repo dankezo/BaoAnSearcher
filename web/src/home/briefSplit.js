@@ -18,8 +18,8 @@ export function natureOf(item) {
 }
 
 export function splitBrief(items = []) {
-  const ranked = [...items].sort((a, b) => (b.insight?.priority || 0) - (a.insight?.priority || 0))
-  const critical = ranked.filter(item => (item.insight?.priority || 0) >= 80).slice(0, 2)
+  const ranked = [...items].sort((a, b) => (b.attention_score ?? b.insight?.priority ?? 0) - (a.attention_score ?? a.insight?.priority ?? 0))
+  const critical = ranked.filter(item => (item.attention_score ?? item.insight?.priority ?? 0) >= 80).slice(0, 4)
   const ids = new Set(critical.map(item => item.id))
   return { critical, secondary: ranked.filter(item => !ids.has(item.id)) }
 }

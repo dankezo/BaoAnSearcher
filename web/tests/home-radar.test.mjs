@@ -114,3 +114,10 @@ test('gemini payload must stay inside the executive schema', () => {
   })
   assert.equal(legal.executive_recommendations.length, 1)
 })
+
+
+test('featured policy/demand stories use editorial attention without changing draft severity',()=>{
+ const items=[{id:'old-recall',attention_score:60,insight:{priority:95}},...['medicine-price','distribution','prescribing','tender-law'].map((id,i)=>({id,attention_score:95-i,insight:{priority:i>1?50:85}}))]
+ assert.deepEqual(splitBrief(items).critical.map(item=>item.id),['medicine-price','distribution','prescribing','tender-law'])
+ assert.deepEqual(splitBrief(items).secondary.map(item=>item.id),['old-recall'])
+})

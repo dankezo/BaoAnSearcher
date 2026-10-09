@@ -7,7 +7,7 @@ import {authorized} from '../../api-lib/routes/regulatoryDaily.js'
 const doc={id:'test',title:'Danh mục thuốc đáp ứng quy định đấu thầu thuốc',summary:'Công bố danh mục thuốc để kiểm tra hồ sơ đấu thầu.',legal_status:'unknown',code:'800/QĐ-QLD'}
 test('editorial prioritization excludes cosmetics, flags drafts and avoids treating sanctions as bans',()=>{
   assert.equal(ruleInsight(doc).priority,85)
-  assert.equal(ruleInsight({...doc,title:'Thu hồi số tiếp nhận công bố mỹ phẩm',summary:''}).priority,10)
+  assert.equal(ruleInsight({...doc,title:'Thu hồi số tiếp nhận công bố mỹ phẩm',summary:''}).priority,0)
   assert.equal(ruleInsight({...doc,title:'Thu hồi thuốc do vi phạm chất lượng',summary:''}).priority,95)
   assert.equal(ruleInsight({...doc,legal_status:'draft'}).priority,50)
   const sanction=ruleInsight({...doc,title:'Quyết định xử phạt Công ty dược',summary:''})

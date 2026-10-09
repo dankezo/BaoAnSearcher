@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createClient } from '@supabase/supabase-js'
-import { brief, ruleInsight } from '../../lib/regulatory/brief.js'
+import { brief, ruleInsight, editorialRelevant, guardedInsight, attentionScore } from '../../lib/regulatory/brief.js'
 import { categoryOf, relevant } from '../../lib/regulatory/parser.js'
 import { crawlSource } from '../../lib/regulatory/crawler.js'
 import { seedSources } from '../../lib/regulatory/seed.js'
@@ -88,4 +88,20 @@ test('prescribing proposals and significant older policy news reach the shared b
  assert.deepEqual(result.items.map(d=>d.id).sort(),['law-proposal','origin-price','prescribing'])
  assert.equal(result.items.find(d=>d.id==='prescribing').insight.priority,50)
  assert.match(result.items.find(d=>d.id==='prescribing').insight.action,/chưa áp dụng/)
+})
+
+
+test('editorial scope rejects unrelated sector projects before AI scoring and keeps general tender policies',()=>{
+ const waste={title:'Dự án xử lý rác thỏa thuận nhận quyền sử dụng đất có phải đấu thầu?',summary:'Áp dụng Luật Đấu thầu và thu hồi đất.'}
+ assert.equal(editorialRelevant(waste),false)
+ assert.equal(ruleInsight(waste).priority,0)
+ assert.equal(guardedInsight(waste,{method:'ai',priority:99,impact:'Có thể ảnh hưởng cung ứng thuốc.',action:'Cần xem hồ sơ.'}).priority,0)
+ assert.equal(editorialRelevant({title:'Đấu thầu xây dựng đường cao tốc',summary:'Quy định lựa chọn nhà thầu.'}),false)
+ assert.equal(editorialRelevant({title:'Thông báo đấu thầu laptop',summary:'Thuộc phạm vi quản lý của Bộ Y tế.'}),false)
+ assert.equal(editorialRelevant({title:'Hướng dẫn thực hiện đấu thầu theo các Hiệp định CPTPP, EVFTA, UKVFTA'}),true)
+ assert.equal(editorialRelevant({title:'Nhiều quy định mới về lựa chọn nhà thầu có hiệu lực'}),true)
+ const draft={title:'Đề xuất sửa Luật Đấu thầu',summary:'Dự thảo luật.',legal_status:'draft',published_at:new Date(Date.now()-60*86400000).toISOString()}
+ assert.equal(ruleInsight(draft).priority,50)
+ assert.equal(attentionScore(draft),88)
+ assert.ok(attentionScore(draft)>attentionScore({title:'Thu hồi thuốc Colchicina',published_at:new Date(Date.now()-40*86400000).toISOString()}))
 })
