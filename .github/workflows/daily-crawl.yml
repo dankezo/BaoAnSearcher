@@ -1,7 +1,7 @@
 name: Daily public data crawl
 on:
   schedule:
-    - cron: '17 22 * * *' # 05:17 Asia/Bangkok / Vietnam
+    - cron: '17 22 * * 0-5' # 05:17 Monday-Saturday Asia/Bangkok / Vietnam (UTC previous day)
   workflow_dispatch:
     inputs:
       only:
