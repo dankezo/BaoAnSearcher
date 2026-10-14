@@ -38,7 +38,7 @@ export function emailAllowed(email) {
 }
 
 function emailFromPayload(payload) {
-  return payload?.email || payload?.user_metadata?.email || ''
+  return payload?.email || ''
 }
 
 async function jwks(url, anon) {
