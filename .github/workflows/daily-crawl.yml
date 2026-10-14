@@ -1,7 +1,7 @@
 name: Daily public data crawl
 on:
   schedule:
-    - cron: '17 22 * * *' # 05:17 daily Asia/Bangkok / Vietnam (UTC previous day)
+    - cron: '17 22 * * *' # 05:17 daily VN; Sunday runs YCBG only
   workflow_dispatch:
     inputs:
       only:
@@ -50,6 +50,12 @@ jobs:
       PYTHONUNBUFFERED: '1'
       PYTHONUTF8: '1'
     steps:
+      - name: Preserve Sunday pause for existing sources
+        if: github.event_name == 'schedule'
+        run: |
+          if [ "$(TZ=Asia/Bangkok date +%u)" = 7 ]; then
+            echo "CRAWL_ONLY=ycbg" >> "$GITHUB_ENV"
+          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
