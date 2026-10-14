@@ -47,11 +47,11 @@ const App = compiled.exports.default
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 10))
 
-async function renderedMode(hostname) {
+async function renderedMode(hostname, initialHash='#map') {
   const previous = { window: global.window, health: global.routingHealth, props: global.routingSectionProps }
   global.routingSectionProps = null
   global.routingHealth = () => Promise.reject(new Error('local health unavailable'))
-  let hash = '#map'
+  let hash = initialHash
   global.window = {
     location: { hostname, get hash() { return hash } },
     history: { replaceState: (_state, _title, url) => { hash = String(url).startsWith('#') ? String(url) : hash } },
@@ -64,6 +64,7 @@ async function renderedMode(hostname) {
   try {
     await act(async () => { root = create(React.createElement(App)); await tick(); await tick() })
     assert.ok(global.routingSectionProps, `map section should render for ${hostname}`)
+    if(initialHash==='#msc-ycbg')assert.ok(root.root.findAllByProps({'data-section':'YcbgSection'}).length)
     const nav = root.root.findByType('nav')
     assert.deepEqual(nav.findAllByType('summary').map((node) => String(node.children[0]).trim()), ['Tra cứu', 'Nâng cao'])
     assert.deepEqual(nav.children.filter((node) => node.type === 'button').map((node) => node.children[0]), ['Bảng tin', 'Quản lý danh mục', 'Dữ liệu'])
@@ -80,7 +81,7 @@ async function renderedMode(hostname) {
     await act(async () => { prices.props.onClick({ currentTarget: { closest: () => menu } }); await tick() })
     assert.equal(menu.open, false)
     assert.ok(root.root.findAllByProps({ 'data-section': 'MscSection' }).length)
-    for (const [label, target] of [['Thuốc DAV', '#dav'], ['MSC - Gói thầu', '#msc'], ['BHYT VSS', '#vss'], ['Bản đồ', '#map']]) {
+    for (const [label, target] of [['Thuốc DAV', '#dav'], ['MSC - Gói thầu', '#msc'], ['MSC - YCBG','#msc-ycbg'],['BHYT VSS', '#vss'], ['Bản đồ', '#map']]) {
       const option = nav.findAllByType('button').find((node) => node.children[0] === label)
       menu.open = true
       await act(async () => { option.props.onClick({ currentTarget: { closest: () => menu } }); await tick() })
@@ -99,4 +100,8 @@ async function renderedMode(hostname) {
 test('local health failure stays local on localhost and uses cloud on a production hostname', async () => {
   assert.equal(await renderedMode('localhost'), true)
   assert.equal(await renderedMode('app.example.com'), false)
+})
+
+test('YCBG permalink opens the YCBG section after a reload',async()=>{
+  assert.equal(await renderedMode('app.example.com','#msc-ycbg'),false)
 })

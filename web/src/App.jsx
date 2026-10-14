@@ -121,9 +121,10 @@ export default function App() {
   const [tab, setTab] = useState(() => {
     const h = window.location.hash.replace('#', '')
     if (h === 'multi') return 'multi'
+    if (['msc-prices','msc-ycbg'].includes(h)) return 'msc'
     return TABS.some((t) => t.id === h) ? h : 'home'
   })
-  const [mscKind, setMscKind] = useState('tenders')
+  const [mscKind, setMscKind] = useState(()=>window.location.hash==='#msc-ycbg'?'ycbg':window.location.hash==='#msc-prices'?'prices':'tenders')
   const [visitedMsc,setVisitedMsc] = useState({})
   useEffect(()=>{if(tab==='msc')setVisitedMsc(previous=>previous[mscKind]?previous:{...previous,[mscKind]:true})},[tab,mscKind])
   const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
@@ -134,7 +135,7 @@ export default function App() {
   const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches)
   const [visited, setVisited] = useState(() => {
     const h = window.location.hash.replace('#', '')
-    const id = TABS.some((t) => t.id === h) ? h : 'home'
+    const id = ['msc-prices','msc-ycbg'].includes(h)?'msc':TABS.some((t) => t.id === h) ? h : 'home'
     return { [id]: true }
   })
 
@@ -199,9 +200,9 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const want = `#${tab}`
+    const want = `#${tab==='msc'&&mscKind!=='tenders'?'msc-'+mscKind:tab}`
     if (window.location.hash !== want) window.history.replaceState(null, '', want)
-  }, [tab])
+  }, [tab,mscKind])
 
   useEffect(() => {
     const onHash = () => {
@@ -212,6 +213,7 @@ export default function App() {
         return
       }
       if (h === 'multi') setTab(phone ? 'msc' : 'multi')
+      else if (['msc-prices','msc-ycbg'].includes(h)) { setMscKind(h.slice(4)); setTab('msc') }
       else if (TABS.some((t) => t.id === h)) setTab(h)
     }
     window.addEventListener('hashchange', onHash)

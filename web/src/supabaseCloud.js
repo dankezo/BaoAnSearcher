@@ -39,13 +39,13 @@ function foldParam(v) {
 
 const abortByKey = new Map()
 
-async function rawTender(path, body, { method = 'POST', abortKey } = {}) {
+async function rawTender(path, body, { method = 'POST', abortKey, timeoutMs = 55000 } = {}) {
   const controller = new AbortController()
   if (abortKey) {
     abortByKey.get(abortKey)?.abort()
     abortByKey.set(abortKey, controller)
   }
-  const timeout = setTimeout(() => controller.abort(), 55_000)
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const res = await authenticatedFetch(path, {
       method,
@@ -241,7 +241,7 @@ export async function cloudMscSearch({ kind = 'prices', filters = {}, page = 0, 
       size,
       cursor,
       ...(view?{view}:{}),
-    }, { abortKey: `search:msc:${kind}:${stableKey('f', { filters, cursor, size, view })}` })
+    }, { abortKey: `search:msc:${kind}:${stableKey('f', { filters, cursor, size, view })}`,...(kind==='ycbg'?{timeoutMs:120000}:{}) })
     return normalizePage(payload, page, size)
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
