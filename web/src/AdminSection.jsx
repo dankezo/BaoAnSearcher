@@ -59,7 +59,7 @@ export function DataRegistryHub({ registry, loading, error, onOpen, onRefresh, l
         <div>
           {view==='sources'&&<span className="kicker">Data Management Hub</span>}
           <h1 id="data-registry-title">Trung tâm Dữ liệu</h1>
-          {view==='sources'&&<p>Giám sát 4 nguồn lõi bằng snapshot metadata. Trang này không tải hay đếm bảng dữ liệu thô.</p>}
+          {view==='sources'&&<p>Giám sát 5 nguồn lõi bằng snapshot metadata. Trang này không tải hay đếm bảng dữ liệu thô.</p>}
         </div>
         {view==='sources'&&<div className={`registry-overall ${healthy ? 'healthy' : syncing ? 'syncing' : 'warning'}`}>
           <span>{healthy ? '●' : syncing ? '●' : '●'}</span>{headline}
