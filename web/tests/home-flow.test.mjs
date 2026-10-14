@@ -20,6 +20,9 @@ const bundle = await build({
   plugins: [{
     name: 'fixture',
     setup(b) {
+      b.onResolve({filter:/^@radix-ui\/react-dialog$/},()=>({path:'dialog',namespace:'home-dialog-test'}))
+      b.onLoad({filter:/.*/,namespace:'home-dialog-test'},()=>({contents:`import React,{createContext,useContext} from 'react';const C=createContext({});export const Root=({open,onOpenChange,children})=>React.createElement(C.Provider,{value:{open,onOpenChange}},children);export const Portal=({children})=>useContext(C).open?children:null;export const Overlay=()=>null;export const Content=({children,...props})=>React.createElement('aside',{...props,role:'dialog'},children);export const Title=({children,asChild})=>asChild?children:React.createElement('h2',null,children);export const Close=({children,...props})=>{const ctx=useContext(C);return React.createElement('button',{...props,onClick:()=>ctx.onOpenChange(false)},children)};`}))
+
       b.onResolve({ filter: /regulatoryService$|supabaseCloud$|geminiService$/ }, args => ({ path: args.path, namespace: 'fixture' }))
       b.onLoad({ filter: /.*/, namespace: 'fixture' }, (args) => {
         if (args.path.includes('regulatory')) return { contents: 'export const regulatoryRequest = (...a) => globalThis.homeReg(...a)' }
@@ -57,6 +60,24 @@ const walk = (node, visit) => {
   visit(node)
   walk(node.children, visit)
 }
+
+test('radar requests compact pages in parallel and renders while annual totals are pending',async()=>{
+ let root,resolveSlice;const requests=[]
+ global.homeReg=async()=>({items:[],sources:[]})
+ global.homeMsc=async body=>{requests.push(body);return {items:[{tender_no:'IB-SHARED',name:'Loaded tender',close_date:'2030-12-31',baoan_match:'exact'}],hasMore:!body.filters.metricQuick}}
+ global.homeSlice=()=>new Promise(resolve=>{resolveSlice=resolve})
+ try{
+  await act(async()=>{root=create(React.createElement(Home,{localMode:false,user:{id:'radar-test'}}));await wait()})
+  assert.equal(requests.length,2);assert.ok(requests.every(body=>body.view==='radar'))
+  const open=root.root.findAllByType('article').find(node=>node.props['aria-label']==='Đang mở')
+  assert.match(content(open),/1 gói khớp/);assert.doesNotMatch(content(open),/…/)
+  assert.doesNotMatch(content(open),/1\+/)
+  await act(async()=>{resolveSlice({matchExact:42})})
+  assert.match(content(open),/42 gói khớp/)
+ }finally{
+  await act(async()=>root?.unmount());delete global.homeReg;delete global.homeMsc;delete global.homeSlice
+ }
+})
 
 test('home cockpit keeps one row of three cards and confirms a watch topic from a popup', async () => {
   const previous = global.fetch
@@ -161,7 +182,7 @@ test('home cockpit keeps one row of three cards and confirms a watch topic from 
     const openPanel = panelOf()
     assert.equal(openPanel.count, 1)
     assert.match(content(openPanel.panel), /IB260001/)
-    assert.match(content(openPanel.panel), /Khớp SKU/)
+    assert.match(content(openPanel.panel), /Khớp hợp lệ/)
     assert.doesNotMatch(content(openPanel.panel), /Gói mới tuần này/)
     assert.equal(tenderCount(radarCards()[0]), 0)
     await act(async () => button(root, 'IB260001').props.onClick())
@@ -179,28 +200,22 @@ test('home cockpit keeps one row of three cards and confirms a watch topic from 
     assert.match(content(root.toJSON()), /Theo dõi dự thảo/)
     const launch = () => root.root.findAllByType('button').find(node => String(node.props.className || '').includes('home-watch-launch'))
     assert.equal(rendered(launch().children), 'Thêm')
-    assert.equal(button(root, 'Xác nhận'), undefined)
+    assert.equal(button(root, 'Lưu theo dõi'), undefined)
     await act(async () => launch().props.onClick())
     assert.equal(root.root.findAll(node => node.props?.role === 'dialog' && node.props['aria-label'] === 'Thêm mục theo dõi').length, 1)
     const field = (label) => root.root.findAllByType('input').find(node => node.props['aria-label'] === label)
     const ingredientField = () => root.root.findAllByType('label').find(node => String(node.props.className || '').includes('home-watch-field') && content(node.props.children).includes('Hoạt chất') && !content(node.props.children).includes('SĐK'))
-    assert.equal(field('Giá trị hoạt chất').props.disabled, true)
-    assert.match(ingredientField().props.className, /is-off/)
-    await act(async () => field('Hoạt chất').props.onChange({ target: { checked: true } }))
-    assert.equal(field('Giá trị hoạt chất').props.disabled, false)
-    assert.match(ingredientField().props.className, /is-on/)
+    assert.equal(field('Giá trị hoạt chất').props.disabled, undefined)
+    assert.equal(ingredientField().findAllByType('input').length,1)
     await act(async () => field('Giá trị hoạt chất').props.onChange({ target: { value: 'Metformin' } }))
-    await act(async () => field('Hoạt chất').props.onChange({ target: { checked: false } }))
+    await act(async () => field('Giá trị hoạt chất').props.onChange({ target: { value: '' } }))
     assert.equal(field('Giá trị hoạt chất').props.value, '')
-    assert.equal(field('Giá trị hoạt chất').props.disabled, true)
-    assert.match(ingredientField().props.className, /is-off/)
-    await act(async () => field('Hoạt chất').props.onChange({ target: { checked: true } }))
     await act(async () => field('Giá trị hoạt chất').props.onChange({ target: { value: 'Metformin' } }))
     const nameField = () => root.root.findAllByType('input').find(node => node.props['aria-label'] === 'Tên tiêu chí')
     assert.equal(nameField().props.value, 'Metformin')
     await act(async () => nameField().props.onChange({ target: { value: 'Metformin bệnh viện' } }))
     assert.equal(nameField().props.value, 'Metformin bệnh viện')
-    await act(async () => button(root, 'Xác nhận').props.onClick())
+    await act(async () => root.root.findAllByType('form').find(node=>node.props.className==='home-watch-form').props.onSubmit({preventDefault(){}}))
     assert.match(content(radarCards()[2]), /1 gói trên trang đã tải/)
     assert.doesNotMatch(content(radarCards()[2]), /gói mới gồm hoạt chất Metformin/)
     assert.equal(tenderCount(radarCards()[2]), 0)
@@ -233,12 +248,11 @@ test('home cockpit keeps one row of three cards and confirms a watch topic from 
     assert.equal(renameField().props.value, 'Metformin bệnh viện')
     await act(async () => renameField().props.onChange({ target: { value: 'Thuốc tiểu đường' } }))
     assert.match([...mem.entries()].find(([key]) => String(key).includes('home.watchTopics'))?.[1] || '', /Thuốc tiểu đường/)
-    await act(async () => field('Tỉnh').props.onChange({ target: { checked: true } }))
     const provinceSelect = () => root.root.findAllByType('select').find(node => node.props['aria-label'] === 'Chọn tỉnh')
     await act(async () => provinceSelect().props.onChange({ target: { value: 'Hà Nội' } }))
     assert.equal(nameField().props.value, 'Hà Nội')
     await act(async () => nameField().props.onChange({ target: { value: 'Khu vực Hà Nội' } }))
-    await act(async () => button(root, 'Xác nhận').props.onClick())
+    await act(async () => root.root.findAllByType('form').find(node=>node.props.className==='home-watch-form').props.onSubmit({preventDefault(){}}))
     await act(async () => watchToggle().props.onClick())
     const named = panelOf()
     assert.match(tagText(named.panel, 'IB260001'), /Thuốc tiểu đường/)

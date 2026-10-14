@@ -39,9 +39,10 @@ async function suggestTidb(section, field, q) {
   const needle = fold(q).trim()
   if (!spec || !column || needle.length < 2) return []
   try {
+    const tokens = needle.split(/\s+/).filter(Boolean)
     const rs = await tidbDb.query(
-      'SELECT value FROM suggest_values WHERE section = ? AND field = ? AND value LIKE ? ORDER BY cnt DESC LIMIT 8',
-      [section, field, `%${needle}%`],
+      `SELECT value FROM suggest_values WHERE section = ? AND field = ? AND ${tokens.map(() => "REPLACE(LOWER(value),'đ','d') COLLATE utf8mb4_unicode_ci LIKE ?").join(' AND ')} ORDER BY cnt DESC LIMIT 8`,
+      [section, field, ...tokens.map(token => `%${token.replace(/[\\%_]/g, char => '\\' + char)}%`)],
     )
     return (rs.rows || []).map((row) => String(row.value ?? '').trim()).filter(Boolean)
   } catch {

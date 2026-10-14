@@ -1,4 +1,4 @@
-import { resolveBidStatusFromRow } from '../bidStatus.js'
+import { parseCloseMs, resolveBidStatusFromRow } from '../bidStatus.js'
 
 const DAY = 86400000
 
@@ -16,7 +16,7 @@ export function parseDateMs(raw) {
 
 export function classifyTender(row, now = Date.now()) {
   const bid = resolveBidStatusFromRow(row, now)
-  const close = parseDateMs(row?.close_date)
+  const close = parseCloseMs(row?.close_date)
   const pub = parseDateMs(row?.published)
   const isOpen = bid.key === 'open'
   const match = row?.baoan_match === 'exact' || row?.baoan_match === 'near'
@@ -26,6 +26,11 @@ export function classifyTender(row, now = Date.now()) {
 }
 
 export function countdownLabel(close, now = Date.now()) {
+  if(typeof close==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(close)){
+    const [year,month,day]=close.split('-')
+    return `Ngày đóng ${day}/${month}/${year} · chưa rõ giờ`
+  }
+  if(typeof close==='string')close=parseCloseMs(close)
   if (close == null) return 'Chưa có hạn đóng'
   const ms = close - now
   if (ms < 0) return 'Đã đóng thầu'
@@ -56,7 +61,7 @@ export function mergeTenders(openItems = [], recentItems = []) {
     if (!key || map.has(key)) continue
     map.set(key, row)
   }
-  return [...map.values()]
+  return [...map.values()].sort((a, b) => (parseDateMs(b.published) ?? 0) - (parseDateMs(a.published) ?? 0))
 }
 
 function tenderKey(row) {
@@ -64,7 +69,8 @@ function tenderKey(row) {
 }
 
 export function radarView(openItems = [], recentItems = [], mode, now = Date.now()) {
-  const open = openItems.filter(row => classifyTender(row, now).isOpen)
+  const newest = (a, b) => (parseDateMs(b.published) ?? 0) - (parseDateMs(a.published) ?? 0)
+  const open = openItems.filter(row => classifyTender(row, now).isOpen).sort(newest)
   const matched = open.filter(row => classifyTender(row, now).match)
   const fresh = []
   const seenFresh = new Set()
@@ -75,9 +81,10 @@ export function radarView(openItems = [], recentItems = [], mode, now = Date.now
     if (classifyTender(row, now).fresh) fresh.push(row)
   }
   const merged = mergeTenders(openItems, recentItems)
+  fresh.sort(newest)
   const closing = merged
     .filter(row => classifyTender(row, now).closing)
-    .sort((a, b) => (parseDateMs(a.close_date) ?? Number.POSITIVE_INFINITY) - (parseDateMs(b.close_date) ?? Number.POSITIVE_INFINITY))
+    .sort(newest)
   const list = mode === 'match' ? matched : mode === 'fresh' ? fresh : mode === 'closing' ? closing : mode === 'open' ? open : []
   return {
     counts: { open: open.length, match: matched.length, fresh: fresh.length, closing: closing.length },

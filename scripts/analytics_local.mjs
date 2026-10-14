@@ -3,7 +3,7 @@ import { createInterface } from 'node:readline'
 import { overview, detail, suggest, savedOverview } from '../api-lib/analytics/core.js'
 import { fields, mappings } from '../api-lib/analytics/cloud.js'
 import { insight } from '../api-lib/analytics/insight.js'
-import { portfolioCoordinates } from '../api-lib/analytics/portfolio.js'
+import { portfolioCoordinates, companyStrategy } from '../api-lib/analytics/portfolio.js'
 import {readFileSync} from 'node:fs'
 import {join} from 'node:path'
 import {suggestionItems} from '../api-lib/analytics/suggestions.js'
@@ -39,7 +39,7 @@ const adapter={
     const rawValue=f=>{
       if(source==='vss'&&f==='form')return `COALESCE(NULLIF(TRIM(json_extract(raw,'$.dangbaoche')),''),SDK_FORM(json_extract(raw,'$.sodk')))`
       if(f==='updated_at')return `COALESCE(json_extract(${raw},'$.collected_at'),json_extract(${raw},'$.created_date'),json_extract(${raw},'$.lastModificationTime'),json_extract(${raw},'$.creationTime'))`
-      const paths=source==='dav'&&nested[f]?nested[f]:[source==='dav'?({name:'tenThuoc',registration:'soDangKy'}[f]||f):mappings[source][f]||f]
+      const paths=source==='dav'&&nested[f]?nested[f]:[source==='dav'?({name:'tenThuoc',registration:'soDangKy',previous_registration:'soDangKyCu'}[f]||f):mappings[source][f]||f]
       const values=paths.map(p=>`json_extract(${raw},'$.${p}')`)
       return values.length>1?`COALESCE(${values.join(',')})`:values[0]
     }
@@ -48,7 +48,7 @@ const adapter={
     const expr=f=>f==='province'&&source==='dav'?`COMPANY_PROVINCE(${rawValue(q.companyFocus==='manufacturer'?'manufacturer':'registrant')},'${q.companyFocus==='manufacturer'?'factory':'office'}')`:f==='id'?(table==='records'?'source_id':'id'):f==='amount'&&source==='msc_prices'?`CMUL(${numeric('price')},${numeric('quantity')})`:['price','quantity','amount'].includes(f)?numeric(f):['date','expiry'].includes(f)?`ADATE(${rawValue(f)})`:rawValue(f)
     const wanted=purpose==='portfolio'?['ingredient','strength','group_name','registration']:purpose==='overview'?source==='dav'?['registration','date','expiry','updated_at','price','quantity','amount','province',...(q.mode==='company'?['manufacturer','registrant']:[])]:source==='msc_tenders'?['id','tender_no','date','updated_at','status','price','quantity','amount']:['updated_at','ingredient','strength','form','company','manufacturer','tender_no','province','facility','group_name','unit','price','quantity','amount','date',...(q.entity?['name','registration']:[])]:fields
     const cols=wanted.map(f=>`${expr(f)} AS ${f}`)
-    let keys=['ingredient','name','registration','manufacturer','registrant','company','province','facility','strength','form','route']
+    let keys=['ingredient','name','registration','previous_registration','manufacturer','registrant','company','province','facility','strength','form','route','unit']
     if(purpose==='portfolio')keys=['ingredient','strength','registration']
     if(purpose==='overview') keys=keys.filter(f=>Object.hasOwn(q.filters||{},f)||q.entity&&(q.mode==='drug'&&f===q.entityField||q.mode==='territory'&&f===(q.territoryField==='facility'?'facility':'province')||q.mode==='company'&&(q.role==='all'?['company','manufacturer','registrant'].includes(f):f===(q.role==='manufacturer'?'manufacturer':q.role==='registrant'?'registrant':'company'))))
     for(const f of keys) cols.push(`FOLD(${expr(f)}) AS ${f}_key`)
@@ -89,7 +89,8 @@ const adapter={
 }
 try {
   const stored=request.action==='ai-insight'&&request.body.snapshot?savedOverview(request.body.snapshot,request.body.query):null
-  const value=request.action==='company-profile'?await crawlCompany(request.body.legalName||request.body.query.entity):request.action==='awards'?await recentAwards(adapter,request.body):request.action==='suggest'?await suggest(adapter,request.q):request.action==='detail'?await detail(adapter,request.body):request.action==='ai-insight'?await insight(stored?{...stored,news:request.body._news||[],newsStatus:request.body._newsStatus||'unavailable',_refreshAt:request.body.refreshAt}:request.overview||await overview(adapter,request.body.query||request.body)):await overview(adapter,request.body)
+  const strategy=request.action==='ai-insight'&&(request.body.query||request.body).mode==='company'?await companyStrategy(adapter,request.body.query||request.body):undefined
+  const value=request.action==='company-profile'?await crawlCompany(request.body.legalName||request.body.query.entity):request.action==='awards'?await recentAwards(adapter,request.body):request.action==='suggest'?await suggest(adapter,request.q):request.action==='detail'?await detail(adapter,request.body):request.action==='ai-insight'?await insight({...(stored?{...stored,news:request.body._news||[],newsStatus:request.body._newsStatus||'unavailable',_refreshAt:request.body.refreshAt}:request.overview||await overview(adapter,request.body.query||request.body)),companyStrategy:strategy}):await overview(adapter,request.body)
   if(request.action==='overview'&&value.query.mode==='company') value.baoanCoordinates=await portfolioCoordinates(adapter)
   process.stdout.write(JSON.stringify(value))
 } catch(e){process.stdout.write(JSON.stringify({error:e.message,status:e.status||500}));process.exitCode=1}

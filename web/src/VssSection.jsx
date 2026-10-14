@@ -8,35 +8,35 @@ import {
   IngredientText, LoadingOverlay, Pagination, SuggestField, TableToolbar, UpdatedNote,
   applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize, serverFilters, useSectionMeta,
   useSelection, useLoadProgress, } from './components'
-import { StatCards } from './areaStats'
-import { applyMetricQuick } from './metrics'
+
+import { applyMetricQuick, MscPriceSlice } from './metrics'
+import { downloadBlob } from './export'
+import DateInput, { validateDateInputs } from './DateInput'
+import SaveResultButton from './SaveResultButton'
+import { tableSnapshot } from './savedResultStore'
+import { formatNumber, numberValue, lineValue } from './numbers'
 
 const PAGE_SIZE_DEFAULT = 100
 const VSS_TEXT_KEYS = ['q', 'hoatchat', 'sodk']
 
-const toNum = (v) => {
-  if (v == null || v === '') return ''
-  const n = Number(String(v).replace(/[^\d.-]/g, ''))
-  return Number.isFinite(n) ? n : v
-}
-const fmtNum = (v) => {
-  const n = toNum(v)
-  return typeof n === 'number' ? n.toLocaleString('vi-VN') : (v ?? '')
-}
+const toNum = v => numberValue(v,true)
+const vssNumber = (row,key) => row._analyticsNumbers ? numberValue(row._analyticsNumbers[key]) : toNum(row[key])
+const vssTotal = row => lineValue(vssNumber(row,'gia'),vssNumber(row,'soluong'))
 
 const ALL_COLS = [
-  { key: 'hoatchat', label: 'Tên hoạt chất', width: 200, render: (v) => <IngredientText text={v} /> },
+  { key: 'hoatchat', label: 'Tên hoạt chất', width: 170, render: (v) => <IngredientText text={v} /> },
   { key: 'sodk', label: 'Số ĐK', width: 112, mono: true, nowrap: true },
   { key: 'ten', label: 'Tên thuốc', width: 160, truncateAt: 72 },
   { key: 'duongdung', label: 'Đường dùng', filter: 'select' },
-  { key: 'dangbaoche', label: 'Dạng bào chế', filter: 'select', truncateAt: 48 },
+  { key: 'dangbaoche', label: 'Dạng bào chế', filter: 'select', truncateAt: 48, render: value => value || <span className="muted" title="VSS thiếu dạng và chưa có một dạng DAV xác định theo SĐK">Chưa xác định</span> },
   { key: 'hamluong', label: 'Hàm lượng', truncateAt: 64 },
   { key: 'donvitinh', label: 'ĐVT', width: 65, filter: 'select' },
-  { key: 'soluong', label: 'Số lượng', align: 'right', mono: true, text: (r) => toNum(r.soluong), render: (v) => fmtNum(v) },
-  { key: 'gia', label: 'Giá', align: 'right', mono: true, text: (r) => toNum(r.gia), render: (v) => fmtNum(v) },
-  { key: 'thanhtien', label: 'Thành tiền', align: 'right', mono: true, text: (r) => toNum(r.thanhtien), render: (v) => fmtNum(v) },
+  { key: 'gia', label: 'Đơn giá', align: 'right', mono: true, sum: true, exportValue:r=>vssNumber(r,'gia'), text:r=>formatNumber(vssNumber(r,'gia')), render:(_v,r)=>formatNumber(vssNumber(r,'gia')) },
+  { key: 'soluong', label: 'SL', align: 'right', mono: true, sum: true, exportValue:r=>vssNumber(r,'soluong'), text:r=>formatNumber(vssNumber(r,'soluong')), render:(_v,r)=>formatNumber(vssNumber(r,'soluong')) },
+  { key: 'thanhtien', label: 'Tổng GT', align: 'right', mono: true, sum: true, exportValue:vssTotal, text:r=>formatNumber(vssTotal(r)), render:(_v,r)=>formatNumber(vssTotal(r)) },
   { key: 'nhomthau', label: 'Nhóm thầu', filter: 'select', align: 'center' },
   { key: 'nhasx', label: 'Nhà SX', width: 220, truncateAt: 72 },
+  { key: 'tennhathau', label: 'Nhà thầu trúng', width: 220, truncateAt: 72 },
   { key: 'nuocsx', label: 'Nước SX', filter: 'select' },
   { key: 'ma_tinh', label: 'Mã tỉnh', mono: true, filter: 'select' },
   { key: 'ten_tinh', label: 'Tỉnh / TP', width: 130, filter: 'select' },
@@ -49,7 +49,7 @@ const DETAIL_FIELDS = [
   ...ALL_COLS,
   { key: 'loai_thau', label: 'Loại thầu' },
   { key: 'ten_cskcb', label: 'CSKCB' },
-  { key: 'nam', label: 'Năm' },
+  { key: 'nam', label: 'Năm', text: (r) => String(r.nam ?? '') },
   { key: 'congbo', label: 'Công bố', text: (r) => fmtDate(r.congbo) },
 ]
 
@@ -77,7 +77,7 @@ function filterStatic(items, f) {
     out = out.filter((r) => matchesYear(r, f.nam))
   }
   if (f.tuNgay) out = out.filter((r) => String(r.tungay_hd || '') >= f.tuNgay)
-  if (f.denNgay) out = out.filter((r) => String(r.denngay_hd || '') <= `${f.denNgay} 23:59:59`)
+  if (f.denNgay) out = out.filter((r) => r.tungay_hd && String(r.tungay_hd).slice(0,10) <= f.denNgay)
   return sortByDateDesc(out, ['congbo', 'tungay_hd', 'tungay', 'denngay_hd', 'created_date'])
 }
 
@@ -109,8 +109,8 @@ function VssFieldGrid({ draft, setF, placeOpts, fieldSuggest, onCommit }) {
         options={Array.from({ length: 4 }, (_, i) => String(new Date().getFullYear() - i))}
         placeholder="Chọn năm…"
       />
-      <Field label="HĐ từ ngày"><input type="date" value={draft.tuNgay} onChange={(e) => setF('tuNgay', e.target.value)} /></Field>
-      <Field label="HĐ đến ngày"><input type="date" value={draft.denNgay} onChange={(e) => setF('denNgay', e.target.value)} /></Field>
+      <Field label="Ngày bắt đầu HĐ từ"><DateInput aria-label="Ngày bắt đầu HĐ từ" value={draft.tuNgay} onValueChange={value=>setF('tuNgay',value)} /></Field>
+      <Field label="Ngày bắt đầu HĐ đến"><DateInput aria-label="Ngày bắt đầu HĐ đến" value={draft.denNgay} onValueChange={value=>setF('denNgay',value)} /></Field>
       <MultiSelectField label="Nước sản xuất" value={draft.nuocsx} onChange={(v) => setF('nuocsx', v)} suggest={fieldSuggest('nuocsx')} placeholder="Chọn nước…" />
       <MultiSelectField label="Loại thầu" value={draft.loai_thau} onChange={(v) => setF('loai_thau', v)} suggest={fieldSuggest('loai_thau')} placeholder="vd: thau_tinh…" />
       <MultiSelectField label="Mã tỉnh" value={draft.ma_tinh} onChange={(v) => setF('ma_tinh', v)} options={placeOpts.ma_tinh} placeholder="Chọn mã tỉnh…" />
@@ -121,6 +121,7 @@ function VssFieldGrid({ draft, setF, placeOpts, fieldSuggest, onCommit }) {
 export default function VssSection({ localMode, embedded = false, filtersInModal = false }) {
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
+  const [appliedColumnFilters, setAppliedColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(false)
   const [filterModalOpen, setFilterModalOpen] = useState(false)
   const [compactFilters, setCompactFilters] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 900px)').matches)
@@ -164,10 +165,11 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   const meta = useSectionMeta('vss', localMode, null, refreshKey)
 
 
-  const cols = ALL_COLS
+  const cols = useMemo(() => ALL_COLS.filter(col => col.key !== 'tennhathau' || data.items.some(row => row.tennhathau)), [data.items])
 
   const filtersRef = useRef(filters)
   const columnFiltersRef = useRef(columnFilters)
+  const appliedColumnFiltersRef = useRef(appliedColumnFilters)
   const pageSizeRef = useRef(pageSize)
   const pageRef = useRef(0)
   const cursorsByPageRef = useRef(new Map([[0, null]]))
@@ -176,7 +178,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   pageSizeRef.current = pageSize
 
   const mergedFilters = useCallback(
-    (cf) => ({ ...filtersRef.current, ...serverFilters(cf ?? columnFiltersRef.current, SERVER_MAP), loai: 'Tân dược' }),
+    (cf) => ({ ...filtersRef.current, ...serverFilters(cf ?? appliedColumnFiltersRef.current, SERVER_MAP), loai: 'Tân dược' }),
     [],
   )
 
@@ -185,6 +187,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     const stale = () => id !== reqSeq.current
     const size = resolvePageSize(pageSizeRef.current)
     const active = { ...mergedFilters(cf), ...(override || {}), loai: 'Tân dược' }
+    if (cf) { appliedColumnFiltersRef.current = cf; setAppliedColumnFilters(cf) }
     setCardKey(JSON.stringify(active))
     if (skipShortTextSearch(active, VSS_TEXT_KEYS, { ...EMPTY_FILTERS, loai: 'Tân dược' })) {
       setInfoNote(SHORT_SEARCH_NOTE)
@@ -256,10 +259,11 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
   const draftRef = useRef(null)
   const applyDraft = useCallback((override) => {
+    if (!validateDateInputs()) return
     const next = draftRef.current?.commit(override) || { ...filtersRef.current, ...(override || {}) }
     filtersRef.current = { ...next, loai: 'Tân dược' }
     setFilters(filtersRef.current)
-    search(0)
+    search(0, columnFiltersRef.current)
   }, [search])
   const clearDraft = useCallback(() => {
     draftRef.current?.reset(EMPTY_FILTERS)
@@ -280,7 +284,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     setColumnFilters(next)
     search(0, next)
   }, [search])
-  const runSearch = useCallback((override) => search(0, undefined, override || null), [search])
+  const runSearch = useCallback((override) => search(0, columnFiltersRef.current, override || null), [search])
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
 
   const [placeOpts, setPlaceOpts] = useState({ ten_tinh: [], ma_tinh: [] })
@@ -307,10 +311,10 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
   }, [localMode])
 
   const rows = useMemo(() => {
-    let list = applyColumnFilters(data.items, cols, columnFilters)
+    let list = applyColumnFilters(data.items, cols, appliedColumnFilters)
     list = applyMetricQuick(list, metricQuick, 'vss')
     return list
-  }, [data.items, cols, columnFilters, metricQuick])
+  }, [data.items, cols, appliedColumnFilters, metricQuick])
   const rowKey = useCallback((r, i) => `${r.sodk}|${r.ma_tinh}|${r.tungay_hd}|${r.stt ?? `${page}-${i}`}`, [page])
   const pageSizeNum = resolvePageSize(pageSize)
   const metricsItems = metricsSample ?? data.items
@@ -337,10 +341,10 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
 
   const fetchAll = useCallback(async () => {
     const searchFn = localMode
-      ? (p, size) => api.vssSearch({ filters: mergedFilters(), page: p, size })
+      ? (p, size, cursor) => api.vssSearch({ filters: mergedFilters(), page: p, size, cursor })
       : (p, size, cursor) => cloudVssSearch({ filters: mergedFilters(), page: p, size, cursor })
     if (!localMode && !supabaseConfigured) return []
-    return fetchAllPages(searchFn, { onProgress: setExportPct })
+    return fetchAllPages(searchFn, { size:5000, cap:50000, strict:true, onProgress: setExportPct })
   }, [localMode, mergedFilters, embedded])
 
   const runExport = async (selectedRows) => {
@@ -349,8 +353,14 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
     setExporting(true)
     setExportPct(5)
     try {
+      if(localMode && !selectedRows?.size && !Object.values(appliedColumnFilters).some(value=>String(value??'').trim())){
+        const filters=JSON.parse(cardKey || '{}')
+        const blob=await api.datasetDownload({code:'VSS',filters,start:filters.tuNgay,end:filters.denNgay,format:'xlsx'})
+        downloadBlob(blob,'VSS_BHYT_trung_thau.xlsx')
+        return
+      }
       const n = await exportSelectionOrAll({
-        columns: cols, selected: selectedRows, fetchAll, filename: 'VSS_BHYT_trung_thau', sheetName: 'VSS', columnFilters,
+        columns: cols, selected: selectedRows, fetchAll, filename: 'VSS_BHYT_trung_thau', sheetName: 'VSS', columnFilters: appliedColumnFilters,
       })
       if (!n) setErr('Không có dòng nào để xuất.')
     } catch (e) {
@@ -399,6 +409,7 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
                       {!modalFilters && (
                         <VssFieldGrid draft={draft} setF={setF} placeOpts={placeOpts} fieldSuggest={fieldSuggest} onCommit={applyDraft} />
                       )}
+                      {modalFilters && <SuggestField label="Tìm kiếm" value={draft.q} onChange={v=>setF('q',v)} onSearch={v=>applyDraft({q:v})} suggest={fieldSuggest('q')} placeholder="Tên thuốc, hoạt chất, SĐK, nhà sản xuất…"/>}
                       <div className="filter-actions">
                         {modalFilters && (
                           <button
@@ -430,13 +441,8 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
                 {cardError && !cardStats
                   ? <p className="info-note" role="status">{cardError}</p>
                   : (
-                    <StatCards
-                      stats={cardStats}
-                      pending={!cardStats}
-                      months={12}
-                      showGroups={false}
-                      hideHeader
-                    />
+                    <MscPriceSlice source="vss" loading={!cardStats} view={cardStats?{...cardStats,revenue:cardStats.value,series:(cardStats.trend||[]).map(point=>({...point,revenue:point.value})),months:12}:null}/>
+
                   )}
               </aside>
             )}
@@ -455,6 +461,8 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
           activeColumnFilters={activeCF}
           onClearColumnFilters={() => { columnFiltersRef.current = {}; setColumnFilters({}); search(0, {}) }}
         >
+          {filtersRow && <button type="button" className="btn sm" onClick={() => applyDraft()}>{Icons.search} Tìm kiếm</button>}
+          <SaveResultButton source="vss" defaultName={`VSS · ${filters.sodk||filters.hoatchat||filters.q||'Kết quả trúng thầu'}`} disabled={loading||!data.items.length} getSnapshot={async()=>tableSnapshot('VSS BHYT',cols,sel.size?[...sel.selected.values()]:applyMetricQuick(applyColumnFilters(await fetchAll(),cols,appliedColumnFilters),metricQuick,'vss'),{...mergedFilters(),columnFilters:appliedColumnFilters,metricQuick,selectionOnly:sel.size>0})}/>
           <button type="button" className="btn ghost sm" onClick={() => runSearch()} title="Quét lại dữ liệu">
             {Icons.refresh} Quét lại
           </button>
@@ -484,8 +492,8 @@ export default function VssSection({ localMode, embedded = false, filtersInModal
               {Icons.refresh} Tìm kiếm lại
             </button>
           )}
-          cardKeys={['hoatchat', 'sodk', 'ten', 'thanhtien', 'ten_tinh']}
-          minWidth={embedded ? 720 : 1100}
+          cardKeys={['hoatchat', 'sodk', 'ten', 'gia', 'soluong', 'thanhtien', 'ten_tinh']}
+          minWidth={cols.reduce((width,column)=>width+(column.width||110),80)}
         />
         <Pagination
           page={page}

@@ -101,6 +101,17 @@ function likeAny(where, args, col, v, dialect) {
     args.push(...vals)
     return
   }
+  if (['buyer', 'ten_cskcb'].includes(col)) {
+    const expressions = vals.map(value => {
+      const tokens = dialect === 'tidb' ? words(value) : String(value).trim().split(/\s+/)
+      args.push(...tokens.map(token => `%${token.replace(/[\\%_]/g, char => '\\' + char)}%`))
+      const field = dialect === 'tidb' ? `REPLACE(LOWER(${target}), 'đ', 'd') COLLATE utf8mb4_unicode_ci` : target
+      const escape = dialect === 'tidb' ? "'\\\\'" : "'\\'"
+      return `(${tokens.map(() => `${field} LIKE ? ESCAPE ${escape}`).join(' AND ') || '0=1'})`
+    })
+    where.push(`(${expressions.join(' OR ')})`)
+    return
+  }
   if (vals.length === 1) {
     where.push(`${target} LIKE ?`)
     args.push(likeValue(dialect, col, vals[0]))
@@ -207,6 +218,8 @@ export function whereFor(kind, filters, dialect) {
     likeAny(rest, args, 'cty_san_xuat', f.sanXuat, dialect)
     likeAny(rest, args, 'cty_dang_ky', f.dangKy, dialect)
     likeAny(rest, args, 'nuoc_san_xuat', f.nuocSanXuat, dialect)
+    if(f.dateFrom){indexed.push('ngay_cap >= ?');args.push(String(f.dateFrom).slice(0,10))}
+    if(f.dateTo){indexed.push(`ngay_cap < ${dialect==='tidb'?"DATE_ADD(?, INTERVAL 1 DAY)":"date(?, '+1 day')"}`);args.push(String(f.dateTo).slice(0,10))}
     const registrationCount = String(f.ingredientCount === 'other' ? f.ingredientCountOther : f.ingredientCount || '').trim()
     if (registrationCount === '1-2' || registrationCount === '3-5') {
       const [min, max] = registrationCount.split('-').map(Number)
@@ -260,9 +273,10 @@ export function whereFor(kind, filters, dialect) {
     for (const [col, value] of cols) likeAny(rest, args, col, value, dialect)
     const publishedFrom = f.publishedFrom || f.tuNgay || null
     if (publishedFrom) {
-      indexed.push('(published IS NULL OR published >= ?)')
+      indexed.push(f.strictDates?'published >= ?':'(published IS NULL OR published >= ?)')
       args.push(String(publishedFrom).slice(0, 10))
     }
+    if(f.publishedTo){indexed.push(`published < ${dialect==='tidb'?"DATE_ADD(?, INTERVAL 1 DAY)":"date(?, '+1 day')"}`);args.push(String(f.publishedTo).slice(0,10))}
   } else {
     eqAny(indexed, args, 'loai', f.loai)
     eqAny(indexed, args, 'nam', f.nam, true)
@@ -273,17 +287,19 @@ export function whereFor(kind, filters, dialect) {
       args.push(`%${w}%`)
     }
     likeAny(rest, args, 'hoatchat', f.hoatchat, dialect)
+    likeAny(rest, args, 'ten', f.ten, dialect)
     likeAny(rest, args, 'sodk', f.sodk, dialect)
     likeAny(rest, args, 'loai_thau', f.loai_thau, dialect)
     likeAny(rest, args, 'duongdung', f.duongdung, dialect)
     likeAny(rest, args, 'ten_tinh', f.ten_tinh, dialect)
     likeAny(rest, args, 'nuocsx', f.nuocsx, dialect)
     if (f.tuNgay) {
-      indexed.push('(tungay_hd IS NULL OR tungay_hd >= ?)')
+      indexed.push('tungay_hd >= ?')
       args.push(String(f.tuNgay).slice(0, 10))
     }
     if (f.denNgay) {
-      indexed.push(`(tungay_hd IS NULL OR tungay_hd < ${dialect==='tidb'?"DATE_ADD(?, INTERVAL 1 DAY)":"date(?, '+1 day')"})`)
+      if(dialect==='turso')indexed.push("tungay_hd <> ''")
+      indexed.push(`tungay_hd < ${dialect==='tidb'?"DATE_ADD(?, INTERVAL 1 DAY)":"date(?, '+1 day')"}`)
       args.push(String(f.denNgay).slice(0, 10))
     }
   }

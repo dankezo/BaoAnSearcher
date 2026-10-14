@@ -228,6 +228,27 @@ def _write_meta(conn, key_name: str, table: str) -> None:
     print(f"  {key_name}={total:,}")
 
 
+def refresh_vss_metric_rollup(conn) -> None:
+    """Replace the derived snapshot atomically; removed month keys must disappear."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute('DELETE FROM agg_vss_monthly')
+            cur.execute("""
+                INSERT INTO agg_vss_monthly (loai, nam, ym, ma_tinh, nhomthau, sum_thanhtien, cnt)
+                SELECT TRIM(COALESCE(loai, '')),
+                       CASE WHEN nam > 0 THEN nam ELSE COALESCE(YEAR(tungay_hd), 0) END,
+                       COALESCE(DATE_FORMAT(tungay_hd, '%Y-%m'), ''),
+                       TRIM(COALESCE(ma_tinh, '')), TRIM(COALESCE(nhomthau, '')),
+                       SUM(COALESCE(thanhtien, 0)), COUNT(*)
+                FROM vss_bids GROUP BY 1, 2, 3, 4, 5
+            """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    print('vss metric rollup refreshed from contract-start facts')
+
+
 def refresh_msc_price_metric_rollup(conn) -> None:
     """Refresh the small monthly metric table after an MSC price sync.
 
@@ -561,7 +582,7 @@ def run_remote(only: set[str], from_start: bool, prune: bool, prune_only: bool) 
         if "tenders" in only:
             _sync_msc(conn, state, from_start, "tenders", "msc_tenders", MSC_TENDER_COLUMNS, build_msc_tender_row)
         if "rollup" in only:
-            sync_jsonl(conn, state, from_start, "agg_vss_monthly", ROLLUP_PATH, ROLLUP_COLUMNS, build_rollup_row)
+            refresh_vss_metric_rollup(conn)
         if "suggest" in only:
             sync_jsonl(conn, state, from_start, "suggest_values", SUGGEST_PATH, SUGGEST_COLUMNS, build_suggest_row)
     finally:

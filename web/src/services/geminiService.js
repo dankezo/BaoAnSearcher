@@ -1,9 +1,10 @@
 import { getSupabase } from '../supabaseClient'
+import { authenticatedFetch } from '../lib/supabase-auth'
 
 async function post(path, body) {
   const session = await getSupabase()?.auth.getSession()
   const token = session?.data?.session?.access_token
-  const response = await fetch(path, {
+  const response = await (token ? authenticatedFetch : fetch)(path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

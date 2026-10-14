@@ -4,6 +4,7 @@ import { openDavLookup } from '../../api'
 import { SERVER_MAP } from './davConfig'
 import type { DavSearchController } from '../../hooks/useDavSearch'
 import type { DrugItem } from '../../types/dav'
+import SaveResultButton from '../../SaveResultButton'
 export function DavDataTable({
   controller,
   embedded = false,
@@ -54,6 +55,8 @@ export function DavDataTable({
         activeColumnFilters={activeCF}
         onClearColumnFilters={clearColumnFilters}
       >
+        {filtersRow && <button type="button" className="btn sm" onClick={() => searchColumn()}>{Icons.search} Tìm kiếm</button>}
+        <SaveResultButton source="dav" defaultName="DAV · Danh mục số đăng ký" disabled={loading||!data.items.length} getSnapshot={controller.getSnapshot}/>
         <details className="dav-column-picker">
           <summary className="btn ghost sm">{Icons.columns} Ẩn/hiện cột</summary>
           <div className="dav-column-options">

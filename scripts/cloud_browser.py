@@ -5,6 +5,29 @@ import html
 import json
 import requests
 
+WORKER_URLS = ('https://crawl.baoanpharma.com', 'https://baoan-public-crawl.dannyphan190.workers.dev')
+
+
+def cloud_worker_post(path, body, timeout=(10, 110)):
+    """Invoke the allowlisted public crawl Worker without logging its key."""
+    worker = (os.environ.get('CLOUDFLARE_YCBG_WORKER_URL') if path.startswith('/ycbg/') or path=='/quota' else None) or os.environ.get('CLOUDFLARE_CRAWL_WORKER_URL', '')
+    worker = worker.strip().rstrip('/')
+    ycbg_route = path.startswith('/ycbg/') or path == '/quota'
+    key_name = 'CLOUDFLARE_YCBG_KEY' if ycbg_route else 'CLOUDFLARE_CRAWL_WORKER_KEY'
+    key = (os.environ.get(key_name) or (os.environ.get('CLOUDFLARE_CRAWL_WORKER_KEY') if ycbg_route else '') or '').strip()
+    if worker not in WORKER_URLS or not key:
+        raise ValueError(f'Configure the BaoAn crawl Worker URL and {key_name}.')
+    response = requests.post(worker + path, headers={'Authorization': f'Bearer {key}'},
+                             json=body, timeout=timeout)
+    status = getattr(response, 'status_code', 200)
+    if isinstance(status, int) and status >= 400:
+        message = 'daily MSC browser budget reached; retry next window.' if status == 429 else 'public source unavailable; check Worker logs.'
+        raise RuntimeError(f'Crawl Worker HTTP {status}: {message}')
+    data = response.json()
+    if not isinstance(data, dict):
+        raise ValueError('Crawl Worker returned an invalid response.')
+    return data
+
 
 def open_browser(runtime):
     account = os.environ.get('CLOUDFLARE_BROWSER_ACCOUNT_ID', '').strip()
@@ -24,15 +47,7 @@ def cloud_search_page(body):
     """Call the website's normal search handler in a bounded Quick Action."""
     worker = os.environ.get('CLOUDFLARE_CRAWL_WORKER_URL', '').strip().rstrip('/')
     if worker:
-        key = os.environ.get('CLOUDFLARE_CRAWL_WORKER_KEY', '').strip()
-        if worker not in ('https://crawl.baoanpharma.com','https://baoan-public-crawl.dannyphan190.workers.dev') or not key:
-            raise ValueError('Configure the BaoAn crawl Worker URL and its private invocation key.')
-        response = requests.post(worker + '/msc/search', headers={'Authorization': f'Bearer {key}'},
-                                 json={'page': body['pageNumber']}, timeout=(10, 110))
-        if response.status_code >= 400:
-            raise RuntimeError(f'Crawl Worker HTTP {response.status_code}: ' + ('daily MSC browser budget reached; retry next window.' if response.status_code==429 else 'public search unavailable; invocation key and Worker logs must be checked.'))
-        response.raise_for_status()
-        data = response.json()
+        data = cloud_worker_post('/msc/search', {'page': body['pageNumber']})
         if not isinstance(data.get('page'), dict):
             raise ValueError('Crawl Worker returned no MSC result page.')
         return data

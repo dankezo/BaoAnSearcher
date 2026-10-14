@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from scripts import cloud_daily
-from scripts.cloud_browser import open_browser, cloud_search_page
+from scripts.cloud_browser import open_browser, cloud_search_page, cloud_worker_post
 from scripts.tidb import pull_to_local
 from scripts.tidb.rows import build_msc_price_row
 from server import cloud_jobs, vss
@@ -16,6 +16,15 @@ from core import connect
 
 
 class CloudCrawlTest(unittest.TestCase):
+    def test_ycbg_worker_uses_dedicated_key_while_msc_keeps_existing_key(self):
+        with patch.dict('os.environ', {'CLOUDFLARE_CRAWL_WORKER_URL': 'https://crawl.baoanpharma.com', 'CLOUDFLARE_CRAWL_WORKER_KEY': 'msc-secret', 'CLOUDFLARE_YCBG_KEY': 'ycbg-secret'}, clear=True), patch('scripts.cloud_browser.requests.post') as post:
+            post.return_value.status_code = 200
+            post.return_value.json.return_value = {'page': {}}
+            cloud_worker_post('/ycbg/search', {'page': 0})
+            self.assertEqual(post.call_args.kwargs['headers']['Authorization'], 'Bearer ycbg-secret')
+            cloud_worker_post('/msc/search', {'page': 0})
+            self.assertEqual(post.call_args.kwargs['headers']['Authorization'], 'Bearer msc-secret')
+
     def test_cloud_search_rejects_error_html_without_returning_a_page(self):
         with patch.dict('os.environ', {'CLOUDFLARE_BROWSER_ACCOUNT_ID': 'a' * 32, 'CLOUDFLARE_BROWSER_TOKEN': 'test-secret'}, clear=True), patch('scripts.cloud_browser.requests.post') as post:
             post.return_value.json.return_value = {'success': True, 'result': '<title>Error</title>'}

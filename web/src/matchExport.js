@@ -1,15 +1,16 @@
 import { buildSheetsXlsx, colLetter, downloadBlob, sheetCell, stamp } from './export.js'
+import { lineValue, numberValue } from './numbers.js'
 
 const HEADERS = [
   'STT', 'Mã TBMT', 'Tên gói', 'Chủ đầu tư', 'Tỉnh',
-  'Hoạt chất MT', 'Hàm lượng MT', 'Dạng bào chế MT', 'Đường dùng MT', 'ĐVT', 'Đơn giá',
+  'Hoạt chất MT', 'Hàm lượng MT', 'Dạng bào chế MT', 'Đường dùng MT', 'ĐVT', 'Đơn giá', 'SL', 'Thành tiền',
   'Hoạt chất khớp', 'Tên biệt dược', 'Hàm lượng', 'Dạng bào chế', 'Mật độ SĐK',
   'Đóng thầu',
 ]
 
-const BAOAN = new Set([11, 12, 13, 14, 15])
+const BAOAN = new Set([13, 14, 15, 16, 17])
 const TENDER = 1
-const CLOSE = 16
+const CLOSE = 18
 
 const STYLES =
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -29,7 +30,7 @@ const STYLES =
   '</fills>' +
   '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
   '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-  '<cellXfs count="7">' +
+  '<cellXfs count="8">' +
   '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
   '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
   '<xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
@@ -37,6 +38,7 @@ const STYLES =
   '<xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1"/>' +
   '<xf numFmtId="0" fontId="0" fillId="5" borderId="0" xfId="0" applyFill="1"/>' +
   '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+  '<xf numFmtId="0" fontId="1" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
   '</cellXfs>' +
   '</styleSheet>'
 
@@ -77,10 +79,12 @@ function httpUrl(value) {
   }
 }
 
-function valuesOf(row, stt) {
+function valuesOf(row, stt, includeLineValues = true) {
+  const price = includeLineValues ? numberValue(row.price, true) : null
+  const quantity = includeLineValues ? numberValue(row.quantity, true) : null
   return [
     stt, row.tenderNo || '', row.name, row.buyer, row.province,
-    row.innMt, row.strengthMt, row.formMt, row.routeMt, row.unit, row.price,
+    row.innMt, row.strengthMt, row.formMt, row.routeMt, row.unit, price, quantity, lineValue(price, quantity),
     row.inn, row.brand, row.strength, row.form, row.sdkDensity,
     formatClose(row.closeDate),
   ]
@@ -90,7 +94,7 @@ export function matchSheet(rows, now = Date.now()) {
   const links = []
   for (let index = 0; index < rows.length; index += 1) {
     const url = httpUrl(rows[index].link)
-    if (url) links.push({ ref: `${colLetter(TENDER)}${index + 2}`, url })
+    if (url) links.push({ ref: `${colLetter(TENDER)}${index + 3}`, url })
   }
   const xml = sheetXml(rows, now, links)
   const rels = links.length
@@ -109,31 +113,48 @@ export function matchSheetXml(rows, now = Date.now()) {
 }
 
 function sheetXml(rows, now, links) {
-  const widths = [6, 18, 36, 28, 16, 24, 16, 18, 16, 10, 14, 24, 22, 16, 18, 14, 18]
+  const countedLines = new Set()
+  const widths = [6, 18, 36, 28, 16, 24, 16, 18, 16, 10, 14, 12, 16, 24, 22, 16, 18, 14, 18]
   const cols = widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')
   const header = HEADERS.map((label, index) => sheetCell(`${colLetter(index)}1`, label, BAOAN.has(index) ? 2 : 1)).join('')
   const body = rows.map((row, index) => {
+    const duplicateLine = row.scopeLineKey && countedLines.has(row.scopeLineKey)
+    if (row.scopeLineKey) countedLines.add(row.scopeLineKey)
     const tone = closeTone(row.closeDate, now)
-    const cells = valuesOf(row, index + 1).map((value, col) => {
+    const cells = valuesOf(row, index + 1, !duplicateLine).map((value, col) => {
       let style = 0
       if (BAOAN.has(col)) style = 3
       else if (col === CLOSE && tone === 'soon') style = 4
       else if (col === CLOSE && tone === 'week') style = 5
       else if (col === TENDER && httpUrl(row.link)) style = 6
-      return sheetCell(`${colLetter(col)}${index + 2}`, value, style)
+      return sheetCell(`${colLetter(col)}${index + 3}`, value, style)
     }).join('')
-    return `<row r="${index + 2}">${cells}</row>`
+    return `<row r="${index + 3}">${cells}</row>`
   }).join('')
-  const last = `${colLetter(HEADERS.length - 1)}${Math.max(1, rows.length + 1)}`
+  const summary = HEADERS.map((_, col) => {
+    const ref = `${colLetter(col)}2`
+    if (col === 0) return `<c r="${ref}" t="inlineStr" s="7"><is><t>Tổng (mỗi dòng mời thầu tính một lần)</t></is></c>`
+    if (col !== 10 && col !== 11 && col !== 12) return `<c r="${ref}" s="7"/>`
+    const seen = new Set()
+    const total = rows.reduce((sum, row) => {
+      if (row.scopeLineKey && seen.has(row.scopeLineKey)) return sum
+      if (row.scopeLineKey) seen.add(row.scopeLineKey)
+      const quantity = numberValue(row.quantity, true), price = numberValue(row.price, true)
+      const value = col === 10 ? price : col === 11 ? quantity : lineValue(price, quantity)
+      return sum + (Number.isFinite(value) ? value : 0)
+    }, 0)
+    return rows.length ? `<c r="${ref}" s="7"><f>SUM(${colLetter(col)}3:${colLetter(col)}${rows.length + 2})</f><v>${total}</v></c>` : `<c r="${ref}" s="7"><v>0</v></c>`
+  }).join('')
+  const last = `${colLetter(HEADERS.length - 1)}${Math.max(2, rows.length + 2)}`
   const hyperlinks = links.length
     ? `<hyperlinks>${links.map((link, index) => `<hyperlink ref="${link.ref}" r:id="rId${index + 1}"/>`).join('')}</hyperlinks>`
     : ''
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
     `<dimension ref="A1:${last}"/>` +
-    '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
+    '<sheetViews><sheetView workbookViewId="0"><pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
     `<sheetFormatPr defaultRowHeight="15"/><cols>${cols}</cols>` +
-    `<sheetData><row r="1">${header}</row>${body}</sheetData>` +
+    `<sheetData><row r="1">${header}</row><row r="2">${summary}</row>${body}</sheetData>` +
     `<autoFilter ref="A1:${last}"/>` +
     hyperlinks +
     '</worksheet>'

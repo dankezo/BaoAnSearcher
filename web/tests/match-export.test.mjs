@@ -31,13 +31,12 @@ test('match workbook keeps MT headers, Bảo An fill, deadline fill, and TBMT hy
   assert.match(sheet, /Mật độ SĐK/)
   assert.match(sheet, /Mã TBMT/)
   assert.doesNotMatch(sheet, /Link gói thầu/)
-  assert.doesNotMatch(sheet, /mời thầu/)
   assert.match(sheet, /s="3"/)
   assert.match(sheet, /s="4"/)
   assert.match(sheet, /s="5"/)
   assert.match(sheet, /s="6"/)
-  assert.match(sheet, /<hyperlink ref="B2" r:id="rId1"\/>/)
-  assert.match(sheet, /<hyperlink ref="B3" r:id="rId2"\/>/)
+  assert.match(sheet, /<hyperlink ref="B3" r:id="rId1"\/>/)
+  assert.match(sheet, /<hyperlink ref="B4" r:id="rId2"\/>/)
   assert.doesNotMatch(sheet, /HYPERLINK/)
   const blob = buildMatchBlob(rows, now)
   const text = Buffer.from(await blob.arrayBuffer()).toString('utf8')
@@ -74,4 +73,21 @@ test('combined match workbook splits exact and near onto two sheets', async () =
   assert.doesNotMatch(exactSheet, /IB2/)
   assert.doesNotMatch(nearSheet, /IB1/)
   assert.doesNotMatch(nearSheet, /IB3/)
+})
+
+test('match workbook totals each source tender line once across multiple BaoAn hits', () => {
+  const rows = [
+    { tenderNo:'IB1', name:'Gói A', price:10, quantity:2, scopeLineKey:'notify-1:0', inn:'A', match:'exact' },
+    { tenderNo:'IB1', name:'Gói A', price:10, quantity:2, scopeLineKey:'notify-1:0', inn:'B', match:'exact' },
+    { tenderNo:'IB1', name:'Gói A', price:13, quantity:4, scopeLineKey:'notify-1:1', inn:'C', match:'exact' },
+  ]
+  const sheet=matchSheetXml(rows,now)
+  assert.match(sheet,/<c r="K2" s="7"><f>SUM\(K3:K5\)<\/f><v>23<\/v><\/c>/)
+  assert.match(sheet,/<c r="L2" s="7"><f>SUM\(L3:L5\)<\/f><v>6<\/v><\/c>/)
+  assert.match(sheet,/<c r="M2" s="7"><f>SUM\(M3:M5\)<\/f><v>72<\/v><\/c>/)
+  assert.match(sheet,/<c r="K3"><v>10<\/v><\/c><c r="L3"><v>2<\/v><\/c><c r="M3"><v>20<\/v><\/c>/)
+  assert.doesNotMatch(sheet,/r="K4"|r="L4"|r="M4"/)
+  assert.match(sheet,/<c r="K5"><v>13<\/v><\/c><c r="L5"><v>4<\/v><\/c><c r="M5"><v>52<\/v><\/c>/)
+  assert.match(sheet,/Tổng \(mỗi dòng mời thầu tính một lần\)/)
+  assert.match(sheet,/ySplit="2" topLeftCell="A3"/)
 })

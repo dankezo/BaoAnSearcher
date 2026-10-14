@@ -4,6 +4,16 @@ import { test } from 'node:test'
 import { filterLegal, LEGAL_CORE } from '../src/home/legalCatalog.js'
 import { natureOf, sourceBadge, splitBrief } from '../src/home/briefSplit.js'
 import { classifyTender, countdownLabel, radarView } from '../src/home/tenderRadar.js'
+
+test('date-only deadlines stay open on their closing day without inventing hours',()=>{
+ const row={tender_no:'TODAY',status_code:'',close_date:'2026-10-13'}
+ const now=Date.parse('2026-10-13T12:00:00+07:00')
+ assert.equal(classifyTender(row,now).isOpen,true)
+ assert.equal(classifyTender(row,now).closing,true)
+ assert.equal(classifyTender(row,Date.parse('2026-10-14T00:00:00+07:00')).isOpen,false)
+ assert.match(countdownLabel(row.close_date,now),/13\/10\/2026.*chưa rõ giờ/)
+ assert.equal(classifyTender({...row,close_date:'2026-10-13T09:00:00+07:00'},now).isOpen,false)
+})
 import { countTopic, defaultTopicName, normalizeTopics, topicSentence } from '../src/home/watchTopics.js'
 import { validateLegal, validateNews } from '../../lib/regulatory/onDemand.js'
 
@@ -21,7 +31,7 @@ test('radar separates open matches from this week’s notices', () => {
   const view = radarView(open, recent, 'fresh', now)
   assert.equal(view.counts.open, 1)
   assert.equal(view.counts.match, 1)
-  assert.deepEqual(view.list.map(row => row.tender_no), ['IB3', 'IB2'])
+  assert.deepEqual(view.list.map(row => row.tender_no), ['IB2', 'IB3'])
   assert.equal(classifyTender(open[1], now).isOpen, false)
   assert.equal(classifyTender(open[0], now).closing, true)
   assert.deepEqual(view.closing.map(row => row.tender_no), ['IB1'])

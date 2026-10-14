@@ -10,6 +10,8 @@ export const ROUTES = {
   'analytics/awards': { methods: ['POST'], handler: 'analytics' },
   'analytics/company-profile': { methods: ['POST'], handler: 'analytics' },
   'tender/search': { methods: ['POST', 'OPTIONS'], handler: 'tenderSearch' },
+  'tender/refresh': { methods: ['POST'], handler: 'tenderRefresh' },
+  'tender/report': { methods: ['POST', 'OPTIONS'], handler: 'tenderReport' },
   'tender/count': { methods: ['POST', 'OPTIONS'], handler: 'tenderCount' },
   'tender/metrics': { methods: ['GET', 'POST', 'OPTIONS'], handler: 'tenderMetrics' },
   'tender/bootstrap': { methods: ['GET', 'POST', 'OPTIONS'], handler: 'tenderBootstrap' },
@@ -59,7 +61,7 @@ export function restoreRequestUrl(req, path) {
 export function matchRoute(method, path) {
   const key = String(path || '').replace(/^\/+|\/+$/g, '')
   const entry = ROUTES[key]
-    || (/^admin\/datasets\/download\/(DAV|MSC_PRICE|MSC_BID|VSS)$/i.test(key)
+    || (/^admin\/datasets\/download\/(DAV|MSC_PRICE|MSC_BID|MSC_YCBG|VSS)$/i.test(key)
       ? { methods: ['GET', 'OPTIONS'], handler: 'adminDatasetDownload' }
       : null)
   if (!entry) return { kind: 'missing' }

@@ -89,3 +89,10 @@ test('identity fields from a different cited company are never merged into the r
  const result=await crawlCompany('Công ty cổ phần Bảo An Pharma',{env:{GEMINI_API_KEY:'mock'},fetchImpl,lookupImpl})
  assert.equal(result.legalName,legal);assert.equal(result.taxId,null);assert.equal(result.address,null);assert.equal(result.status,'partial')
 })
+
+
+test('tax verification checks the labelled occurrence after an unlabelled title occurrence',async()=>{
+ const fetchImpl=async url=>url.includes('generativelanguage.googleapis.com')?jsonResponse({steps:[{type:'model_output',content:[{type:'text',text:JSON.stringify({legalName:legal,taxId:'0103984595'}),annotations:[{type:'url_citation',url:'https://baoanpharma.example/profile'}]}]}]}):new Response(`<title>0103984595 ${legal}</title><body>${'Navigation '.repeat(40)}${legal} Mã số thuế: 0103984595</body>`,{headers:{'content-type':'text/html'}})
+ const result=await crawlCompany(legal,{env:{GEMINI_API_KEY:'mock'},fetchImpl,lookupImpl})
+ assert.equal(result.taxId,'0103984595');assert.equal(result.status,'verified')
+})

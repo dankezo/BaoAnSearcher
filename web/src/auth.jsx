@@ -50,6 +50,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
   const [authError, setAuthError] = useState('')
+  const [clientRevision, setClientRevision] = useState(0)
 
   useEffect(() => {
     if (!enforceRememberWindow()) {
@@ -65,12 +66,15 @@ export function AuthProvider({ children }) {
     }
     let alive = true
 
-    const applySession = async (s) => {
+    const applySession = async (s, event) => {
+      if (!alive) return
       if (!s) {
         setSession(null)
+        if (event === 'SIGNED_OUT') setAuthError('Phiên đăng nhập đã hết hiệu lực. Đăng nhập lại để tiếp tục.')
         return
       }
       const denied = await rejectIfNotAllowed(sb, s)
+      if (!alive) return
       if (denied) {
         setSession(null)
         setAuthError(denied)
@@ -105,20 +109,21 @@ export function AuthProvider({ children }) {
       }
     })
 
-    const { data: sub } = sb.auth.onAuthStateChange(async (_event, next) => {
-      if (!alive) return
-      await applySession(next)
+    const { data: sub } = sb.auth.onAuthStateChange((event, next) => {
+      // Supabase emits while holding its auth lock. Defer any auth calls.
+      queueMicrotask(() => { void applySession(next, event).catch(error => { if (alive) setAuthError(mapAuthError(error)) }) })
     })
     return () => {
       alive = false
       sub?.subscription?.unsubscribe()
     }
-  }, [])
+  }, [clientRevision])
 
   const signIn = useCallback(async (email, password, { remember = true } = {}) => {
     setAuthError('')
     setRememberPreference(!!remember)
     resetSupabaseClient()
+    setClientRevision(value => value + 1)
     const sb = getSupabase()
     if (!sb) {
       const m = 'Chưa cấu hình Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'
@@ -174,6 +179,7 @@ export function AuthProvider({ children }) {
     setAuthError('')
     setRememberPreference(!!remember)
     resetSupabaseClient()
+    setClientRevision(value => value + 1)
     const sb = getSupabase()
     if (!sb) {
       const m = 'Chưa cấu hình Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).'

@@ -14,6 +14,8 @@ SCHEMA_FILES = (
     ROOT / "tidb" / "006_dav_groups_and_msc_identity.sql",
     ROOT / "tidb" / "007_msc_price_daily_units.sql",
     ROOT / "tidb" / "008_msc_open_date.sql",
+    ROOT / "tidb" / "011_shared_query_cache.sql",
+    ROOT / "tidb" / "012_msc_ycbg.sql",
 )
 
 

@@ -6,6 +6,7 @@ import { supabaseConfigured } from './supabaseCloud'
 
 const DavSection = lazy(() => import('./DavSection'))
 const MscSection = lazy(() => import('./MscSection'))
+const YcbgSection = lazy(() => import('./YcbgSection'))
 const VssSection = lazy(() => import('./VssSection'))
 const AdminSection = lazy(() => import('./AdminSection'))
 const HomeDashboard = lazy(() => import('./home/HomeDashboard'))
@@ -13,12 +14,15 @@ const PortfolioCockpit = lazy(() => import('./PortfolioCockpit'))
 const BaoAnCatalog = lazy(() => import('./BaoAnCatalog'))
 const MapSection = lazy(() => import('./MapSection'))
 const AnalyticsApp = lazy(() => import('./analytics/AnalyticsApp'))
+const TenderMarketReport = lazy(() => import('./TenderMarketReport'))
 
 function PaneFallback() {
   return <p className="info-note" role="status">Đang mở mục…</p>
 }
 
 const TABS = [
+  { id: 'tender-report', label: 'Thống kê thầu BHYT' },
+  { id: 'msc-report', label: 'Thống kê thầu MSC' },
   { id: 'analytics-overview', label: 'Phân tích tổng hợp' },
 
   { id: 'home', label: 'Bảng tin', sub: 'Nhịp thầu · bảng tin' },
@@ -120,6 +124,8 @@ export default function App() {
     return TABS.some((t) => t.id === h) ? h : 'home'
   })
   const [mscKind, setMscKind] = useState('tenders')
+  const [visitedMsc,setVisitedMsc] = useState({})
+  useEffect(()=>{if(tab==='msc')setVisitedMsc(previous=>previous[mscKind]?previous:{...previous,[mscKind]:true})},[tab,mscKind])
   const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
   const [localMode, setLocalMode] = useState(localHost)
   const [checked, setChecked] = useState(false)
@@ -170,6 +176,7 @@ export default function App() {
       if (code === 'DAV') setTab('dav')
       else if (code === 'VSS') setTab('vss')
       else if (code === 'MSC_PRICE') { setMscKind('prices'); setTab('msc') }
+      else if (code === 'MSC_YCBG') { setMscKind('ycbg'); setTab('msc') }
       else if (code === 'MSC_BID') { setMscKind('tenders'); setTab('msc') }
     }
     window.addEventListener('baoan-open-dataset', onOpenDataset)
@@ -231,12 +238,14 @@ export default function App() {
             <details className={`msc-nav-menu${['dav', 'msc', 'vss'].includes(tab) ? ' active' : ''}`} onBlur={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) e.currentTarget.open = false }} onKeyDown={(e) => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary').focus() } }}>
               <summary>Tra cứu <span aria-hidden="true">⌄</span></summary>
               <div className="msc-nav-options">
-                {[['dav', 'Thuốc DAV'], ['prices', 'MSC - Đơn giá'], ['tenders', 'MSC - Gói thầu'], ['vss', 'BHYT VSS']].map(([value, label]) => <button type="button" key={value} aria-pressed={value === 'prices' || value === 'tenders' ? tab === 'msc' && mscKind === value : tab === value} onClick={(e) => { if (value === 'prices' || value === 'tenders') { setMscKind(value); setTab('msc') } else setTab(value); e.currentTarget.closest('details').open = false }}>{label}</button>)}
+                {[['dav', 'Thuốc DAV'], ['prices', 'MSC - Đơn giá'], ['tenders', 'MSC - Gói thầu'], ['ycbg', 'MSC - YCBG'], ['vss', 'BHYT VSS']].map(([value, label]) => <button type="button" key={value} aria-pressed={value === 'prices' || value === 'tenders' || value === 'ycbg' ? tab === 'msc' && mscKind === value : tab === value} onClick={(e) => { if (value === 'prices' || value === 'tenders' || value === 'ycbg') { setMscKind(value); setTab('msc') } else setTab(value); e.currentTarget.closest('details').open = false }}>{label}</button>)}
               </div>
             </details>
-            <details className={`msc-nav-menu${tab === 'map' || tab.startsWith('analytics-') || multi ? ' active' : ''}`} onBlur={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) e.currentTarget.open = false }} onKeyDown={(e) => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary').focus() } }}>
+            <details className={`msc-nav-menu${tab === 'map' || tab === 'tender-report' || tab === 'msc-report' || tab.startsWith('analytics-') || multi ? ' active' : ''}`} onBlur={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) e.currentTarget.open = false }} onKeyDown={(e) => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary').focus() } }}>
               <summary>Nâng cao <span aria-hidden="true">⌄</span></summary>
               <div className="msc-nav-options">
+                <button type="button" aria-pressed={tab === 'tender-report'} onClick={(e)=>{setTab('tender-report');e.currentTarget.closest('details').open=false}}>Thống kê thầu BHYT</button>
+                <button type="button" aria-pressed={tab === 'msc-report'} onClick={(e)=>{setTab('msc-report');e.currentTarget.closest('details').open=false}}>Thống kê thầu MSC</button>
                 {[['analytics-overview', 'Phân tích tổng hợp']].map(([id,label]) => <button key={id} type="button" aria-pressed={tab === id} onClick={(e)=>{setTab(id);e.currentTarget.closest('details').open=false}}>{label}</button>)}
                 <button type="button" aria-pressed={tab === 'map'} onClick={(e) => { setTab('map'); e.currentTarget.closest('details').open = false }}>Bản đồ</button>
                 {!phone && <button type="button" aria-pressed={multi} onClick={(e) => { setTab('multi'); e.currentTarget.closest('details').open = false }}>Đa khung</button>}
@@ -251,7 +260,7 @@ export default function App() {
                 localMode
                   ? 'Kết nối API local'
                   : supabaseConfigured
-                    ? 'Supabase Auth + kho Supabase (SEARCH_BACKEND). Turso chỉ khi bật rollback.'
+                    ? 'Đăng nhập Supabase · API cloud. Xem nguồn và lần cập nhật trong mục Dữ liệu.'
                     : 'Thiếu VITE_SUPABASE_* — cấu hình rồi build lại'
               }
             >
@@ -261,7 +270,7 @@ export default function App() {
                 : localMode
                   ? 'Local API'
                   : supabaseConfigured
-                    ? 'Cloud · Supabase'
+                    ? 'Cloud'
                     : 'Chưa cấu hình Cloud'}
             </div>
             {user?.email && (
@@ -275,6 +284,8 @@ export default function App() {
           </div>
         </header>
         <main className={`page${multi ? ' page-split' : ''}`}>
+          {checked && visited['tender-report'] && <div className="tab-pane" hidden={tab !== 'tender-report'} aria-hidden={tab !== 'tender-report'}><Suspense fallback={<PaneFallback />}><TenderMarketReport localMode={localMode}/></Suspense></div>}
+          {checked && visited['msc-report'] && <div className="tab-pane" hidden={tab !== 'msc-report'} aria-hidden={tab !== 'msc-report'}><Suspense fallback={<PaneFallback />}><TenderMarketReport localMode={localMode} source="msc"/></Suspense></div>}
           {checked && !multi && tab.startsWith('analytics-') && <Suspense fallback={<PaneFallback />}><AnalyticsApp key={tab} localMode={localMode} deep={true} /></Suspense>}
           {checked && !multi && visited.home && (
             <div className="tab-pane" hidden={tab !== 'home'} aria-hidden={tab !== 'home'}>
@@ -288,28 +299,22 @@ export default function App() {
               </Suspense>
             </div>
           )}
-          {checked && !multi && tab === 'dav' && (
-            <div className="tab-pane">
+          {checked && visited.dav && (
+            <div className="tab-pane" hidden={tab !== 'dav'} aria-hidden={tab !== 'dav'}>
               <Suspense fallback={<PaneFallback />}>
               <DavSection localMode={localMode} />
               </Suspense>
             </div>
           )}
-          {checked && !multi && tab === 'msc' && (
-            <div className="tab-pane">
-              {phone && (
-                <div className="mobile-msc-switch" role="tablist" aria-label="Dữ liệu MSC">
-                  <button type="button" className={mscKind === 'tenders' ? 'on' : ''} aria-pressed={mscKind === 'tenders'} onClick={() => setMscKind('tenders')}>Gói thầu</button>
-                  <button type="button" className={mscKind === 'prices' ? 'on' : ''} aria-pressed={mscKind === 'prices'} onClick={() => setMscKind('prices')}>Đơn giá</button>
-                </div>
-              )}
+          {checked && visited.msc && (
+            <div className="tab-pane" hidden={tab !== 'msc'} aria-hidden={tab !== 'msc'}>
               <Suspense fallback={<PaneFallback />}>
-              <MscSection key={mscKind} localMode={localMode} selectedKind={mscKind} />
+              {['tenders','prices','ycbg'].filter(kind=>visitedMsc[kind]).map(kind=><div key={kind} hidden={kind!==mscKind}>{kind === 'ycbg' ? <YcbgSection localMode={localMode} /> : <MscSection localMode={localMode} selectedKind={kind} />}</div>)}
               </Suspense>
             </div>
           )}
-          {checked && !multi && tab === 'vss' && (
-            <div className="tab-pane">
+          {checked && visited.vss && (
+            <div className="tab-pane" hidden={tab !== 'vss'} aria-hidden={tab !== 'vss'}>
               <Suspense fallback={<PaneFallback />}>
               <VssSection localMode={localMode} />
               </Suspense>

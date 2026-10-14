@@ -16,6 +16,8 @@ function mockRes() {
 
 test('keeps the existing API paths and methods', () => {
   assert.deepEqual(matchRoute('POST', 'tender/search'), { kind: 'ok', handler: 'tenderSearch' })
+  assert.deepEqual(matchRoute('POST', 'tender/report'), { kind: 'ok', handler: 'tenderReport' })
+  assert.equal(matchRoute('GET', 'tender/report').kind, 'method')
   assert.deepEqual(matchRoute('GET', 'tender/suggest'), { kind: 'ok', handler: 'tenderSuggest' })
   assert.deepEqual(matchRoute('POST', 'metrics/map'), { kind: 'ok', handler: 'metricsMap' })
   assert.deepEqual(matchRoute('GET', 'regulatory-daily'), { kind: 'ok', handler: 'regulatoryDaily' })
@@ -35,6 +37,9 @@ test('unknown path is 404 and the wrong method is 405 before any handler runs', 
   await handler({ method: 'GET', url: '/api/tender/search', query: { route: ['tender', 'search'] } }, wrong)
   assert.equal(wrong.statusCode, 405)
   assert.match(wrong.headers.Allow, /POST/)
+  const unauthenticated=mockRes()
+  await handler({method:'POST',url:'/api/tender/report',headers:{},query:{route:['tender','report']}},unauthenticated)
+  assert.equal(unauthenticated.statusCode,401)
 })
 
 test('reads the rewrite stamp or the /api pathname and restores the public URL', () => {

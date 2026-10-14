@@ -6,7 +6,7 @@ import React from 'react'
 import {create,act} from 'react-test-renderer'
 import {fileURLToPath} from 'node:url'
 let calls=0,resolvePage
-const result=await build({entryPoints:[fileURLToPath(new URL('../src/analytics/DetailTable.tsx',import.meta.url))],bundle:true,write:false,platform:'node',format:'cjs',external:['react','react/jsx-runtime'],plugins:[{name:'mock-client',setup(b){b.onResolve({filter:/^\.\/client$/},()=>({path:'client',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export const loadDetail=(...args)=>globalThis.__analyticsTestLoad(...args);`,loader:'js'}))}}]})
+const result=await build({entryPoints:[fileURLToPath(new URL('../src/analytics/DetailTable.tsx',import.meta.url))],bundle:true,write:false,platform:'node',format:'cjs',external:['react','react-dom','react/jsx-runtime'],define:{'import.meta.env':'{}'},plugins:[{name:'mock-client',setup(b){b.onResolve({filter:/^\.\/client$/},()=>({path:'client',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export const loadDetail=(...args)=>globalThis.__analyticsTestLoad(...args);`,loader:'js'}))}}]})
 const compiled=new Module('analytics-ui-test');compiled.paths=Module._nodeModulePaths(process.cwd());compiled._compile(result.outputFiles[0].text,'analytics-ui-test.cjs')
 const DetailTable=compiled.exports.default
 test('closed detail sends no request; opened detail pages on demand and ignores late response',async()=>{

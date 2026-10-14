@@ -9,6 +9,7 @@ import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta
+from contextlib import closing
 from html.parser import HTMLParser
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -1235,7 +1236,7 @@ def _encode_cursor(date_value, row_id) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
-def search_bids(filters: dict, page: int = 0, size: int = 50, cursor: str | None = None) -> dict:
+def bid_where(filters: dict):
     clauses, args = [], []
     q = fold(filters.get("q") or "")
     if q:
@@ -1243,9 +1244,10 @@ def search_bids(filters: dict, page: int = 0, size: int = 50, cursor: str | None
             clauses.append("search LIKE ?")
             args.append(f"%{w}%")
     for field, key in [
-        ("hoatchat", "hoatchat"), ("sodk", "sodk"), ("loai", "loai"),
+        ("hoatchat", "hoatchat"), ("sodk", "sodk"), ("loai", "loai"), ("ten", "ten"),
         ("nhomthau", "nhomthau"), ("loai_thau", "loai_thau"),
         ("duongdung", "duongdung"), ("ma_tinh", "ma_tinh"), ("nuocsx", "nuocsx"),
+        ("ten_cskcb", "ten_cskcb"),
     ]:
         raw = filters.get(field)
         if isinstance(raw, (list, tuple)):
@@ -1254,6 +1256,10 @@ def search_bids(filters: dict, page: int = 0, size: int = 50, cursor: str | None
             text = fold(raw or "")
             vals = [v for v in text.replace(";", "|").split("|") if v] if text else []
         if not vals:
+            continue
+        if field == "ten_cskcb":
+            clauses.append("(" + " OR ".join("(" + " AND ".join(f"fold(coalesce({key},'')) LIKE ?" for _ in val.split()) + ")" for val in vals) + ")")
+            args.extend(f"%{word}%" for val in vals for word in val.split())
             continue
         # Expand N3 / 3 / nhom 3 so multi-select does not false-match via bare digits
         if field == "nhomthau":
@@ -1348,11 +1354,22 @@ def search_bids(filters: dict, page: int = 0, size: int = 50, cursor: str | None
             )
             args.extend([year, f"{y}%", f"{y}%", f"{y}%", f"{y}%", y_end, y_start])
     if filters.get("tuNgay"):
-        clauses.append("coalesce(tungay_hd,'') >= ?")
+        clauses.append("tungay_hd >= ?")
         args.append(filters["tuNgay"])
     if filters.get("denNgay"):
-        clauses.append("coalesce(tungay_hd,'') <= ?")
-        args.append(filters["denNgay"] + " 23:59:59" if len(filters["denNgay"]) == 10 else filters["denNgay"])
+        clauses.append("tungay_hd <> ''")
+        clauses.append("tungay_hd < date(?, '+1 day')" if len(filters["denNgay"]) == 10 else "tungay_hd <= ?")
+        args.append(filters["denNgay"])
+
+    if filters.get('ten_tinh'):
+        values = filters['ten_tinh'] if isinstance(filters['ten_tinh'], list) else [filters['ten_tinh']]
+        clauses.append('(' + ' OR '.join("fold(json_extract(raw,'$.ten_tinh')) LIKE ?" for _ in values) + ')')
+        args.extend('%' + fold(value) + '%' for value in values)
+    return clauses, args
+
+
+def search_bids(filters: dict, page: int = 0, size: int = 50, cursor: str | None = None) -> dict:
+    clauses, args = bid_where(filters)
 
     cursor_value = _decode_cursor(cursor)
     if cursor_value:
@@ -1361,7 +1378,7 @@ def search_bids(filters: dict, page: int = 0, size: int = 50, cursor: str | None
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     page = max(0, int(page))
     size = max(1, min(5000, int(size)))
-    with connect() as con:
+    with closing(connect()) as con:
         rows = con.execute(
             _VSS_LIST_SQL + where +
             " ORDER BY coalesce(tungay_hd,'') DESC, id DESC LIMIT ?",

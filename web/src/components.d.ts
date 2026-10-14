@@ -62,26 +62,34 @@ export function TableToolbar(props: {
   children: ReactNode
 }): ReactElement
 export function ErrorNote(props: { children: ReactNode }): ReactElement | null
-export function DataTable(props: {
-  columns: DavColumn[]
-  rows: DrugItem[]
-  rowKey: (row: DrugItem, index: number) => string
-  startIndex: number
-  selected: Map<string, DrugItem>
-  onToggleRow: (key: string, row: DrugItem) => void
-  onToggleAll: (pairs: [string, DrugItem][], checked: boolean) => void
-  columnFilters: ColumnFilters
-  onColumnFilter: (key: string, value: string) => void
-  filtersVisible: boolean
-  onFilterEnter: (key?: string, value?: string) => void
-  onFilterSuggest: (key: string, q: string) => Promise<string[]>
-  onRowDoubleClick: (row: DrugItem) => void
-  loading: boolean
-  emptyText: string
-  emptyAction: ReactNode
-  cardKeys: (keyof DrugItem)[]
-  minWidth: number
-  trailing: { label: string; render: (row: DrugItem) => ReactNode }
+export function DataTable<Row extends object>(props: {
+  columns: { [Key in keyof Row]-?: {
+    key: Key; label: string; render?: (value: Row[Key], row: Row) => ReactNode
+    text?: (row: Row) => unknown; align?: string; width?: number; mono?: boolean
+    nowrap?: boolean; filter?: 'select' | 'text' | false; truncateAt?: number
+  } }[keyof Row][]
+  rows: Row[]
+  rowKey: (row: Row, index: number) => string
+  startIndex?: number
+  showIndex?: boolean
+  selectable?: boolean
+  selected?: Map<string, Row> | Set<string>
+  onToggleRow?: (key: string, row: Row) => void
+  onToggleAll?: (pairs: [string, Row][], checked: boolean) => void
+  columnFilters?: ColumnFilters
+  onColumnFilter?: (key: string, value: string) => void
+  filtersVisible?: boolean
+  onFilterEnter?: (key?: string, value?: string) => void
+  onFilterSuggest?: (key: string, q: string) => Promise<string[]>
+  onRowDoubleClick?: (row: Row) => void
+  rowDoubleClickCapture?: boolean
+  loading?: boolean
+  emptyText?: string
+  emptyAction?: ReactNode
+  cardKeys?: (keyof Row)[]
+  minWidth?: number
+  rowClassName?: (row: Row) => string
+  trailing?: { label: string; render: (row: Row) => ReactNode }
 }): ReactElement
 export function Pagination(props: {
   page: number
@@ -142,7 +150,7 @@ export function serverFilters(
 export function applyColumnFilters(rows: DrugItem[], columns: DavColumn[], filters: ColumnFilters): DrugItem[]
 export function fetchAllPages(
   fetchPage: (page: number, size: number, cursor?: Record<string, string> | null) => Promise<DavSearchResult>,
-  options?: { size?: number; cap?: number; onProgress?: (pct: number) => void; shouldCancel?: () => boolean },
+  options?: { size?: number; cap?: number; onProgress?: (pct: number) => void; shouldCancel?: () => boolean; strict?: boolean },
 ): Promise<DrugItem[]>
 export function exportSelectionOrAll(options: {
   columns: DavColumn[]

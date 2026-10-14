@@ -26,6 +26,22 @@ def memory_db():
 
 
 class AnalyticsLocalTest(unittest.TestCase):
+    def test_ingredient_scope_includes_combinations_and_annotated_extracts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = dict(os.environ, PYTHONUTF8="1", ANALYTICS_DB_DIR=directory, ANALYTICS_PYTHON=sys.executable)
+            subprocess.run([sys.executable, "-m", "tests.analytics_fixture", directory], check=True, env=env, capture_output=True)
+            with closing(sqlite3.connect(Path(directory)/"dav.sqlite3")) as con:
+                for index, ingredient in enumerate(["Silymarin", "Cao cây kế sữa (tương đương Silymarin 70mg, Silybin 35mg)", "Vitamin B1; Silymarin", "Silymarinol"]):
+                    row = dict(soDangKy=f"SILY-{index}",tenThuoc=f"Thuốc {index}",hoatChat=ingredient,ngayHetHan="2028-01-01")
+                    con.execute("INSERT INTO drugs VALUES(?,?,?)",(f"s{index}",json.dumps(row,ensure_ascii=False),analytics_sqlite.fold(ingredient)))
+                con.commit()
+            for include, expected in [(True,3),(False,2)]:
+                payload=dict(action="overview",body=dict(mode="drug",entity="Silymarin",months="all",includeCombinations=include))
+                result=subprocess.run(["node","scripts/analytics_local.mjs"],input=json.dumps(payload),text=True,encoding="utf-8",capture_output=True,check=True,env=env,timeout=20)
+                source=json.loads(result.stdout)["sources"]["dav"]
+                self.assertEqual(source["status"],"available")
+                self.assertEqual(source["rows"][0]["active"],expected)
+
     def test_indexed_date_candidates_preserve_exact_money_legacy_dates_and_membership(self):
         with tempfile.TemporaryDirectory() as directory:
             env = dict(os.environ, PYTHONUTF8="1", ANALYTICS_DB_DIR=directory, ANALYTICS_PYTHON=sys.executable)

@@ -19,7 +19,76 @@
     "slug": "3bvit-ansba",
     "dav_matched": true,
     "strategy_note": "Trúng Danh mục 93, hưởng bảo hộ Điều 56 Luật Đấu thầu. Bệnh viện công lập bị cấm mời thầu thuốc nhập khẩu.",
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "893100054125",
+        "registration_link": "current",
+        "row_count": 2,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2500638792",
+            "product": "3Bvit Ansba",
+            "ingredient": "Vitamin B1 + Vitamin B12 +Vitamin B6",
+            "strength": "100mg + 1mg + 50mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Đại học Y Dược",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2026",
+            "tender_no": "IB2600177291",
+            "product": "3Bvit Ansba",
+            "ingredient": "Vitamin B1 + Vitamin B6 + Vitamin B12",
+            "strength": "100mg + 50mg + 1000mcg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện đa khoa Chương Mỹ",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "VSS",
+        "group": "N4",
+        "matched_registration": "893100054125",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": 2026,
+            "tender_type": "3.thau_rieng_le",
+            "product": "3Bvit Ansba",
+            "ingredient": "Vitamin B1 + B6 + B12",
+            "strength": "100mg + 50mg + 1000mcg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bvđk Chương Mỹ",
+            "contract_start": "2026-08-05",
+            "contract_end": "2027-09-30"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "VSS",
+        "group": "N4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 2,
@@ -40,7 +109,86 @@
     "web_url": "https://baoanpharma.com/products/abagamax",
     "slug": "abagamax",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-35988-22",
+        "registration_link": "current",
+        "row_count": 2,
+        "years": [
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2400552906",
+            "product": "Abagamax",
+            "ingredient": "Cao Anthocyanosidic của Vaccinium myrtillus (tương đương 32,4- 39,6mg tổng lượng anthocyanins, tính theo cyanidin 3-O-glucosid chlorid) + Betacaroten",
+            "strength": "100mg + 5mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Trung ương Quân đội 108",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2025",
+            "tender_no": "IB2500207146",
+            "product": "Abagamax",
+            "ingredient": "Cao Anthocyanosidic của Vaccinium myrtillus + Betacaroten",
+            "strength": "100mg+5mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Nội tiết Trung ương",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "VD-35988-22",
+        "registration_link": "current",
+        "row_count": 3,
+        "years": [
+          "2024",
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2400277853",
+            "product": "Abagamax\n",
+            "ingredient": "Cao Anthocyanosidic của Vaccinium myrtillus (tương đương 32,4- 39,6mg tổng lượng anthocyanins, tính theo cyanidin 3-O-glucosid chlorid) + Betacaroten",
+            "strength": "100mg + 5mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Mắt Trung ương",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2026",
+            "tender_no": "IB2500544293",
+            "product": "Abagamax",
+            "ingredient": "Cao Anthocyanosidic của Vaccinium myrtillus + Betacaroten",
+            "strength": "100mg+5mg",
+            "province": "Thành phố Cần Thơ",
+            "buyer": "Bệnh viện đa khoa Sóc Trăng",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 3,
@@ -61,7 +209,150 @@
     "web_url": "https://baoanpharma.com/products/abamotic",
     "slug": "abamotic",
     "dav_matched": true,
-    "con_hieu_luc": false
+    "con_hieu_luc": false,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-33987-20",
+        "registration_link": "old",
+        "row_count": 8,
+        "years": [
+          "2023",
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300172400",
+            "product": "Abamotic",
+            "ingredient": "Mosaprid citrat ",
+            "strength": "5mg/0,5g",
+            "province": "Tỉnh Đồng Nai",
+            "buyer": "Sở Y tế Đồng Nai",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2300311668",
+            "product": "ABAMOTIC",
+            "ingredient": "Mosaprid citrat",
+            "strength": "5mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Trung ương Quân đội 108",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "VD-33987-20",
+        "registration_link": "old",
+        "row_count": 2,
+        "years": [
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2300281346",
+            "product": "Abamotic",
+            "ingredient": "Mosaprid citrat",
+            "strength": "5mg/0,5g",
+            "province": "Tỉnh Tiền Giang",
+            "buyer": "Bệnh viện quân y 120",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2025",
+            "tender_no": "IB2400514461",
+            "product": "Abamotic",
+            "ingredient": "Mosaprid citrat",
+            "strength": "5mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Quân Y 103",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "893110263300",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2600099293",
+            "product": "Abamotic",
+            "ingredient": "Mosaprid citrat",
+            "strength": "5mg/0,5g",
+            "province": "Thành phố Cần Thơ",
+            "buyer": "Trung tâm Y tế khu vực Ô Môn",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "VD-33987-20",
+        "registration_link": "old",
+        "row_count": 4,
+        "years": [
+          "2023",
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300237092",
+            "product": "Abamotic",
+            "ingredient": "Mosaprid citrat",
+            "strength": "5mg/0,5g",
+            "province": "Thành phố Cần Thơ",
+            "buyer": "BỆNH VIỆN QUÂN Y 121 CỤC HẬU CẦN QUÂN KHU 9",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2300173860",
+            "product": "Abamotic",
+            "ingredient": "Mosaprid citrat",
+            "strength": "5mg/0,5g",
+            "province": "Tỉnh Khánh Hoà",
+            "buyer": "Sở Y tế tỉnh Khánh Hòa",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      }
+    ],
+    "old_registrations": [
+      "VD-33987-20"
+    ],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 4,
@@ -82,7 +373,78 @@
     "web_url": "https://baoanpharma.com/products/abanuro",
     "slug": "abanuro",
     "dav_matched": true,
-    "con_hieu_luc": false
+    "con_hieu_luc": false,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-33352-19",
+        "registration_link": "old",
+        "row_count": 2,
+        "years": [
+          "2023",
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300172400",
+            "product": "Abanuro",
+            "ingredient": "Nicergolin",
+            "strength": "30mg",
+            "province": "Tỉnh Đồng Nai",
+            "buyer": "Sở Y tế Đồng Nai",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2300308086",
+            "product": "Abanuro",
+            "ingredient": "Nicergolin",
+            "strength": "30mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Phổi Trung ương",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "VD-33352-19",
+        "registration_link": "old",
+        "row_count": 1,
+        "years": [
+          "2023"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300205858",
+            "product": "Abanuro",
+            "ingredient": "Nicergolin",
+            "strength": "30mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Đại học Y Dược ",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      }
+    ],
+    "old_registrations": [
+      "VD-33352-19"
+    ],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 5,
@@ -103,7 +465,41 @@
     "web_url": "https://baoanpharma.com/products/abanuti",
     "slug": "abanuti",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-33353-19",
+        "registration_link": "old",
+        "row_count": 1,
+        "years": [
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2400310569",
+            "product": "Abanuti",
+            "ingredient": "Levocarnitin",
+            "strength": "1g/10ml; 10ml",
+            "province": "TP. Hồ Chí Minh",
+            "buyer": "Bệnh viện Nhi Đồng 2",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      }
+    ],
+    "old_registrations": [
+      "VD-33353-19"
+    ],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 6,
@@ -124,7 +520,11 @@
     "web_url": "https://baoanpharma.com/products/abarin-10",
     "slug": "abarin-10",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 7,
@@ -145,7 +545,11 @@
     "web_url": "https://baoanpharma.com/products/abarin-5",
     "slug": "abarin-5",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 8,
@@ -166,7 +570,11 @@
     "web_url": "https://baoanpharma.com/products/abivoltab",
     "slug": "abivoltab",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 9,
@@ -187,7 +595,163 @@
     "web_url": "https://baoanpharma.com/products/adofebrat",
     "slug": "adofebrat",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "893110464723",
+        "registration_link": "current",
+        "row_count": 6,
+        "years": [
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2300373698",
+            "product": "Adofebrat",
+            "ingredient": "Fenofibrat",
+            "strength": "145mg",
+            "province": "Tỉnh Đăk Lăk",
+            "buyer": "Bệnh viện đa khoa vùng tây nguyên",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2025",
+            "tender_no": "IB2400444042",
+            "product": "Adofebrat",
+            "ingredient": "Fenofibrat",
+            "strength": "145mg",
+            "province": "Tỉnh Thừa Thiên Huế",
+            "buyer": "TRUNG TÂM Y TẾ HUYỆN QUẢNG ĐIỀN",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "893110464723",
+        "registration_link": "current",
+        "row_count": 2,
+        "years": [
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2300337058",
+            "product": "Adofebrat",
+            "ingredient": "Fenofibrat 145mg",
+            "strength": "145mg",
+            "province": "Tỉnh Thừa Thiên Huế",
+            "buyer": "BỆNH VIỆN QUÂN Y 268/CỤC HẬU CẦN/ QUÂN KHU 4",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2025",
+            "tender_no": "IB2400592455",
+            "product": "Adofebrat",
+            "ingredient": "Fenofibrat",
+            "strength": "145mg",
+            "province": "Tỉnh Quảng Bình",
+            "buyer": "Bệnh viện đa khoa huyện Bố Trạch",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "893110464723",
+        "registration_link": "current",
+        "row_count": 4,
+        "years": [
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2300383614",
+            "product": "Adofebrat",
+            "ingredient": "Fenofibrat",
+            "strength": "145mg",
+            "province": "TP. Hồ Chí Minh",
+            "buyer": "Bệnh Viện Chợ Rẫy",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2400393044",
+            "product": "Adofebrat",
+            "ingredient": "Fenofibrat",
+            "strength": "145mg",
+            "province": "Tỉnh Trà Vinh",
+            "buyer": "Bệnh viện đa khoa Tỉnh Trà Vinh",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "VSS",
+        "group": "N4",
+        "matched_registration": "893110464723",
+        "registration_link": "current",
+        "row_count": 20,
+        "years": [
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": 2024,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Adofebrat",
+            "ingredient": "Fenofibrat",
+            "strength": "145mg",
+            "province": "Tỉnh Thừa Thiên Huế",
+            "buyer": "Bv Quân Y 268",
+            "contract_start": "2024-02-05",
+            "contract_end": "2025-02-05"
+          },
+          {
+            "year": 2024,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Adofebrat",
+            "ingredient": "Fenofibrat",
+            "strength": "145mg",
+            "province": "Thành phố Hồ Chí Minh",
+            "buyer": "Bv Chợ Rẫy",
+            "contract_start": "2024-04-17",
+            "contract_end": "2025-04-17"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      },
+      {
+        "source": "VSS",
+        "group": "N4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 10,
@@ -208,7 +772,11 @@
     "web_url": "https://baoanpharma.com/products/alphaba-s",
     "slug": "alphaba-s",
     "dav_matched": true,
-    "con_hieu_luc": false
+    "con_hieu_luc": false,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 11,
@@ -229,7 +797,126 @@
     "web_url": "https://baoanpharma.com/products/anba-qe",
     "slug": "anba-qe",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-35621-22",
+        "registration_link": "current",
+        "row_count": 12,
+        "years": [
+          "2024",
+          "2025",
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2300256776",
+            "product": "Anba-QE",
+            "ingredient": "Ubidecarenon +  D-alpha-tocopheryl acid succinat",
+            "strength": "100mg + 12,31mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "BỆNH VIỆN PHỤ SẢN TRUNG ƯƠNG",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2025",
+            "tender_no": "IB2400378429",
+            "product": "Anba-QE",
+            "ingredient": "Ubidecarenon + D-alpha-tocopheryl",
+            "strength": "100mg + 12,31mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Tim Hà Nội",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "VD-35621-22",
+        "registration_link": "current",
+        "row_count": 2,
+        "years": [
+          "2023",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300205858",
+            "product": "ANBA-QE",
+            "ingredient": "Ubidecarenone+ D-alpha-tocopheryl acid succinat",
+            "strength": "100mg+ 12,31mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Đại học Y Dược ",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2025",
+            "tender_no": "IB2400549567",
+            "product": "Anba-QE",
+            "ingredient": "D-alpha-Tocopheryl acid succinat; Ubidecarenon",
+            "strength": "12,31mg; 100mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Phụ Sản Hà Nội",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "VD-35621-22",
+        "registration_link": "current",
+        "row_count": 4,
+        "years": [
+          "2024",
+          "2025",
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2400230149",
+            "product": "Anba-QE",
+            "ingredient": "Ubidecarenone + D-alpha-tocopheryl acid succinat",
+            "strength": "100mg+12,31mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "BỆNH VIỆN PHỤ SẢN TRUNG ƯƠNG",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2025",
+            "tender_no": "IB2400611069",
+            "product": "Anba-QE",
+            "ingredient": "Ubidecarenon + \nD-alpha-tocopheryl \nacid succinat",
+            "strength": "100mg + 12,31mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Da liễu Trung ương",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 12,
@@ -254,7 +941,191 @@
     "alt_reg_numbers": [
       "893100420223"
     ],
-    "sdk_note": "Có thêm SĐK còn hiệu lực: 893100420223"
+    "sdk_note": "Có thêm SĐK còn hiệu lực: 893100420223",
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-35419-21",
+        "registration_link": "current",
+        "row_count": 11,
+        "years": [
+          "2023",
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300145234",
+            "product": "Anbabrom",
+            "ingredient": "Bromhexin hydroclorid",
+            "strength": "8mg/5ml",
+            "province": "Tỉnh Đăk Lăk",
+            "buyer": "TRUNG TÂM Y TẾ HUYỆN KRÔNG BÚK",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2300308464",
+            "product": "Anbabrom",
+            "ingredient": "Bromhexin hydroclorid",
+            "strength": "8mg/5ml; 5ml",
+            "province": "Tỉnh Đăk Lăk",
+            "buyer": "Trung tâm Y tế huyện Krông năng",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "VD-35419-21",
+        "registration_link": "current",
+        "row_count": 4,
+        "years": [
+          "2023",
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300194008",
+            "product": "Anbabrom",
+            "ingredient": "Bromhexin hydroclorid",
+            "strength": "8mg/5ml",
+            "province": "Tỉnh Bình Dương",
+            "buyer": "Bệnh viện Quân y 4 - Cục Hậu cần - Quân đoàn 4",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2300271977",
+            "product": "Anbabrom",
+            "ingredient": "Bromhexin hydroclorid",
+            "strength": "8mg/5ml",
+            "province": "Tỉnh Đăk Lăk",
+            "buyer": "Trung tâm y tế huyện Krông Pắc",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "VD-35419-21",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2400040737",
+            "product": "Anbabrom",
+            "ingredient": "Bromhexin hydroclorid",
+            "strength": "8mg/5ml",
+            "province": "Tỉnh Bến Tre",
+            "buyer": "TRUNG TÂM Y TẾ HUYỆN GIỒNG TRÔM",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "VD-35419-21",
+        "registration_link": "current",
+        "row_count": 4,
+        "years": [
+          "2023",
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300031103",
+            "product": "Anbabrom",
+            "ingredient": "Bromhexin",
+            "strength": "8mg/5ml, 5ml",
+            "province": "Tỉnh Kon Tum",
+            "buyer": "Bệnh viện đa khoa tỉnh Kon Tum",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2400216221",
+            "product": "Anbabrom",
+            "ingredient": "Bromhexin hydroclorid",
+            "strength": "8mg/5ml",
+            "province": "Tỉnh Nghệ An",
+            "buyer": "Bệnh viện Phong Da liễu Trung ương Quỳnh Lập",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "VSS",
+        "group": "N4",
+        "matched_registration": "VD-35419-21",
+        "registration_link": "current",
+        "row_count": 78,
+        "years": [
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": 2024,
+            "tender_type": "2.thau_tinh",
+            "product": "Anbabrom",
+            "ingredient": "Bromhexin hydroclorid",
+            "strength": "8mg/5ml",
+            "province": "Tỉnh Đồng Nai",
+            "buyer": "",
+            "contract_start": "",
+            "contract_end": ""
+          },
+          {
+            "year": 2024,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Anbabrom",
+            "ingredient": "Bromhexin hydroclorid",
+            "strength": "8mg/5ml; 5ml",
+            "province": "Tỉnh Đắk Lắk",
+            "buyer": "TrạM Y Tế Ea Dăh",
+            "contract_start": "2024-01-02",
+            "contract_end": "2025-01-02"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      },
+      {
+        "source": "VSS",
+        "group": "N4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 13,
@@ -275,7 +1146,39 @@
     "web_url": "https://baoanpharma.com/products/anbabrom-f",
     "slug": "anbabrom-f",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "893100420223",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2500128273",
+            "product": "Anbabrom-F",
+            "ingredient": "Bromhexin hydroclorid + Guaifenesin",
+            "strength": "(4mg + 100mg)/5ml",
+            "province": "Tỉnh Tiền Giang",
+            "buyer": "Bệnh viện quân y 120",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "N4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 14,
@@ -296,7 +1199,11 @@
     "web_url": "https://baoanpharma.com/products/anbaburol",
     "slug": "anbaburol",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 15,
@@ -317,7 +1224,233 @@
     "web_url": "https://baoanpharma.com/products/anbaescin",
     "slug": "anbaescin",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-35786-22",
+        "registration_link": "current",
+        "row_count": 14,
+        "years": [
+          "2023",
+          "2024",
+          "2025",
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300058188",
+            "product": "Anbaescin",
+            "ingredient": "Aescin",
+            "strength": "50mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Hữu Nghị Việt Đức",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2023",
+            "tender_no": "IB2300176967",
+            "product": "Anbaescin",
+            "ingredient": "Aescin",
+            "strength": "50mg",
+            "province": "TP. Hồ Chí Minh",
+            "buyer": "Bệnh Viện Răng Hàm Mặt Thành Phố Hồ Chí Minh",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "VD-35786-22",
+        "registration_link": "current",
+        "row_count": 12,
+        "years": [
+          "2023",
+          "2024",
+          "2025",
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300187848",
+            "product": "Anbaescin",
+            "ingredient": "Aescin",
+            "strength": "50mg",
+            "province": "Tỉnh Long An",
+            "buyer": "BỆNH VIỆN ĐA KHOA TỈNH LONG AN",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2300281346",
+            "product": "Anbaescin",
+            "ingredient": "Aescin",
+            "strength": "50 mg",
+            "province": "Tỉnh Tiền Giang",
+            "buyer": "Bệnh viện quân y 120",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "NHÓM 4",
+        "matched_registration": "VD-35786-22",
+        "registration_link": "current",
+        "row_count": 13,
+        "years": [
+          "2024",
+          "2025",
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2300386761",
+            "product": "Anbaescin",
+            "ingredient": "Aescin",
+            "strength": "50mg",
+            "province": "TP. Hồ Chí Minh",
+            "buyer": "Bệnh Viện Quận Bình Tân",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2400250790",
+            "product": "Anbaescin",
+            "ingredient": "Aescin",
+            "strength": "50mg",
+            "province": "TP. Hồ Chí Minh",
+            "buyer": "BỆNH VIỆN NGUYỄN TRI PHƯƠNG",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "VD-35786-22",
+        "registration_link": "current",
+        "row_count": 19,
+        "years": [
+          "2024",
+          "2025",
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2300383614",
+            "product": "Anbaescin",
+            "ingredient": "Aescin (Escin)",
+            "strength": "50mg",
+            "province": "TP. Hồ Chí Minh",
+            "buyer": "Bệnh Viện Chợ Rẫy",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2400196799",
+            "product": "Anbaescin",
+            "ingredient": "Aescin",
+            "strength": "50mg",
+            "province": "Tỉnh Hậu Giang",
+            "buyer": "Sở Y tế tỉnh Hậu Giang",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 5",
+        "matched_registration": "VD-35786-22",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2500009280",
+            "product": "Anbaescin",
+            "ingredient": "Aescin",
+            "strength": "50mg",
+            "province": "Thành phố Cần Thơ",
+            "buyer": "BỆNH VIỆN QUÂN Y 121 CỤC HẬU CẦN QUÂN KHU 9",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "VSS",
+        "group": "N4",
+        "matched_registration": "VD-35786-22",
+        "registration_link": "current",
+        "row_count": 39,
+        "years": [
+          "2024",
+          "2025",
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": 2024,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Anbaescin",
+            "ingredient": "Aescin",
+            "strength": "50 mg",
+            "province": "Tỉnh Tiền Giang",
+            "buyer": "Bv Quân Y 120",
+            "contract_start": "2024-03-06",
+            "contract_end": "2025-03-05"
+          },
+          {
+            "year": 2024,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Anbaescin",
+            "ingredient": "Aescin",
+            "strength": "50mg",
+            "province": "Thành phố Hồ Chí Minh",
+            "buyer": "Bvđk Bình Tân",
+            "contract_start": "2024-03-15",
+            "contract_end": "2024-10-19"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "NHÓM 4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 5"
+      },
+      {
+        "source": "VSS",
+        "group": "N4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 16,
@@ -338,7 +1471,11 @@
     "web_url": "https://baoanpharma.com/products/anbagrel",
     "slug": "anbagrel",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 17,
@@ -359,7 +1496,240 @@
     "web_url": "https://baoanpharma.com/products/anbaliv",
     "slug": "anbaliv",
     "dav_matched": true,
-    "con_hieu_luc": false
+    "con_hieu_luc": false,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-33988-20",
+        "registration_link": "old",
+        "row_count": 6,
+        "years": [
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2400503332",
+            "product": "Anbaliv\n",
+            "ingredient": "Silymarin",
+            "strength": "400mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Da Liễu Hà Nội",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2025",
+            "tender_no": "IB2400477693",
+            "product": "Anbaliv\n",
+            "ingredient": "Silymarin",
+            "strength": "400mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Nội tiết Trung ương",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "VD-33988-20",
+        "registration_link": "old",
+        "row_count": 4,
+        "years": [
+          "2023",
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300176708",
+            "product": "Anbaliv",
+            "ingredient": "Silymarin",
+            "strength": "400mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh Viện Bỏng quốc gia Lê Hữu Trác",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2400373933",
+            "product": "Anbaliv",
+            "ingredient": "Silymarin",
+            "strength": "400mg",
+            "province": "TP. Hồ Chí Minh",
+            "buyer": "BỆNH VIỆN QUÂN Y 7A",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "NHÓM 4",
+        "matched_registration": "VD-33988-20",
+        "registration_link": "old",
+        "row_count": 1,
+        "years": [
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2400373208",
+            "product": "Anbaliv",
+            "ingredient": "Silymarin",
+            "strength": "400mg",
+            "province": "TP. Hồ Chí Minh",
+            "buyer": "Bệnh viện Phạm Ngọc Thạch",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "VD-33988-20",
+        "registration_link": "old",
+        "row_count": 1,
+        "years": [
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2300252112",
+            "product": "Anbaliv",
+            "ingredient": "Silymarin",
+            "strength": "400mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện 19-8, Bộ Công an",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "VD-33988-20",
+        "registration_link": "old",
+        "row_count": 7,
+        "years": [
+          "2023",
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300094225",
+            "product": "Anbaliv",
+            "ingredient": "Silymarin",
+            "strength": "400mg",
+            "province": "Thành phố Cần Thơ",
+            "buyer": "Bệnh Viện Phụ Sản Thành Phố Cần Thơ",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2400324191",
+            "product": "Anbaliv",
+            "ingredient": "Silymarin",
+            "strength": "400mg",
+            "province": "TP. Hồ Chí Minh",
+            "buyer": "Bệnh Viện Chợ Rẫy",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "VSS",
+        "group": "N4",
+        "matched_registration": "893100263400",
+        "registration_link": "current",
+        "row_count": 2,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": 2026,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Anbaliv",
+            "ingredient": "Silymarin",
+            "strength": "400mg",
+            "province": "Thành phố Hồ Chí Minh",
+            "buyer": "Bvđk Bình Tân",
+            "contract_start": "2026-05-04",
+            "contract_end": "2027-05-04"
+          },
+          {
+            "year": 2026,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Anbaliv",
+            "ingredient": "Silymarin",
+            "strength": "400mg",
+            "province": "Thành phố Hồ Chí Minh",
+            "buyer": "Bv Quân Y 7a/Cục Hậu Cần-Kỹ Thuật/Quân Khu 7",
+            "contract_start": "2026-05-29",
+            "contract_end": "2027-11-29"
+          }
+        ]
+      },
+      {
+        "source": "VSS",
+        "group": "N4",
+        "matched_registration": "VD-33988-20",
+        "registration_link": "old",
+        "row_count": 1,
+        "years": [
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": 2024,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Anbaliv",
+            "ingredient": "Silymarin",
+            "strength": "400mg",
+            "province": "Thành phố Hồ Chí Minh",
+            "buyer": "Bv Quân Y 7a/ Quân Khu 7",
+            "contract_start": "2024-12-12",
+            "contract_end": "2025-12-12"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "NHÓM 4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      },
+      {
+        "source": "VSS",
+        "group": "N4"
+      }
+    ],
+    "old_registrations": [
+      "VD-33988-20"
+    ],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 18,
@@ -380,7 +1750,126 @@
     "web_url": "https://baoanpharma.com/products/anbaluti",
     "slug": "anbaluti",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-33355-19",
+        "registration_link": "old",
+        "row_count": 3,
+        "years": [
+          "2023",
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300173399",
+            "product": "Anbaluti",
+            "ingredient": "Levocarnitine",
+            "strength": "330mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "BỆNH VIỆN NHI TRUNG ƯƠNG  ",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2300311668",
+            "product": "Anbaluti",
+            "ingredient": "Levocarnitin",
+            "strength": "330mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Trung ương Quân đội 108",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "893110876124",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2400343489",
+            "product": " Anbaluti",
+            "ingredient": "Levocarnitin",
+            "strength": "330mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh Viện Quân Y 105",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "VD-33355-19",
+        "registration_link": "old",
+        "row_count": 1,
+        "years": [
+          "2023"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300205858",
+            "product": "Anbaluti",
+            "ingredient": "Levocarnitine",
+            "strength": "330mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Đại học Y Dược ",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "VD-33355-19",
+        "registration_link": "old",
+        "row_count": 1,
+        "years": [
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2400263276",
+            "product": "Anbaluti",
+            "ingredient": "Levocarnitin",
+            "strength": "330mg",
+            "province": "Tỉnh Hà Nam",
+            "buyer": "BỆNH VIỆN ĐA KHOA TỈNH HÀ NAM",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      }
+    ],
+    "old_registrations": [
+      "VD-33355-19"
+    ],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 19,
@@ -401,7 +1890,11 @@
     "web_url": "https://baoanpharma.com/products/anbaridol",
     "slug": "anbaridol",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 20,
@@ -422,7 +1915,114 @@
     "web_url": "https://baoanpharma.com/products/anbaserin",
     "slug": "anbaserin",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-35540-22",
+        "registration_link": "current",
+        "row_count": 4,
+        "years": [
+          "2023",
+          "2025",
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300199462",
+            "product": "Anbaserin",
+            "ingredient": "Phosphatidylserin (dưới dạng phospholipid đậu nành 500 mg đã được làm giàu 70% phosphatidylserin)",
+            "strength": "350mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Trung ương Quân đội 108",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2025",
+            "tender_no": "IB2400550487",
+            "product": "Anbaserin",
+            "ingredient": "Phosphatidylserin (dưới dạng Phospholipid đậu nành 500 mg đã được làm giàu 70% phosphatidylserin)",
+            "strength": "350mg",
+            "province": "Tỉnh Thanh Hoá",
+            "buyer": "Bệnh viện Đa khoa tỉnh Thanh Hóa",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "VD-35540-22",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2023"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300205858",
+            "product": "Anbaserin",
+            "ingredient": "Phosphatidylserin",
+            "strength": "350mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Đại học Y Dược ",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "VD-35540-22",
+        "registration_link": "current",
+        "row_count": 6,
+        "years": [
+          "2024",
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2400263276",
+            "product": "Anbaserin",
+            "ingredient": "Phosphatidylserin (dưới dạng phospholipid đậu nành 500 mg đã được làm giàu 70% phosphatidylserin)",
+            "strength": "350mg",
+            "province": "Tỉnh Hà Nam",
+            "buyer": "BỆNH VIỆN ĐA KHOA TỈNH HÀ NAM",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2024",
+            "tender_no": "IB2400378901",
+            "product": "Anbaserin",
+            "ingredient": "Phosphatidynserin",
+            "strength": "350mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viên Lão khoa Trung ương",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 21,
@@ -443,7 +2043,103 @@
     "web_url": "https://baoanpharma.com/products/andomag-b6",
     "slug": "andomag-b6",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "893100244424",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2500638792",
+            "product": "Andomag B6",
+            "ingredient": "Magnesi lactat dihydrat + Vitamin B6",
+            "strength": "500mg + 5mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Đại học Y Dược",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "893100244424",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2600302039",
+            "product": "Andomag B6",
+            "ingredient": "Vitamin B6 + Magnesi lactat",
+            "strength": "5mg + 500mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Viện Y học Phòng không - Không quân",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "VSS",
+        "group": "N4",
+        "matched_registration": "893100244424",
+        "registration_link": "current",
+        "row_count": 2,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": 2026,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Andomag B6",
+            "ingredient": "Vitamin B6 + magnesi lactat",
+            "strength": "500mg + 5mg",
+            "province": "Tỉnh Nghệ An",
+            "buyer": "Bv Quân Y4 / Quân Khu 4",
+            "contract_start": "2026-01-01",
+            "contract_end": "2027-12-31"
+          },
+          {
+            "year": 2026,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Andomag B6",
+            "ingredient": "Vitamin B6 + magnesi (lactat)",
+            "strength": "500mg + 5mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bv Đhyd-Đhqg Hà Nội",
+            "contract_start": "2026-04-20",
+            "contract_end": "2028-04-20"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      },
+      {
+        "source": "VSS",
+        "group": "N4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 22,
@@ -464,7 +2160,11 @@
     "web_url": "https://baoanpharma.com/products/andotazin",
     "slug": "andotazin",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 23,
@@ -485,7 +2185,11 @@
     "web_url": "https://baoanpharma.com/products/apizyltab",
     "slug": "apizyltab",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 24,
@@ -506,7 +2210,11 @@
     "web_url": "https://baoanpharma.com/products/ascorotix",
     "slug": "ascorotix",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 25,
@@ -527,7 +2235,11 @@
     "web_url": "https://baoanpharma.com/products/b1b6b12-ansba",
     "slug": "b1b6b12-ansba",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 26,
@@ -548,7 +2260,117 @@
     "web_url": "https://baoanpharma.com/products/batika",
     "slug": "batika",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-35710-22",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2023"
+        ],
+        "examples": [
+          {
+            "year": "2023",
+            "tender_no": "IB2300199462",
+            "product": "Batika",
+            "ingredient": "Ubidecarenon + D-alpha-tocopherol",
+            "strength": "30mg + 6,71mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Trung ương Quân đội 108",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "VD-35710-22",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2500128273",
+            "product": "Batika",
+            "ingredient": "Ubidecarenon + Vitamin E",
+            "strength": "30mg + 6,71mg",
+            "province": "Tỉnh Tiền Giang",
+            "buyer": "Bệnh viện quân y 120",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "NHÓM 4",
+        "matched_registration": "VD-35710-22",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2400332846",
+            "product": "Batika",
+            "ingredient": "Ubidecarenon + D-alpha-tocopherol",
+            "strength": "30mg +  6,71mg",
+            "province": "TP. Hồ Chí Minh",
+            "buyer": "Bệnh viện Da Liễu",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "VD-35710-22",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2024"
+        ],
+        "examples": [
+          {
+            "year": "2024",
+            "tender_no": "IB2400379705",
+            "product": "Batika",
+            "ingredient": "Ubidecarenon + \r\n D-alpha-tocopherol",
+            "strength": "30mg + 6,71mg",
+            "province": "TP. Hồ Chí Minh",
+            "buyer": "Bệnh viện Thống Nhất",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "NHÓM 4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 27,
@@ -569,7 +2391,11 @@
     "web_url": "https://baoanpharma.com/products/bezynmax",
     "slug": "bezynmax",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 28,
@@ -591,7 +2417,11 @@
     "slug": "braforce",
     "dav_matched": true,
     "strategy_note": "Thị trường thầu Memantin chủ yếu là viên nén 10mg. Dung dịch uống ống 5ml là ô kỹ thuật hiếm, giúp bệnh viện lập yêu cầu kỹ thuật riêng cho bệnh nhân cao tuổi khó nuốt tại khoa Thần kinh và Lão khoa.",
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 29,
@@ -612,7 +2442,91 @@
     "web_url": "https://baoanpharma.com/products/brasante",
     "slug": "brasante",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "893110244524",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2500017461",
+            "product": "Brasante",
+            "ingredient": "Piracetam",
+            "strength": "333,3mg/ 5ml",
+            "province": "Tỉnh An Giang",
+            "buyer": "Bệnh viện Đa khoa Trung tâm An Giang",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "893110244524",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2400430806",
+            "product": "Brasante\n",
+            "ingredient": "Piracetam",
+            "strength": "333,3mg/ml; 5ml",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Đại học Y Dược ",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "893110244524",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2400557999",
+            "product": "Brasante",
+            "ingredient": "Piracetam",
+            "strength": "333,3mg/ml; 5ml",
+            "province": "Thành phố Cần Thơ",
+            "buyer": "Bệnh Viện Phụ Sản Thành Phố Cần Thơ",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 30,
@@ -633,7 +2547,11 @@
     "web_url": "https://baoanpharma.com/products/dexifenmax",
     "slug": "dexifenmax",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 31,
@@ -654,7 +2572,11 @@
     "web_url": "https://baoanpharma.com/products/esinba",
     "slug": "esinba",
     "dav_matched": true,
-    "con_hieu_luc": false
+    "con_hieu_luc": false,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 32,
@@ -676,7 +2598,11 @@
     "slug": "gluratintab",
     "dav_matched": true,
     "strategy_note": "Mật độ SĐK cao, kiểm soát giá, né thầu mở.",
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 33,
@@ -697,7 +2623,65 @@
     "web_url": "https://baoanpharma.com/products/guathimax",
     "slug": "guathimax",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "N5",
+        "matched_registration": "893100053825",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2500532530",
+            "product": "Guathimax",
+            "ingredient": "Coenzym Q10 (Ubidecarenon)",
+            "strength": "100mg",
+            "province": "Tỉnh Ninh Bình",
+            "buyer": "Bệnh viện đa khoa tỉnh Ninh Bình",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "893100053825",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2600274423",
+            "product": "Guathimax",
+            "ingredient": "Ubidecarenon",
+            "strength": "100mg",
+            "province": "Thành phố Hồ Chí Minh",
+            "buyer": "Bệnh viện Da Liễu",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "N5"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 34,
@@ -718,7 +2702,11 @@
     "web_url": "https://baoanpharma.com/products/ibupara-ansba",
     "slug": "ibupara-ansba",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 35,
@@ -740,7 +2728,11 @@
     "slug": "irsartan-ansba",
     "dav_matched": true,
     "strategy_note": "Viên ngậm phân tán ODT cho phép tách phân thầu kỹ thuật theo Điều 12 Thông tư 40/2025/TT-BYT, không đối đầu trực tiếp viên nén Nhóm 4.",
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 36,
@@ -761,7 +2753,49 @@
     "web_url": "https://baoanpharma.com/products/minomaxtyl",
     "slug": "minomaxtyl",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "893110231825",
+        "registration_link": "current",
+        "row_count": 2,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2600026527",
+            "product": "Minomaxtyl",
+            "ingredient": "Glycine + L- Arginin hydroclorid + L-Histidin hydroclorid monohydrat + L-isoleucin + L-leucin + L-Lysin hydroclorid + L-Methionin + L-Phenylalanin + L-Threonin + L-Tryptophan + L-Valin",
+            "strength": "242mg + 140mg + 70mg + 134mg + 152mg + 168mg + 134mg + 90mg + 90mg + 46mg + 134mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Nội tiết Trung ương",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2026",
+            "tender_no": "IB2600168035",
+            "product": "Minomaxtyl",
+            "ingredient": "Glycine + L- Arginin hydroclorid + L-Histidin hydroclorid monohydrat + L-isoleucin + L-leucin + L-Lysin hydroclorid + L-Methionin + L-Phenylalanin + L-Threonin + L-Tryptophan + L-Valin",
+            "strength": "242mg + 140mg + 70mg + 134mg + 152mg + 168mg + 134mg + 90mg + 90mg + 46mg + 134mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Phổi Trung ương",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 37,
@@ -782,7 +2816,11 @@
     "web_url": "https://baoanpharma.com/products/mynoline",
     "slug": "mynoline",
     "dav_matched": true,
-    "con_hieu_luc": false
+    "con_hieu_luc": false,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 38,
@@ -803,7 +2841,39 @@
     "web_url": "https://baoanpharma.com/products/neuvitaba",
     "slug": "neuvitaba",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "VD-35787-22",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2400552906",
+            "product": "Neuvitaba",
+            "ingredient": "Benfotiamine",
+            "strength": "150mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Trung ương Quân đội 108",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 39,
@@ -824,7 +2894,77 @@
     "web_url": "https://baoanpharma.com/products/nurovitab",
     "slug": "nurovitab",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "893100137100",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2500576206",
+            "product": "Nurovitab",
+            "ingredient": "Vitamin B1 + B6 + B12",
+            "strength": "15mg + 10mg + 20mcg",
+            "province": "Tỉnh Hà Tĩnh",
+            "buyer": "Bệnh viện Đa khoa thị xã Kỳ Anh",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "VSS",
+        "group": "N4",
+        "matched_registration": "893100137100",
+        "registration_link": "current",
+        "row_count": 2,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": 2026,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Nurovitab",
+            "ingredient": "Vitamin B1 + B6 + B12",
+            "strength": "0.02mg + 10mg + 15mg",
+            "province": "Tỉnh Nghệ An",
+            "buyer": "Bv Quân Y4 / Quân Khu 4",
+            "contract_start": "2026-01-01",
+            "contract_end": "2027-12-31"
+          },
+          {
+            "year": 2026,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Nurovitab",
+            "ingredient": "Vitamin B1 + B6 + B12",
+            "strength": "15mg + 10mg + 20mcg",
+            "province": "Tỉnh Hà Tĩnh",
+            "buyer": "Bvđk Thị Xã Kỳ Anh",
+            "contract_start": "2026-01-26",
+            "contract_end": "2027-01-26"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      },
+      {
+        "source": "VSS",
+        "group": "N4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 40,
@@ -846,7 +2986,11 @@
     "slug": "oflozylkab",
     "dav_matched": true,
     "strategy_note": "Đề xuất BE lên Nhóm 3; cảnh báo chuyển giao công nghệ sang cơ sở EU-GMP (Meracine) để lên Nhóm 2.",
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 41,
@@ -867,7 +3011,11 @@
     "web_url": "https://baoanpharma.com/products/oraban",
     "slug": "oraban",
     "dav_matched": true,
-    "con_hieu_luc": false
+    "con_hieu_luc": false,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 42,
@@ -888,7 +3036,113 @@
     "web_url": "https://baoanpharma.com/products/roitintab",
     "slug": "roitintab",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "893100225124",
+        "registration_link": "current",
+        "row_count": 3,
+        "years": [
+          "2025",
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2500207146",
+            "product": "Roitintab",
+            "ingredient": "Glucosamin sulfat + Chondroitin sulfat",
+            "strength": "750mg + 250mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Nội tiết Trung ương",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2026",
+            "tender_no": "IB2600011830",
+            "product": "Roitintab",
+            "ingredient": "Glucosamin sulfat ( dưới dạng glucosamin sulfat natri clorid tương đương glucosamin 588,83mg) + Chondroitin sulfat ( dưới dạng natri chondroitin sulfat 274mg)",
+            "strength": "750mg + 250mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Bệnh Nhiệt đới Trung ương",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "893100225124",
+        "registration_link": "current",
+        "row_count": 2,
+        "years": [
+          "2025",
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2400430806",
+            "product": "Roitintab\n",
+            "ingredient": "Glucosamin sulfat ( dưới dạng glucosamin sulfat natri clorid tương đương glucosamin 588,83mg) + Chondroitin sulfat ( dưới dạng natri chondroitin sulfat 274mg)",
+            "strength": "750mg; 250mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Đại học Y Dược ",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2026",
+            "tender_no": "IB2600167554",
+            "product": "Roitintab",
+            "ingredient": "Glucosamin sulfat ( dưới dạng glucosamin sulfat natri clorid tương đương glucosamin 588,83mg) + Chondroitin sulfat ( dưới dạng natri chondroitin sulfat 274mg)",
+            "strength": "750mg + 250mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện đa khoa Gia Lâm",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4",
+        "matched_registration": "893100225124",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2025"
+        ],
+        "examples": [
+          {
+            "year": "2025",
+            "tender_no": "IB2400367002",
+            "product": "Roitintab\n",
+            "ingredient": "Glucosamin sulfat ( dưới dạng glucosamin sulfat natri clorid tương đương glucosamin 588,83mg) + Chondroitin sulfat ( dưới dạng natri chondroitin sulfat 274mg)",
+            "strength": "750mg + 250mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Trung ương Quân đội 108",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "MSC",
+        "group": "Nhóm 4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 43,
@@ -910,7 +3164,65 @@
     "slug": "rozymaxta",
     "dav_matched": true,
     "strategy_note": "Đề xuất BE lên Nhóm 3; cảnh báo chuyển giao công nghệ sang cơ sở EU-GMP (Meracine) để lên Nhóm 2.",
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "893110456525",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2600007685",
+            "product": "Rozymaxta",
+            "ingredient": "Ezetimib; Rosuvastatin (dưới dạng rosuvastatin calci 5,2mg)",
+            "strength": "10mg; 5mg",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện Trung ương Quân đội 108",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "893110456525",
+        "registration_link": "current",
+        "row_count": 1,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2600103711",
+            "product": "Rozymaxta",
+            "ingredient": "Ezetimib + Rosuvastatin",
+            "strength": "10mg + 5mg",
+            "province": "Thành phố Hồ Chí Minh",
+            "buyer": "BỆNH VIỆN QUÂN Y 7A",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 44,
@@ -931,7 +3243,123 @@
     "web_url": "https://baoanpharma.com/products/sakicamax",
     "slug": "sakicamax",
     "dav_matched": true,
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [
+      {
+        "source": "MSC",
+        "group": "4",
+        "matched_registration": "893100572924",
+        "registration_link": "current",
+        "row_count": 5,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2600153081",
+            "product": "Sakicamax",
+            "ingredient": "Calci carbonat + vitamin D3",
+            "strength": "1250mg + 440IU",
+            "province": "Thành phố Hải Phòng",
+            "buyer": "Bệnh viện Đa khoa Hải Dương",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2026",
+            "tender_no": "IB2600434506",
+            "product": "Sakicamax",
+            "ingredient": "Calci carbonat + vitamin D3",
+            "strength": "1250mg + 440IU",
+            "province": "Tỉnh Thanh Hóa",
+            "buyer": "Bệnh viện Đa khoa Sầm Sơn",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "MSC",
+        "group": "N4",
+        "matched_registration": "893100572924",
+        "registration_link": "current",
+        "row_count": 2,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": "2026",
+            "tender_no": "IB2600015677",
+            "product": "Sakicamax",
+            "ingredient": "Calci carbonat + vitamin D3",
+            "strength": "1250mg + 440IU",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện đa khoa Phú Xuyên",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          },
+          {
+            "year": "2026",
+            "tender_no": "IB2600177291",
+            "product": "Sakicamax",
+            "ingredient": "Calci carbonat + vitamin D3",
+            "strength": "1250mg + 440IU",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bệnh viện đa khoa Chương Mỹ",
+            "source_url": "https://muasamcong.mpi.gov.vn/web/guest/winning-bid-data"
+          }
+        ]
+      },
+      {
+        "source": "VSS",
+        "group": "N4",
+        "matched_registration": "893100572924",
+        "registration_link": "current",
+        "row_count": 3,
+        "years": [
+          "2026"
+        ],
+        "examples": [
+          {
+            "year": 2026,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Sakicamax",
+            "ingredient": "Calci carbonat + vitamin D3",
+            "strength": "1250mg + 440IU",
+            "province": "Thành phố Hà Nội",
+            "buyer": "Bvđk Phú Xuyên",
+            "contract_start": "2026-04-08",
+            "contract_end": "2027-04-08"
+          },
+          {
+            "year": 2026,
+            "tender_type": "3.thau_rieng_le",
+            "product": "Sakicamax",
+            "ingredient": "Calci carbonat + vitamin D3",
+            "strength": "1250mg + 440IU",
+            "province": "Tỉnh Hải Dương",
+            "buyer": "Bvđk Hải Dương",
+            "contract_start": "2026-07-20",
+            "contract_end": "2027-07-20"
+          }
+        ]
+      }
+    ],
+    "observed_tender_groups": [
+      {
+        "source": "MSC",
+        "group": "4"
+      },
+      {
+        "source": "MSC",
+        "group": "N4"
+      },
+      {
+        "source": "VSS",
+        "group": "N4"
+      }
+    ],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   },
   {
     "id": 45,
@@ -953,6 +3381,10 @@
     "slug": "sakiesmin",
     "dav_matched": true,
     "strategy_note": "Ưu thế liều 1000mg 1 lần/ngày thay hàm lượng 500mg để chào thầu gói mua sắm tập trung của Sở Y tế.",
-    "con_hieu_luc": true
+    "con_hieu_luc": true,
+    "group_evidence": [],
+    "observed_tender_groups": [],
+    "old_registrations": [],
+    "tender_group_status": "Cần rà soát"
   }
 ]

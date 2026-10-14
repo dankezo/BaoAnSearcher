@@ -400,7 +400,7 @@ def _price_aggregates(filters, start, end):
     with closing(sqlite3.connect(f"file:{MSC_DB}?mode=ro", uri=True)) as lookup:
         indexed = lookup.execute("SELECT 1 FROM sqlite_master WHERE name='records_search_fts'").fetchone() is not None
         dated = lookup.execute("SELECT 1 FROM sqlite_master WHERE name='idx_records_kind_cursor'").fetchone() is not None
-    clauses, args = search_where("prices", filters, indexed=indexed)
+    clauses, args = search_where("prices", {**filters, 'publishedFrom': '', 'publishedTo': ''}, indexed=indexed)
     clauses.extend(["metric_day(json_extract(normalized, '$.published')) >= ?",
                     "metric_day(json_extract(normalized, '$.published')) <= ?"])
     args.extend([start.date().isoformat(), end.date().isoformat()])
@@ -410,18 +410,18 @@ def _price_aggregates(filters, start, end):
         args.extend([start.date().isoformat(), end.date().isoformat() + "~"])
     with closing(sqlite3.connect(f"file:{MSC_DB}?mode=ro", uri=True)) as con:
         con.create_function("fold", 1, fold, deterministic=True)
-        con.create_function("metric_num", 1, lru_cache(maxsize=8192)(_num), deterministic=True)
+        con.create_function("metric_num", 2, lru_cache(maxsize=8192)(lambda raw, canonical: float(canonical) if canonical is not None else _num(raw)), deterministic=True)
         con.create_function("metric_day", 1, lru_cache(maxsize=4096)(lambda v: stamp.date().isoformat() if (stamp := _parse_dt(v)) else None), deterministic=True)
         # Broad totals cannot use the registration index to narrow their rows.
-        scan = " NOT INDEXED" if not any(value for key, value in filters.items() if key != "metricMonths") else ""
+        scan = " NOT INDEXED" if not any(value for key, value in filters.items() if key not in ("metricMonths", "strictDates")) else ""
         rows = con.execute("""
           SELECT metric_day(json_extract(normalized, '$.published')) AS published,
                  coalesce(json_extract(normalized, '$.province'), ''),
                  coalesce(json_extract(normalized, '$.group_name'), ''),
                  coalesce(json_extract(normalized, '$.unit'), ''),
-                 SUM(metric_num(json_extract(normalized, '$.quantity'))),
-                 SUM(metric_num(json_extract(normalized, '$.quantity')) * metric_num(json_extract(normalized, '$.unit_price'))),
-                 COUNT(*), MIN(metric_num(json_extract(normalized, '$.unit_price'))), MAX(metric_num(json_extract(normalized, '$.unit_price')))
+                 SUM(metric_num(json_extract(normalized, '$.quantity'), json_extract(normalized, '$._analyticsNumbers.quantity'))),
+                 SUM(metric_num(json_extract(normalized, '$.quantity'), json_extract(normalized, '$._analyticsNumbers.quantity')) * metric_num(json_extract(normalized, '$.unit_price'), json_extract(normalized, '$._analyticsNumbers.unit_price'))),
+                 COUNT(*), MIN(metric_num(json_extract(normalized, '$.unit_price'), json_extract(normalized, '$._analyticsNumbers.unit_price'))), MAX(metric_num(json_extract(normalized, '$.unit_price'), json_extract(normalized, '$._analyticsNumbers.unit_price')))
             FROM records""" + scan + " WHERE " + " AND ".join(clauses) + " GROUP BY 1,2,3,4", args).fetchall()
     keys = ("published", "province", "group_name", "unit", "qty", "revenue", "cnt", "minPrice", "maxPrice")
     return [dict(zip(keys, row)) for row in rows]
@@ -458,7 +458,7 @@ def _shape_price_rows(rows, window, include_groups=True):
             if lo is not None: part["minPrice"] = min(lo, part["minPrice"]) if part["minPrice"] is not None else lo
             if hi is not None: part["maxPrice"] = max(hi, part["maxPrice"]) if part["maxPrice"] is not None else hi
             if group: groups[int(group) - 1] += revenue
-        else:
+        if previous:
             previous_count += int(item.get("cnt") or 0)
             prev_revenue += revenue
             prov["prev"] += revenue
@@ -487,6 +487,17 @@ _PRICE_LOCK = threading.Lock()
 
 def _msc_prices(filters: dict, months: int) -> dict:
     window = _window(months)
+    if filters.get('publishedFrom') or filters.get('publishedTo'):
+        start = datetime.fromisoformat(filters['publishedFrom']) if filters.get('publishedFrom') else datetime(1900, 1, 1)
+        end = datetime.fromisoformat(filters['publishedTo']) if filters.get('publishedTo') else window[1]
+        if start > end:
+            raise ValueError('Từ ngày phải trước hoặc bằng đến ngày.')
+        def previous(day):
+            try:
+                return day.replace(year=day.year - 1)
+            except ValueError:
+                return day.replace(year=day.year - 1, day=28)
+        window = (months, end, start, previous(start), previous(end))
     # SQLite WAL changes must invalidate aggregates as well as main DB changes.
     stamps = tuple((p.stat().st_mtime_ns, p.stat().st_size) if p.exists() else None for p in (MSC_DB, Path(str(MSC_DB) + "-wal")))
     key = (json.dumps(filters, sort_keys=True, ensure_ascii=False), months, window[1].strftime("%Y-%m-%d"), stamps)
@@ -503,6 +514,10 @@ def _msc_prices(filters: dict, months: int) -> dict:
         return future.result(timeout=90)
     try:
         result = _shape_price_rows(_price_aggregates(filters, window[3], window[1]), window)
+        if filters.get('publishedFrom') or filters.get('publishedTo'):
+            result['range'] = {'from': filters.get('publishedFrom'), 'to': window[1].date().isoformat()}
+            for view in result.get('groupViews', {}).values():
+                view['range'] = result['range']
         with _PRICE_LOCK:
             if len(_PRICE_CACHE) >= 16:
                 _PRICE_CACHE.pop(next(iter(_PRICE_CACHE)))

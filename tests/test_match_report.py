@@ -11,12 +11,14 @@ from server.match_report import build_rows, select_open
 
 
 FAKE = ({
+    "group": "4",
     "stems": ["paracetamol"],
     "form": "vien nen",
     "route": "uong",
     "strength": {(500.0, "mg")},
     "card": {"brand": "ParaBA", "inn": "Paracetamol", "strength": "500mg", "form": "Viên nén", "reg": "VD-1"},
 }, {
+    "group": "4",
     "stems": ["paracetamol"],
     "form": "vien nen",
     "route": "uong",
@@ -26,7 +28,7 @@ FAKE = ({
 
 
 def _lot(name, strength, form="Viên nén"):
-    return {"lotName": name, "tenHoatChat": name, "nongDo": strength, "dangBaoChe": form, "duongDung": "Uống", "uom": "Viên", "pricePlan": 12000}
+    return {"lotName": name, "tenHoatChat": name, "nongDo": strength, "dangBaoChe": form, "duongDung": "Uống", "groupMedicine":"4", "uom": "Viên", "quantity": 2.5, "pricePlan": 12000}
 
 
 class MatchReportTest(unittest.TestCase):
@@ -59,12 +61,21 @@ class MatchReportTest(unittest.TestCase):
         self.assertEqual([row["brand"] for row in exact], ["ParaBA", "ParaBA2"])
         self.assertEqual(exact[0]["sdkDensity"], 4)
         self.assertEqual(exact[0]["price"], 12000)
+        self.assertEqual(exact[0]["quantity"], 2.5)
+        self.assertEqual(exact[0]["totalValue"], 30000)
+        self.assertEqual(exact[0]["scopeLineKey"], exact[1]["scopeLineKey"])
         self.assertEqual(exact[0]["link"], "https://muasamcong.mpi.gov.vn/goi/1")
         self.assertEqual(exact[0]["innMt"], "Paracetamol")
         self.assertTrue(all(row["tenderNo"] == "IB2" for row in near))
         self.assertEqual(near[0]["link"], "")
         self.assertEqual([row["match"] for row in both], ["exact", "exact", "near", "near"])
         self.assertEqual([row["stt"] for row in both], [1, 2, 3, 4])
+
+    def test_scope_index_distinguishes_tender_lines_with_same_content(self):
+        item={"tender_no":"IB1","baoan_match":"exact","scope_lots":[_lot("Paracetamol","500mg"),_lot("Paracetamol","500mg")]}
+        rows=build_rows([item],"exact",lambda inn:4)
+        self.assertEqual([row["scopeLineKey"] for row in rows],["IB1:0","IB1:0","IB1:1","IB1:1"])
+        self.assertEqual([row["quantity"] for row in rows],[2.5]*4)
 
     def test_select_open_uses_the_card_window(self):
         now = datetime.now().replace(microsecond=0)

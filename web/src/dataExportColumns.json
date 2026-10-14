@@ -1,0 +1,324 @@
+{
+  "VSS": [
+    {
+      "key": "hoatchat",
+      "label": "Hoạt chất"
+    },
+    {
+      "key": "sodk",
+      "label": "Số đăng ký"
+    },
+    {
+      "key": "ten",
+      "label": "Tên thuốc"
+    },
+    {
+      "key": "duongdung",
+      "label": "Đường dùng"
+    },
+    {
+      "key": "dangbaoche",
+      "label": "Dạng bào chế"
+    },
+    {
+      "key": "hamluong",
+      "label": "Hàm lượng"
+    },
+    {
+      "key": "donvitinh",
+      "label": "ĐVT"
+    },
+    {
+      "key": "soluong",
+      "label": "Số lượng",
+      "numeric": true,
+      "sum": true
+    },
+    {
+      "key": "gia",
+      "label": "Đơn giá",
+      "numeric": true,
+      "sum": true
+    },
+    {
+      "key": "thanhtien",
+      "label": "Thành tiền",
+      "numeric": true,
+      "sum": true
+    },
+    {
+      "key": "nhomthau",
+      "label": "Nhóm thầu"
+    },
+    {
+      "key": "nhasx",
+      "label": "Nhà sản xuất"
+    },
+    {
+      "key": "nuocsx",
+      "label": "Nước sản xuất"
+    },
+    {
+      "key": "ma_tinh",
+      "label": "Mã tỉnh"
+    },
+    {
+      "key": "ten_tinh",
+      "label": "Tỉnh / TP"
+    },
+    {
+      "key": "ma_cskcb",
+      "label": "Mã CSKCB"
+    },
+    {
+      "key": "ten_cskcb",
+      "label": "Tên CSKCB"
+    },
+    {
+      "key": "tungay_hd",
+      "label": "Ngày bắt đầu HĐ"
+    },
+    {
+      "key": "denngay_hd",
+      "label": "Ngày kết thúc HĐ"
+    }
+  ],
+  "DAV": [
+    {
+      "key": "soDangKy",
+      "label": "Số đăng ký",
+      "cloudKey": "so_dang_ky"
+    },
+    {
+      "key": "ngayCap",
+      "label": "Ngày cấp",
+      "cloudKey": "ngay_cap"
+    },
+    {
+      "key": "tenThuoc",
+      "label": "Tên thuốc",
+      "cloudKey": "ten_thuoc"
+    },
+    {
+      "key": "hoatChat",
+      "label": "Hoạt chất",
+      "cloudKey": "hoat_chat"
+    },
+    {
+      "key": "hamLuong",
+      "label": "Hàm lượng",
+      "cloudKey": "ham_luong"
+    },
+    {
+      "key": "dangBaoChe",
+      "label": "Dạng bào chế",
+      "cloudKey": "dang_bao_che"
+    },
+    {
+      "key": "dongGoi",
+      "label": "Quy cách đóng gói",
+      "cloudKey": "dong_goi"
+    },
+    {
+      "key": "hanDung",
+      "label": "Hạn dùng",
+      "cloudKey": "han_dung"
+    },
+    {
+      "key": "ngayHetHan",
+      "label": "Ngày hết hạn",
+      "cloudKey": "ngay_het_han"
+    },
+    {
+      "key": "ctyDangKy",
+      "label": "Công ty đăng ký",
+      "cloudKey": "cty_dang_ky"
+    },
+    {
+      "key": "ctySanXuat",
+      "label": "Công ty sản xuất",
+      "cloudKey": "cty_san_xuat"
+    },
+    {
+      "key": "nuocSanXuat",
+      "label": "Nước sản xuất",
+      "cloudKey": "nuoc_san_xuat"
+    },
+    {
+      "key": "soDangKyCu",
+      "label": "SĐK cũ",
+      "cloudKey": "so_dang_ky_cu"
+    },
+    {
+      "key": "soQuyetDinh",
+      "label": "Số quyết định",
+      "cloudKey": "so_quyet_dinh"
+    },
+    {
+      "key": "tieuChuan",
+      "label": "Tiêu chuẩn",
+      "cloudKey": "tieu_chuan"
+    }
+  ],
+  "MSC_PRICE": [
+    {
+      "key": "name",
+      "label": "Tên thuốc"
+    },
+    {
+      "key": "ingredient",
+      "label": "Hoạt chất"
+    },
+    {
+      "key": "route",
+      "label": "Đường dùng"
+    },
+    {
+      "key": "dosage_form",
+      "label": "Dạng bào chế"
+    },
+    {
+      "key": "strength",
+      "label": "Hàm lượng"
+    },
+    {
+      "key": "registration",
+      "label": "Số đăng ký"
+    },
+    {
+      "key": "unit_price",
+      "label": "Đơn giá",
+      "numeric": true,
+      "sum": true
+    },
+    {
+      "key": "quantity",
+      "label": "Số lượng",
+      "numeric": true,
+      "sum": true
+    },
+    {
+      "key": "total_value",
+      "label": "Tổng GT",
+      "numeric": true,
+      "sum": true
+    },
+    {
+      "key": "unit",
+      "label": "ĐVT"
+    },
+    {
+      "key": "group_name",
+      "label": "Nhóm"
+    },
+    {
+      "key": "manufacturer",
+      "label": "Nhà sản xuất"
+    },
+    {
+      "key": "country",
+      "label": "Nước sản xuất"
+    },
+    {
+      "key": "buyer",
+      "label": "Bệnh viện / Chủ đầu tư"
+    },
+    {
+      "key": "province",
+      "label": "Tỉnh"
+    },
+    {
+      "key": "tender_no",
+      "label": "Mã TBMT"
+    },
+    {
+      "key": "published",
+      "label": "Ngày KQLCNT"
+    }
+  ],
+  "MSC_BID": [
+    {
+      "key": "tender_no",
+      "label": "Mã TBMT"
+    },
+    {
+      "key": "name",
+      "label": "Tên gói"
+    },
+    {
+      "key": "buyer",
+      "label": "Chủ đầu tư"
+    },
+    {
+      "key": "province",
+      "label": "Tỉnh"
+    },
+    {
+      "key": "published",
+      "label": "Ngày đăng"
+    },
+    {
+      "key": "close_date",
+      "label": "Đóng thầu"
+    },
+    {
+      "key": "status_label",
+      "label": "Trạng thái"
+    },
+    {
+      "key": "bid_price",
+      "label": "Giá gói",
+      "numeric": true
+    },
+    {
+      "key": "bid_form",
+      "label": "Hình thức"
+    }
+  ],
+  "MSC_YCBG": [
+    {
+      "key": "tender_no",
+      "label": "Mã YCBG"
+    },
+    {
+      "key": "version",
+      "label": "Phiên bản"
+    },
+    {
+      "key": "name",
+      "label": "Tên yêu cầu báo giá"
+    },
+    {
+      "key": "buyer",
+      "label": "Chủ đầu tư"
+    },
+    {
+      "key": "province",
+      "label": "Tỉnh / TP"
+    },
+    {
+      "key": "published",
+      "label": "Ngày đăng"
+    },
+    {
+      "key": "close_date",
+      "label": "Hạn nhận báo giá"
+    },
+    {
+      "key": "status_label",
+      "label": "Trạng thái"
+    },
+    {
+      "key": "baoan_match",
+      "label": "Khớp Bảo An"
+    },
+    {
+      "key": "document_status",
+      "label": "Hồ sơ"
+    },
+    {
+      "key": "source_url",
+      "label": "Nguồn"
+    }
+  ]
+}

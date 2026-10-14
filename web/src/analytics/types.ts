@@ -1,11 +1,13 @@
 export type Mode = 'drug' | 'company' | 'territory' | 'macro'
 export type Source = 'msc_prices' | 'msc_tenders' | 'vss' | 'dav'
+export interface AnalyticsProgress {source:Source;completed:number;total:number}
 export type Role = 'winner' | 'manufacturer' | 'registrant' | 'all'
 export interface AnalyticsQuery {
   version?: number; mode: Mode; entity: string; role: Role; months: number | 'all'
   start?: string; end?: string; comparison: 'yoy' | 'previous' | 'none'
   companyFocus?: 'manufacturer'|'business'; entityMatch?: 'contains'|'exact'
-  filters: Partial<Record<'group'|'strength'|'form'|'route'|'province', string>>
+  includeCombinations?:boolean; companyMissing?:boolean
+  filters: Partial<Record<'group'|'strength'|'form'|'route'|'province'|'company'|'unit'|'ingredient', string>>
   previousStart?: string; previousEnd?: string
   entityField?: 'ingredient'|'registration'|'name'
   territoryField?: 'province'|'facility'|'region'
@@ -20,7 +22,7 @@ export interface AggregateRow {
 }
 export interface SourceStats { status:'available'|'unavailable'|'unsupported'; reason?:string; rows:AggregateRow[]; comparisonMissing?:boolean;linkedTenderCoverage?:string;updatedAt?:string|null }
 export interface AnalyticsOverview {
-  version:number; query:AnalyticsQuery; generatedAt:string; cached:boolean; snapshot?:boolean
+  version:number; aggregationRevision?:number; query:AnalyticsQuery; generatedAt:string; cached:boolean; snapshot?:boolean
   coverage:'unknown'|'complete'|'partial'; sources:Record<Source,SourceStats>; missing:Record<string,string>
   baoanCoordinates?:{ingredient_key:string;strength_key:string;group_key:string}[]
   baseline?:StrategicInsight
@@ -42,4 +44,4 @@ export interface InsightItem {detail:string;source:Source|'regulatory';documentI
 export interface StrategicInsight {method:'ai'|'rules';provider?:string;model?:string;reason?:string;generatedAt:string;evidence:InsightItem[];inference:InsightItem[];verification:InsightItem[];actions:InsightItem[];news?:NewsContext[];newsStatus?:'available'|'unavailable';newsSummary?:{documentId:string;impact:string;action:string}|null}
 export interface Preset {id:string;name:string;configuration:AnalyticsQuery;version:number}
 export const SOURCE_LABELS:Record<Source,string>={msc_prices:'MSC · Đơn giá',msc_tenders:'MSC · Gói thầu',vss:'VSS · Trúng thầu',dav:'DAV · Số đăng ký'}
-export const DEFAULT_QUERY:AnalyticsQuery={mode:'macro',entity:'',role:'winner',months:12,comparison:'yoy',filters:{}}
+export const DEFAULT_QUERY:AnalyticsQuery={mode:'macro',entity:'',role:'winner',months:12,comparison:'yoy',includeCombinations:true,filters:{}}

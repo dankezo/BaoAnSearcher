@@ -1,34 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { api, applyClientFilters, containsWords, fmtDate, fmtDateTime, SHORT_SEARCH_NOTE, skipShortTextSearch, sortByDateDesc } from './api'
-import { cloudMatchReport, cloudMetricsSlice, cloudMscSearch, cloudSuggest, supabaseConfigured } from './supabaseCloud'
+import { api, getStatus, applyClientFilters, containsWords, fmtDate, fmtDateTime, SHORT_SEARCH_NOTE, skipShortTextSearch, sortByDateDesc } from './api'
+import { cloudMatchReport, cloudMetricsSlice, cloudMscSearch, cloudRefreshTenders, cloudSuggest, supabaseConfigured } from './supabaseCloud'
+import {resetQueryCache} from './queryCache'
 import { loadSuggestStatic } from './suggestClient'
 import { FilterDraft } from './filterDraft'
+import DateInput, { validateDateInputs } from './DateInput'
 import {
   DataTable, DetailModal, ErrorNote, Field, FilterModal, Icons, MultiSelectField, IngredientText, LoadingOverlay, Pagination,
   SuggestField, TableToolbar, UpdatedNote, applyColumnFilters, exportSelectionOrAll, fetchAllPages, resolvePageSize,
   serverFilters, useSectionMeta, useSelection, useLoadProgress, } from './components'
 import { focusBaoAn, readCompare, requestCompare } from './compare'
 import { MscPriceMetrics, MscTenderMetrics, applyMetricQuick, mscStatusDisplay } from './metrics'
+import SaveResultButton from './SaveResultButton'
+import { tableSnapshot } from './savedResultStore'
 import { exportMatchWorkbook } from './matchExport'
 import { StatusBadge, resolveBidStatusFromRow } from './bidStatus'
+import { formatNumber, numberValue, lineValue } from './numbers'
 
 const PAGE_SIZE_DEFAULT = 100
 const MSC_TEXT_KEYS = ['q', 'name', 'ingredient', 'dosage_form', 'registration', 'manufacturer', 'tender_no', 'winner']
-const money = (v) => (typeof v === 'number' ? v.toLocaleString('vi-VN') : v ?? '')
+const money = formatNumber
 
 const PRICE_COLS = [
   { key: 'name', label: 'Tên thuốc', width: 160, truncateAt: 72 },
-  { key: 'ingredient', label: 'Hoạt chất', width: 200, render: (v) => <IngredientText text={v} /> },
+  { key: 'ingredient', label: 'Hoạt chất', width: 170, render: (v) => <IngredientText text={v} /> },
   { key: 'route', label: 'Đường dùng', width: 100, filter: 'select' },
   { key: 'dosage_form', label: 'Dạng bào chế', width: 130, filter: 'select', truncateAt: 48 },
   { key: 'strength', label: 'Hàm lượng', width: 130, truncateAt: 64 },
   { key: 'registration', label: 'SĐK', width: 110, mono: true, nowrap: true },
-  { key: 'unit_price', label: 'Đơn giá', nowrap: true, align: 'right', mono: true, text: (r) => money(r.unit_price) },
-  { key: 'quantity', label: 'SL', nowrap: true, align: 'right', mono: true, text: (r) => money(r.quantity) },
+  { key: 'unit_price', label: 'Đơn giá', nowrap: true, align: 'right', mono: true, sum: true, exportValue: r => numberValue(r.unit_price), text: r => money(r.unit_price), render:v=>money(v) },
+  { key: 'quantity', label: 'SL', nowrap: true, align: 'right', mono: true, sum: true, exportValue: r => numberValue(r.quantity), text: r => money(r.quantity), render:v=>money(v) },
+  { key: 'total_value', label: 'Tổng GT', nowrap: true, align: 'right', mono: true, sum: true, exportValue: r => lineValue(r.unit_price,r.quantity), text: r => money(lineValue(r.unit_price,r.quantity)) || '—', render:(_v,r)=>money(lineValue(r.unit_price,r.quantity)) || '—' },
   { key: 'unit', label: 'ĐVT', width: 65, filter: 'select' },
   { key: 'group_name', label: 'Nhóm', nowrap: true, filter: 'select', align: 'center' },
   { key: 'manufacturer', label: 'NSX', width: 220, truncateAt: 96 },
+  { key: 'winner', label: 'Nhà thầu trúng', width: 220, truncateAt: 96 },
   { key: 'country', label: 'Nước', width: 90, filter: 'select' },
   { key: 'buyer', label: 'Bệnh viện / CĐT', width: 170, truncateAt: 72 },
   { key: 'province', label: 'Tỉnh', width: 130, filter: 'select' },
@@ -57,7 +64,7 @@ const TENDER_COLS = [
 const PRICE_DETAIL = [
   { key: 'name', label: 'Tên thuốc' }, { key: 'ingredient', label: 'Hoạt chất' }, { key: 'strength', label: 'Hàm lượng' },
   { key: 'registration', label: 'Số đăng ký' },
-  { key: 'unit_price', label: 'Đơn giá' }, { key: 'quantity', label: 'Số lượng' }, { key: 'unit', label: 'Đơn vị tính' },
+  { key: 'unit_price', label: 'Đơn giá', text:r=>money(r.unit_price) }, { key: 'quantity', label: 'Số lượng', text:r=>money(r.quantity) }, { key: 'total_value', label: 'Tổng GT', text:r=>money(lineValue(r.unit_price,r.quantity)) }, { key: 'unit', label: 'Đơn vị tính' },
   { key: 'group_name', label: 'Nhóm thuốc' }, { key: 'medicine_type', label: 'Loại thuốc' },
   { key: 'manufacturer', label: 'Nhà sản xuất' }, { key: 'country', label: 'Nước sản xuất' },
   { key: 'winner', label: 'Nhà thầu trúng' },
@@ -84,6 +91,7 @@ const SERVER_MAP = {
 }
 
 const EMPTY_FILTERS = {
+  publishedFrom: '', publishedTo: '', strictDates: true,
   q: '', name: '', ingredient: '', dosage_form: '', registration: '', manufacturer: '',
   province: [], tender_no: '', buyer: [], winner: '', group_name: [], medicine_type: [], country: [], metricQuick: '', metricMonths: 12,
 }
@@ -92,7 +100,7 @@ function hitRegs(row) {
   return [...new Set((row?.hits || []).map((hit) => hit.reg).filter(Boolean))]
 }
 
-function ScopeCatalog({ lines, tenderNo, embedded = false }) {
+export function ScopeCatalog({ lines, tenderNo, embedded = false, title = 'Danh mục thuốc mời thầu' }) {
   const [tip, setTip] = useState(null)
   const [ask, setAsk] = useState(null)
   const [copied, setCopied] = useState('')
@@ -120,7 +128,7 @@ function ScopeCatalog({ lines, tenderNo, embedded = false }) {
   return (
     <section className="scope-catalog">
       <div className="scope-catalog-head">
-        <h4>Danh mục thuốc mời thầu</h4>
+        <h4>{title}</h4>
         <label className="scope-match-only">
           <input type="checkbox" checked={matchedOnly} onChange={(event) => setMatchedOnly(event.target.checked)} />
           Chỉ hiện danh mục khớp
@@ -145,7 +153,7 @@ function ScopeCatalog({ lines, tenderNo, embedded = false }) {
           <thead>
             <tr>
               <th>Mã</th><th>Hoạt chất</th><th>Hàm lượng</th><th>Dạng bào chế</th><th>Nhóm thuốc</th><th>Đường dùng</th>
-              <th className="num">SL</th><th>ĐVT</th><th className="num">Đơn giá</th>
+              <th>ĐVT</th><th className="num">Đơn giá</th><th className="num">SL</th><th className="num">Tổng GT</th>
             </tr>
           </thead>
           <tbody>
@@ -193,11 +201,12 @@ function ScopeCatalog({ lines, tenderNo, embedded = false }) {
                   </td>
                   <td>{row.strength || '—'}</td>
                   <td>{row.form || '—'}</td>
-                  <td>{row.group || '—'}</td>
+                  <td>{row.group || 'Hồ sơ đã tải chưa có nhóm'}</td>
                   <td>{row.route || '—'}</td>
-                  <td className="num">{money(row.qty) || '—'}</td>
                   <td>{row.unit || '—'}</td>
                   <td className="num">{money(row.price) || '—'}</td>
+                  <td className="num">{money(row.qty) || '—'}</td>
+                  <td className="num">{money(lineValue(row.price,row.qty)) || '—'}</td>
                 </tr>
               )
             })}
@@ -208,9 +217,11 @@ function ScopeCatalog({ lines, tenderNo, embedded = false }) {
       {tip && createPortal(
         <div className={`scope-tip${tip.above ? ' above' : ''}`} style={{ top: tip.top, left: tip.left }}>
           <div className="scope-tip-kicker">{tip.row.match === 'exact' ? 'Khớp hợp lệ với thuốc Bảo An' : 'Cần rà soát HSMT'}</div>
+          {tip.row.reviewReason && <div className="muted small">{tip.row.reviewReason}</div>}
           {tip.row.legalBasis && <div className="muted small">{tip.row.legalBasis}</div>}
           {tip.row.hits.map((hit) => (
             <div key={`${hit.reg}-${hit.brand}`} className="scope-tip-hit">
+              <span className="muted small">Nhóm xác minh: {hit.group || 'Chưa xác minh'}{hit.groupEvidence?.length ? ` · Nhóm từng trúng: ${[...new Set(hit.groupEvidence.map(x => x.group))].join(', ')}` : ''}</span>
               <strong>{hit.brand || hit.inn || 'Thuốc Bảo An'}</strong>
               {hit.brand && hit.inn ? <div>{hit.inn}</div> : null}
               <div className="muted">{[hit.strength, hit.form, hit.reg ? `SĐK ${hit.reg}` : ''].filter(Boolean).join(' · ')}</div>
@@ -225,6 +236,7 @@ function ScopeCatalog({ lines, tenderNo, embedded = false }) {
 
 function filterStatic(items, f) {
   let out = items
+  if (f.publishedFrom || f.publishedTo) out = out.filter(r => r.published && (!f.publishedFrom || r.published.slice(0, 10) >= f.publishedFrom) && (!f.publishedTo || r.published.slice(0, 10) <= f.publishedTo))
   if ((f.q || '').trim()) {
     out = out.filter((r) => containsWords(Object.values(r).filter((v) => typeof v === 'string').join(' '), f.q))
   }
@@ -270,6 +282,7 @@ function MscFieldGrid({ draft, setF, kind, provinceOpts, fieldSuggest, onCommit 
       <SuggestField label="TBMT" value={draft.tender_no} onChange={(v) => setF('tender_no', v)} onSearch={searchField('tender_no')} suggest={fieldSuggest('tender_no')} placeholder="IB…" />
       <MultiSelectField label="Tỉnh / TP" value={draft.province} onChange={(v) => setF('province', v)} options={provinceOpts} />
       <MultiSelectField label="Bệnh viện / CĐT" value={draft.buyer} onChange={(v) => setF('buyer', v)} suggest={fieldSuggest('buyer')} />
+      {kind === 'prices' && <div className="msc-date-range"><label className="field">Từ ngày KQLCNT<DateInput className="input" aria-label="Từ ngày KQLCNT" value={draft.publishedFrom} onValueChange={v => setF('publishedFrom', v)} /></label><label className="field">Đến ngày KQLCNT<DateInput className="input" aria-label="Đến ngày KQLCNT" value={draft.publishedTo} onValueChange={v => setF('publishedTo', v)} /></label></div>}
     </div>
   )
 }
@@ -284,6 +297,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   }, [])
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState({})
+  const [appliedColumnFilters, setAppliedColumnFilters] = useState({})
   const [filtersRow, setFiltersRow] = useState(false)
   const [filterModalOpen, setFilterModalOpen] = useState(false)
   const [compactFilters, setCompactFilters] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 900px)').matches)
@@ -294,6 +308,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   const [exporting, setExporting] = useState(false)
   const [exportPct, setExportPct] = useState(0)
   const [err, setErr] = useState('')
+  const [refreshingTenders,setRefreshingTenders]=useState(false)
+  const [refreshNote,setRefreshNote]=useState('')
   const [detail, setDetail] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [loadPct, setLoadPct] = useState(null)
@@ -333,6 +349,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
 
   const filtersRef = useRef(filters)
   const columnFiltersRef = useRef(columnFilters)
+  const appliedColumnFiltersRef = useRef(appliedColumnFilters)
   const pageSizeRef = useRef(pageSize)
   const pageRef = useRef(0)
   // Cursor for every already visited page. This supports Previous without an
@@ -343,7 +360,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   pageSizeRef.current = pageSize
 
   const mergedFilters = useCallback(
-    (cf) => ({ ...filtersRef.current, ...serverFilters(cf ?? columnFiltersRef.current, SERVER_MAP) }),
+    (cf) => ({ ...filtersRef.current, ...serverFilters(cf ?? appliedColumnFiltersRef.current, SERVER_MAP) }),
     [],
   )
 
@@ -382,6 +399,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     const filterOverride = { ...(override || {}) }
     delete filterOverride.kind
     const active = { ...mergedFilters(cf), ...filterOverride }
+    if (cf) { appliedColumnFiltersRef.current = cf; setAppliedColumnFilters(cf) }
     if (activeKind === 'prices') delete active.metricQuick
     if (skipShortTextSearch(active, MSC_TEXT_KEYS, EMPTY_FILTERS)) {
       setErr(SHORT_SEARCH_NOTE)
@@ -479,10 +497,12 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
 
   const draftRef = useRef(null)
   const applyDraft = useCallback((override, options) => {
+    if (!validateDateInputs()) return
     const next = draftRef.current?.commit(override) || { ...filtersRef.current, ...(override || {}) }
+    if (next.publishedFrom && next.publishedTo && next.publishedFrom > next.publishedTo) { setErr('Từ ngày phải trước hoặc bằng đến ngày.'); return }
     filtersRef.current = next
     setFilters(next)
-    search(0, undefined, null, options)
+    search(0, columnFiltersRef.current, null, options)
   }, [search])
   const clearDraft = useCallback(() => {
     draftRef.current?.reset(EMPTY_FILTERS)
@@ -505,7 +525,33 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     setColumnFilters(next)
     search(0, next)
   }, [search])
-  const runSearch = useCallback((override, options) => search(0, undefined, override || null, options), [search])
+  const runSearch = useCallback((override, options) => search(0, columnFiltersRef.current, override || null, options), [search])
+  const refreshTenders=async()=>{
+    if(refreshingTenders)return
+    setRefreshingTenders(true);setRefreshNote('Đang cập nhật gói mới từ MSC…');setErr('')
+    try{
+      let result
+      if(localMode){
+        const started=await api.mscTenders({pages:200})
+        if(!started.ok)throw new Error(started.message||'MSC đang chạy')
+        const deadline=Date.now()+600000
+        while(Date.now()<deadline){
+          await new Promise(resolve=>setTimeout(resolve,2000))
+          const status=(await getStatus(true))?.msc
+          if(!status)throw new Error('Chưa đọc được tiến trình local. Kiểm tra trang Dữ liệu rồi thử lại.')
+          setRefreshNote(status?.message||'Đang cập nhật gói thầu…')
+          if(status?.state==='error')throw new Error(status.message)
+          if(status?.state==='idle'&&status?.progress===100){result={message:status.message};break}
+        }
+        if(!result)throw new Error('Crawl còn chạy. Xem tiến trình tại trang Dữ liệu.')
+      }else result=await cloudRefreshTenders(progress=>setRefreshNote(progress.message))
+      resetQueryCache();metricKeyRef.current=''
+      await search(0)
+      setRefreshNote(result.message||`Đã cập nhật ${result.rows} gói · ${result.added} gói mới. Danh sách đã tải lại.`)
+      window.dispatchEvent(new Event('baoan-data-updated'))
+    }catch(error){setErr(error.message);setRefreshNote('');resetQueryCache();await search(0);setErr(error.message)}
+    finally{setRefreshingTenders(false)}
+  }
   const activeCF = Object.values(columnFilters).filter((v) => String(v ?? '').trim()).length
   const exportMatchReport = useCallback(async (level) => {
     const names = { exact: 'Khop_thuoc', near: 'Gan_khop_thuoc', all: 'Khop_va_gan_khop' }
@@ -541,10 +587,10 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
   }, [localMode, kind, mergedFilters])
 
   const rows = useMemo(() => {
-    let list = applyColumnFilters(data.items, cols, columnFilters)
+    let list = applyColumnFilters(data.items, cols, appliedColumnFilters)
     list = applyMetricQuick(list, metricQuick, kind === 'tenders' ? 'msc_tenders' : 'msc_prices')
     return list
-  }, [data.items, cols, columnFilters, metricQuick, kind])
+  }, [data.items, cols, appliedColumnFilters, metricQuick, kind])
   const rowKey = useCallback((r, i) => String(r.source_id || r.tender_no || `${page}-${i}`), [page])
   const pageSizeNum = resolvePageSize(pageSize)
   const metricsItems = metricsSample ?? data.items
@@ -578,7 +624,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     const searchFn = localMode
       ? (p, size) => api.mscSearch({ kind, filters: mergedFilters(), page: p, size })
       : (p, size, cursor) => cloudMscSearch({ kind, filters: mergedFilters(), page: p, size, cursor })
-    return fetchAllPages(searchFn, { onProgress: setExportPct })
+    return fetchAllPages(searchFn, { size:5000, cap:50000, strict:true, onProgress: setExportPct })
   }, [localMode, kind, mergedFilters])
 
   const doExport = async () => {
@@ -586,7 +632,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
     setExportPct(5)
     try {
       const n = await exportSelectionOrAll({
-        columns: cols, selected: sel.selected, fetchAll, columnFilters,
+        columns: cols, selected: sel.selected, fetchAll, columnFilters: appliedColumnFilters,
         filename: kind === 'prices' ? 'MSC_don_gia' : 'MSC_goi_thau', sheetName: kind === 'prices' ? 'Don gia' : 'Goi thau',
       })
       if (!n) setErr('Không có dòng nào để xuất.')
@@ -626,7 +672,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
             <FilterDraft ref={draftRef} applied={filters}>
               {(draft, setF) => {
                 const detailActive = Object.entries(draft).filter(([k, v]) => {
-                  if (k === 'q' || k === 'metricMonths' || k === 'metricQuick') return false
+                  if (k === 'q' || k === 'metricMonths' || k === 'metricQuick' || k === 'strictDates') return false
                   return Array.isArray(v) ? v.length > 0 : String(v ?? '').trim() !== ''
                 }).length
                 return (
@@ -634,11 +680,13 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
                     {!modalFilters && (
                       <MscFieldGrid draft={draft} setF={setF} kind={kind} provinceOpts={provinceOpts} fieldSuggest={fieldSuggest} onCommit={applyDraft} />
                     )}
-                    {kind === 'tenders' && <p className="muted small">Hoạt chất và dạng bào chế được tìm trong danh mục hồ sơ đã tải. Cập nhật tại Dữ liệu → Hồ sơ gói đang mở.</p>}
+                    {modalFilters && <SuggestField label="Tìm kiếm" value={draft.q} onChange={v=>setF('q',v)} onSearch={v=>applyDraft({q:v})} suggest={fieldSuggest('q')} placeholder="Tên thuốc, hoạt chất, SĐK, mã gói, nhà thầu…"/>}
+                    {kind === 'tenders' && <p className="muted small lookup-filter-note">Hoạt chất và dạng bào chế được tìm trong danh mục hồ sơ đã tải. Cập nhật tại Dữ liệu → Hồ sơ gói đang mở.</p>}
                     {draft.metricQuick && kind === 'tenders' && (
                       <button className="btn ghost sm" type="button" onClick={() => { setMetricActiveId(null); setMetricQuick(null); applyDraft({ metricQuick: '' }) }}>Bỏ lọc chỉ số ×</button>
                     )}
                     <div className="filter-actions">
+                      {kind==='tenders'&&<button type="button" className="btn secondary" disabled={refreshingTenders||loading} onClick={refreshTenders}>{Icons.refresh} {refreshingTenders?'Đang cập nhật…':'Cập nhật gói mới'}</button>}
                       {modalFilters && (
                         <button type="button" className={`btn ghost${detailActive ? ' on' : ''}`} onClick={() => setFilterModalOpen(true)}>
                           {Icons.filter} Bộ lọc chi tiết
@@ -648,6 +696,7 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
                       <button type="button" className="btn" onClick={() => applyDraft()}>{Icons.search} Tìm kiếm</button>
                       <button type="button" className="btn secondary" onClick={clearDraft}>Xóa lọc</button>
                     </div>
+                    {refreshNote&&<p className="muted small" role="status">{refreshNote}</p>}
                     <FilterModal open={modalFilters && filterModalOpen} onClose={() => setFilterModalOpen(false)} onApply={() => applyDraft()}>
                       <MscFieldGrid draft={draft} setF={setF} kind={kind} provinceOpts={provinceOpts} fieldSuggest={fieldSuggest} onCommit={applyDraft} />
                     </FilterModal>
@@ -680,6 +729,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
           activeColumnFilters={activeCF}
           onClearColumnFilters={() => { columnFiltersRef.current = {}; setColumnFilters({}); search(0, {}) }}
         >
+          {filtersRow && <button type="button" className="btn sm" onClick={() => applyDraft()}>{Icons.search} Tìm kiếm</button>}
+          <SaveResultButton source={kind==='prices'?'msc_prices':'msc_tenders'} defaultName={`MSC · ${filters.q||filters.hoatchat||filters.ten||'Kết quả tra cứu'}`} disabled={loading||!data.items.length} getSnapshot={async()=>tableSnapshot(kind==='prices'?'MSC · Đơn giá':'MSC · Gói thầu',cols,sel.size?[...sel.selected.values()]:applyMetricQuick(applyColumnFilters(await fetchAll(),cols,appliedColumnFilters),metricQuick,kind==='prices'?'msc_prices':'msc_tenders'),{...mergedFilters(),columnFilters:appliedColumnFilters,metricQuick,selectionOnly:sel.size>0})}/>
           <button type="button" className="btn ghost sm" onClick={() => runSearch()}>{Icons.refresh} Quét lại</button>
         </TableToolbar>
         <ErrorNote>{err}</ErrorNote>
@@ -707,8 +758,8 @@ export default function MscSection({ localMode, embedded = false, filtersInModal
             </button>
           )}
           cardKeys={kind === 'prices'
-            ? ['name', 'registration', 'unit_price', 'province', 'winner']
-            : ['name', 'tender_no', 'buyer', 'bid_price', 'close_date']}
+            ? ['name', 'registration', 'unit_price', 'quantity', 'total_value', 'province', 'winner']
+            : ['name', 'tender_no', 'status_label', 'buyer', 'published', 'bid_price', 'close_date']}
           minWidth={embedded ? 720 : (kind === 'prices' ? 1100 : 950)}
           trailing={{
             label: 'Nguồn',

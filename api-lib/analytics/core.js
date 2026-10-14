@@ -33,8 +33,8 @@ export function normalizeQuery(input = {}, today = new Date().toLocaleDateString
   if (!['winner', 'manufacturer', 'registrant', 'all'].includes(role)) bad('Vai trò doanh nghiệp không hợp lệ.')
   const filters = {}
   if(input.filters && (typeof input.filters!=='object'||Array.isArray(input.filters)))bad('Bộ lọc nâng cao không hợp lệ.')
-  for (const field of ['group', 'strength', 'form', 'route', 'province']) {
-    if (input.filters?.[field]) filters[field] = String(input.filters[field]).trim().slice(0, 255)
+  for (const field of ['group', 'strength', 'form', 'route', 'province', 'company', 'unit', 'ingredient']) {
+    if (input.filters?.[field]) filters[field] = String(input.filters[field]).trim().slice(0, field==='ingredient'?2048:255)
   }
   if (filters.group && !/^[1-5]$/.test(filters.group)) bad('Nhóm kỹ thuật không hợp lệ.')
   const entity = String(input.entity || '').trim().slice(0, 512)
@@ -45,10 +45,12 @@ export function normalizeQuery(input = {}, today = new Date().toLocaleDateString
   if(mode==='territory'&&entity&&territoryField==='region'&&!Object.values(REGION_BY_CODE).includes(entity))bad('Khu vực không hợp lệ.')
   const entityMatch=input.entityMatch|| (mode==='company'?'contains':'exact')
   if(!['exact','contains'].includes(entityMatch))bad('Cách ghép thực thể không hợp lệ.')
+  if(input.includeCombinations!=null&&typeof input.includeCombinations!=='boolean')bad('Bộ lọc phối hợp không hợp lệ.')
+  const includeCombinations=input.includeCombinations!==false
   const companyFocus=input.companyFocus?String(input.companyFocus).trim():undefined
   if(companyFocus&&!['manufacturer','business'].includes(companyFocus))bad('Vai trò doanh nghiệp không hợp lệ.')
   const span = Date.parse(end) - Date.parse(start) + 86400000
-  return { version: 1, mode, entity, entityField, territoryField, role, months, start, end, comparison, entityMatch, ...(companyFocus?{companyFocus}:{}), filters,
+  return { version: 1, mode, entity, entityField, territoryField, role, months, start, end, comparison, entityMatch, includeCombinations, ...(input.companyMissing===true?{companyMissing:true}:{}), ...(companyFocus?{companyFocus}:{}), filters,
     ...(comparison==='none'?{}:{previousStart: comparison === 'yoy' ? shift(start, -12) : iso(new Date(Date.parse(start) - span)),
     previousEnd: comparison === 'yoy' ? shift(end, -12) : iso(new Date(Date.parse(start) - 86400000))}) }
 }
@@ -88,10 +90,24 @@ function predicate(q, source, adapter) {
     }else add(field,value)
   }
   if (q.entity && q.mode === 'drug') {
-    add(`${q.entityField}_key`,q.entity)
+    if(q.entityField==='ingredient'){
+      if(adapter?.prefilterDrugText){
+        const candidate=fold(q.entity).replace(/[!%_]/g,c=>`!${c}`).split(' ').join('%')
+        parts.push(`REPLACE(LOWER(ingredient),'đ','d') LIKE ?${escapeClause}`);args.push(`%${candidate}%`)
+      }
+      const term=fold(q.entity).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')
+      parts.push('ingredient_key REGEXP ?');args.push(`(^|[^a-z0-9])${term}([^a-z0-9]|$)`)
+      if(!q.includeCombinations)parts.push("REGEXP_REPLACE(ingredient_key, '[(][^()]*[)]', '') NOT REGEXP '[+;]|(^|[^0-9]),([^0-9]|$)'")
+    }else add(`${q.entityField}_key`,q.entity)
   } else if (q.entity && q.mode === 'company') {
+    const fields=q.role==='all'?(source==='dav'?(q.companyFocus==='manufacturer'?['manufacturer']:['manufacturer','registrant']):source==='msc_prices'||source==='vss'?['company','manufacturer']:['company']):[q.role==='manufacturer'?'manufacturer':q.role==='registrant'?'registrant':'company']
+    if(adapter?.prefilterCompanyText){
+      // A loose, cheap superset lets TiDB discard facts before normalizing whitespace.
+      const candidate=fold(q.entity).replace(/[!%_]/g,c=>`!${c}`).split(' ').join('%')
+      parts.push(`(${fields.map(field=>`REPLACE(LOWER(${field}),'đ','d') LIKE ?${escapeClause}`).join(' OR ')})`)
+      args.push(...fields.map(()=>`%${candidate}%`))
+    }
     if(q.role==='all'){
-      const fields=source==='dav'?(q.companyFocus==='manufacturer'?['manufacturer']:['manufacturer','registrant']):source==='msc_prices'||source==='vss'?['company','manufacturer']:['company']
       const operator=q.entityMatch==='contains'?`LIKE ?${escapeClause}`:'= ?'
       parts.push(`(${fields.map(field=>`${field}_key ${operator}`).join(' OR ')})`)
       const phrase=fold(q.entity).replace(/[!%_]/g,c=>`!${c}`)
@@ -110,11 +126,12 @@ function predicate(q, source, adapter) {
   for (const [key, value] of Object.entries(q.filters)) if(key==='province'){
     const values=provinceKeys(value);parts.push(`province_key IN (${values.map(()=>'?').join(',')})`);args.push(...values)
   }else add(key === 'group' ? 'group_key' : `${key}_key`, value)
+  if(q.companyMissing)parts.push("COALESCE(TRIM(company),'') = ''")
   // Tender headers cannot prove a drug/formulation or technical-group match.
   const davGeo=Boolean(adapter?.geoSources?.includes?.('dav')||adapter?.geoSources?.has?.('dav'))
   const davTerritory=q.mode==='territory'&&q.entity&&['province','region'].includes(q.territoryField)&&davGeo
   const unavailable = source === 'msc_tenders' && (q.mode === 'drug' && q.entity || Object.keys(q.filters).some(k => k !== 'province'))
-    || source === 'dav' && (q.mode === 'territory' && q.entity && !davTerritory || q.filters.province&&!davGeo || q.filters.group || q.role === 'winner' && q.mode === 'company' && q.entity)
+    || source === 'dav' && (q.mode === 'territory' && q.entity && !davTerritory || q.filters.province&&!davGeo || q.filters.group || q.filters.unit || q.filters.company || q.companyMissing || q.role === 'winner' && q.mode === 'company' && q.entity)
     || source !== 'dav' && q.mode === 'company' && q.role === 'registrant' && q.entity
   return { sql: parts.length ? parts.join(' AND ') : '1=1', args, unavailable }
 }
@@ -142,7 +159,7 @@ const missing = {
   guarantee: 'Chưa có mức bảo đảm dự thầu và điều khoản tương ứng.',
   hospitalTier: 'Chưa có phân hạng cơ sở y tế đã xác minh.',
 }
-export async function overview(adapter, input) {
+export async function overview(adapter, input, onSource, onProgress) {
   const query = normalizeQuery(input)
   const results = await Promise.all(SOURCES.map(async source => {
     const started=Date.now()
@@ -158,36 +175,64 @@ export async function overview(adapter, input) {
       const totalRegistrations=source==='dav'?'COUNT(DISTINCT registration)':'NULL'
       const wonPackages=['msc_prices','msc_tenders'].includes(source)?"COUNT(DISTINCT NULLIF(tender_no,''))":'NULL'
       const coordinate="CONCAT(COALESCE(ingredient,''),' · ',COALESCE(strength,''),' · ',COALESCE(form,''),' · ',COALESCE(group_key,''),' · ',COALESCE(unit,''))"
-      const dimensions=source==='dav'?(query.mode==='company'?[['manufacturer','manufacturer'],['registrant','registrant']]:[]):source==='msc_tenders'?[['month','SUBSTR(date,1,7)'],['status','status']]:[['month', 'SUBSTR(date,1,7)'], ['month_group', "CONCAT(SUBSTR(date,1,7),'|',group_key)"], ['group','group_key'],['province','province'],['ingredient','ingredient'],['company','company'],['manufacturer','manufacturer'],['facility','facility'],['price_coordinate',coordinate],['unit',"COALESCE(NULLIF(LOWER(TRIM(unit)),''),'Chưa rõ đơn vị')"]]
-      if(['msc_prices','vss'].includes(source)&&query.entity){
-        dimensions.push(['unit_month',`CONCAT(SUBSTR(date,1,7),'|',${coordinate})`],['product',"CONCAT(COALESCE(name,''),' · ',COALESCE(strength,''),' · ',COALESCE(form,''),' · ',COALESCE(unit,''),' · ',COALESCE(registration,''))"])
-      }
+      const dimensions=source==='dav'?(query.mode==='company'?[['manufacturer','manufacturer'],['registrant','registrant']]:[]):source==='msc_tenders'?[['month','SUBSTR(date,1,7)'],['status','status']]:[['month', 'SUBSTR(date,1,7)'], ['month_group', "CONCAT(SUBSTR(date,1,7),'|',group_key)"], ['group','group_key'],['form',"COALESCE(NULLIF(TRIM(form),''),'Chưa rõ dạng bào chế')"],['province','province'],['ingredient','ingredient'],['company','company'],['manufacturer','manufacturer'],['facility','facility'],['price_coordinate',coordinate],['unit',"CASE WHEN LOWER(TRIM(unit)) IN ('viên','vien') AND NULLIF(TRIM(form),'') IS NOT NULL THEN LOWER(TRIM(form)) ELSE COALESCE(NULLIF(LOWER(TRIM(unit)),''),'Chưa rõ đơn vị') END"]]
+      if(['msc_prices','vss'].includes(source))dimensions.push(['unit_month',`CONCAT(SUBSTR(date,1,7),'|',${coordinate})`])
+      if(['msc_prices','vss'].includes(source)&&query.entity)dimensions.push(['product',"CONCAT(COALESCE(name,''),' · ',COALESCE(strength,''),' · ',COALESCE(form,''),' · ',COALESCE(unit,''),' · ',COALESCE(registration,''))"])
       const branches = dimensions.map(([kind, field]) => {
         const label=adapter.text?adapter.text(field):field
         const rowMetrics=kind==='group'?metrics:['unit','unit_month','price_coordinate','product'].includes(kind)?metrics.replace('MIN(price) AS min_price, MAX(price) AS max_price','NULL AS min_price, NULL AS max_price'):'COUNT(*) AS count, SUM(amount) AS amount, NULL AS quantity, NULL AS priced_quantity, NULL AS priced_amount, NULL AS min_price, NULL AS max_price, MAX(updated_at) AS updated_at'
-        const currentOnly=['province','ingredient','company','facility','product','manufacturer','registrant'].includes(kind)?"period='current'":''
-        const complete=kind==='price_coordinate'?"COALESCE(ingredient,'')<>'' AND COALESCE(strength,'')<>'' AND COALESCE(form,'')<>'' AND group_key<>'' AND COALESCE(unit,'')<>''":''
-        const where=[currentOnly,complete].filter(Boolean)
+        const currentOnly=['province','ingredient','company','facility','product','manufacturer','registrant','price_coordinate','unit_month'].includes(kind)?"period='current'":''
+        const where=[currentOnly].filter(Boolean)
         const sql = `SELECT '${kind}' AS kind, period, ${label} AS label, ${rowMetrics}, NULL AS active, NULL AS expiring, NULL AS new_registrations, NULL AS unknown_expiry, NULL AS total_registrations, NULL AS won_packages FROM filtered ${where.length?'WHERE '+where.join(' AND '):''} GROUP BY period, ${field}`
-        return ['province','ingredient','company','facility','product','unit_month','price_coordinate','manufacturer','registrant'].includes(kind) ? `SELECT * FROM (${sql} ORDER BY CAST(amount AS DECIMAL(28,3)) DESC, count DESC LIMIT ${['unit_month','price_coordinate'].includes(kind)?200:30}) rank_${kind}` : sql
+        // Resolve the aggregate explicitly: TiDB can bind CAST(amount) to a
+        // source row instead of SUM(amount), changing which groups enter Top N.
+        return ['province','ingredient','company','facility','product','unit_month','price_coordinate','manufacturer','registrant'].includes(kind) ? `SELECT * FROM (${sql} ORDER BY CAST(SUM(amount) AS DECIMAL(28,3)) DESC, COUNT(*) DESC, ${label} LIMIT ${['unit_month','price_coordinate'].includes(kind)?200:30}) rank_${kind}` : sql
       })
       // Only bounded aggregate rows leave the database; top lists are reduced below.
       const periods=source==='dav'||query.comparison==='none'?"SELECT *, 'current' AS period FROM source_filtered":`SELECT *, 'current' AS period FROM source_filtered WHERE date >= '${query.start}' AND date <= '${query.end}' UNION ALL SELECT *, 'previous' AS period FROM source_filtered WHERE date >= '${query.previousStart}' AND date <= '${query.previousEnd}'`
       // Overlapping 24-month/YoY windows each retain their own complete records.
-      const sql = `WITH source_filtered AS ${adapter.materialize&&source!=='dav'&&query.comparison!=='none'?'MATERIALIZED ':''}(SELECT * FROM (${base}) canonical WHERE ${p.sql} AND ${dates}), filtered AS (${periods}) SELECT 'summary' AS kind, period, ${adapter.text?adapter.text("''"):"''"} AS label, ${metrics}, ${summary}, ${totalRegistrations} AS total_registrations, ${wonPackages} AS won_packages FROM filtered GROUP BY period${branches.length?' UNION ALL '+branches.join(' UNION ALL '):''} LIMIT 20001`
-      const rows = (await adapter.query(source, sql, p.args)).map(row=>{
+      const cte = `WITH source_filtered AS ${adapter.materialize&&source!=='dav'&&query.comparison!=='none'?'MATERIALIZED ':''}(SELECT * FROM (${base}) canonical WHERE ${p.sql} AND ${dates}), filtered AS (${periods}) `
+      const summarySql = `SELECT 'summary' AS kind, period, ${adapter.text?adapter.text("''"):"''"} AS label, ${metrics}, ${summary}, ${totalRegistrations} AS total_registrations, ${wonPackages} AS won_packages FROM filtered GROUP BY period`
+      // TiDB can silently omit consumers of a shared CTE in a multi-branch UNION.
+      // Read each bounded aggregate separately on cloud; SQLite retains its single scan.
+      const records=[]
+      const statements=adapter.separateAggregates?[summarySql,...branches]:[[summarySql,...branches].join(' UNION ALL ')]
+      let completed=0
+      onProgress?.({source,completed,total:statements.length})
+      // Bound concurrent reads to two per source, including uncached entities.
+      for(let index=0;index<statements.length;index+=2){
+        const batches=await Promise.all(statements.slice(index,index+2).map(async statement=>{
+          const rows=await adapter.query(source,cte+statement,p.args)
+          onProgress?.({source,completed:++completed,total:statements.length})
+          return rows
+        }))
+        for(const batch of batches)records.push(...batch)
+      }
+      const rows = records.map(row=>{
         const value={...row}
         for(const key of ['count','active','expiring','new_registrations','unknown_expiry','total_registrations','won_packages'])if(value[key]!=null)value[key]=Number(value[key])
         return value
       })
       if (rows.length > 20000) throw Object.assign(new Error('Phạm vi quá rộng.'),{userMessage:'Phạm vi quá rộng; hãy chọn thực thể hoặc bộ lọc cụ thể hơn.'})
-      const compact = rows.filter(r => ['summary','month','month_group','group','status','unit','unit_month','price_coordinate'].includes(r.kind))
+      const compact = rows.filter(r => ['summary','month','month_group','group','form','status','unit','unit_month','price_coordinate'].includes(r.kind))
       for (const kind of ['province', 'ingredient', 'company', 'facility','product','manufacturer','registrant']) compact.push(...rows.filter(r => r.kind === kind && r.period === 'current' && r.label).sort((a,b) => Number(b.amount || b.count) - Number(a.amount || a.count)).slice(0,30))
       return [source, { status: 'available', rows: compact, durationMs:Date.now()-started, updatedAt:rows.find(r=>r.kind==='summary'&&r.period==='current')?.updated_at||null, linkedTenderCoverage: linked?'Chỉ gói có dòng thuốc MSC liên kết bằng mã thầu; chưa bao gồm TBMT thiếu chi tiết thuốc.':undefined, comparisonMissing: query.comparison==='none'?false:source !== 'dav' && !rows.some(r => r.kind === 'summary' && r.period === 'previous' && Number(r.count) > 0), ...(source==='vss'?{wonPackagesUnavailableReason:'Nguồn VSS không có mã gói ổn định để đếm số gói riêng biệt.'}:{}) }]
     } catch (e) { return [source, { status: 'unavailable', reason: e.userMessage||'Nguồn chưa sẵn sàng. Thử lại hoặc chọn bộ lọc hẹp hơn.', rows: [] }] }
-  }))
-  const data={ version: 2, query, generatedAt: new Date().toISOString(), sources: Object.fromEntries(results), missing, coverage: 'unknown', cached: false }
+  }).map(async pending=>{const result=await pending;onSource?.(result[0],result[1]);return result}))
+  const data={ version: 2, aggregationRevision: 3, query, generatedAt: new Date().toISOString(), sources: Object.fromEntries(results), missing, coverage: 'unknown', cached: false }
   return {...data,baseline:rules(data)}
+}
+async function enrichRegistrants(adapter,q,items){
+// Only DAV identifies the registrant. Never substitute the winning contractor.
+  const keys=value=>[...new Set([fold(value),...String(value||'').split(/[();,]/).map(fold)].filter(Boolean))]
+  const registrations=[...new Set(items.flatMap(row=>keys(row.registration)))]
+  let registrantUnavailable=false
+  if(registrations.length)try {
+      const dav=await adapter.relation('dav',{...q,mode:'macro',entity:'',filters:{}},'detail')
+      const records=await adapter.query('dav',`SELECT DISTINCT registration, previous_registration, registrant FROM (${dav}) dav_products WHERE (registration_key IN (${registrations.map(()=>'?').join(',')}) OR previous_registration_key IN (${registrations.map(()=>'?').join(',')})) AND registrant IS NOT NULL AND registrant <> ''`,[...registrations,...registrations])
+      for(const row of items){const names=[...new Set(records.filter(record=>[...keys(record.registration),...keys(record.previous_registration)].some(key=>keys(row.registration).includes(key))).map(record=>record.registrant))];row.registrant=names.join('; ')||null}
+  }catch{registrantUnavailable=true}
+  return registrantUnavailable
 }
 export async function detail(adapter, input) {
   const q = normalizeQuery(input.query || input), source = input.source || 'msc_prices'
@@ -195,30 +240,24 @@ export async function detail(adapter, input) {
   const page = Math.max(0, Math.min(1000, Math.floor(Number(input.page) || 0)))
   const {base,p}=await sourceQuery(adapter,q,source,'detail')
   if(input.tenderNo){if(!['msc_prices','msc_tenders'].includes(source))bad('Nguồn không có mã TBMT.');p.sql+=' AND tender_no = ?';p.args.push(String(input.tenderNo).slice(0,100))}
+  if(input.companyMissing===true)p.sql+=" AND COALESCE(TRIM(company),'') = ''"
   if (p.unavailable) return { items: [], hasMore: false, page, source, reason: 'Nguồn không hỗ trợ bộ lọc này.' }
   const date = source === 'dav' ? '1=1' : q.months==='all'?'(date IS NULL OR (date >= ? AND date <= ?))':'date >= ? AND date <= ?'
   const args = [...p.args, ...(source === 'dav' ? [] : [q.start, q.end])]
   if(input.panel==='products') {
     if(!['msc_prices','vss'].includes(source)) bad('Sản phẩm cần dữ liệu thuốc MSC hoặc VSS.')
     const dimension=['name','strength','form','unit','registration','group_key']
-    const items=await adapter.query(source,`SELECT MIN(id) AS id, ${dimension.join(',')}, SUM(amount) AS amount, SUM(quantity) AS quantity FROM (${base}) canonical WHERE ${p.sql} AND ${date} GROUP BY ${dimension.join(',')} ORDER BY CAST(SUM(amount) AS DECIMAL(28,3)) DESC, ${dimension.join(',')} LIMIT 30`,args)
-    // Only DAV identifies the registrant. Never substitute the winning contractor.
-    const keys=value=>[...new Set([fold(value),...String(value||'').split(/[();,]/).map(fold)].filter(Boolean))]
-    const registrations=[...new Set(items.flatMap(row=>keys(row.registration)))]
-    let registrantUnavailable=false
-    if(registrations.length)try {
-      const dav=await adapter.relation('dav',{...q,mode:'macro',entity:'',filters:{}},'detail')
-      const records=await adapter.query('dav',`SELECT DISTINCT registration, registrant FROM (${dav}) dav_products WHERE registration_key IN (${registrations.map(()=>'?').join(',')}) AND registrant IS NOT NULL AND registrant <> ''`,registrations)
-      for(const row of items){const names=[...new Set(records.filter(record=>keys(record.registration).some(key=>keys(row.registration).includes(key))).map(record=>record.registrant))];row.registrant=names.join('; ')||null}
-    }catch{registrantUnavailable=true}
+    const items=await adapter.query(source,`SELECT MIN(id) AS id, MIN(ingredient) AS ingredient, ${dimension.join(',')}, SUM(amount) AS amount, SUM(quantity) AS quantity FROM (${base}) canonical WHERE ${p.sql} AND ${date} GROUP BY ${dimension.join(',')} ORDER BY CAST(SUM(amount) AS DECIMAL(28,3)) DESC, ${dimension.join(',')} LIMIT 30`,args)
+    const registrantUnavailable=await enrichRegistrants(adapter,q,items)
     return {source,page:0,items,hasMore:false,panel:'products',registrantUnavailable}
   }
   if(input.panel==='competition') {
     if(!['msc_prices','vss'].includes(source)) bad('Ma trận cần dữ liệu thuốc MSC hoặc VSS.')
-    const dimension=['ingredient','strength','form','group_key','company','unit']
-    const sql=`SELECT CONCAT(COALESCE(ingredient,''),'|',COALESCE(strength,''),'|',COALESCE(form,''),'|',COALESCE(group_key,''),'|',COALESCE(company,''),'|',COALESCE(unit,'')) AS id, ${dimension.join(',')}, COUNT(*) AS count, SUM(amount) AS amount, SUM(quantity) AS quantity FROM (${base}) canonical WHERE ${p.sql} AND ${date} GROUP BY ${dimension.join(',')} ORDER BY CAST(SUM(amount) AS DECIMAL(28,3)) DESC, ingredient, strength, form, group_key, company, unit LIMIT 51 OFFSET ${page*50}`
+    const dimension=['ingredient','strength','form','group_key','company','unit','registration']
+    const sql=`SELECT CONCAT(COALESCE(ingredient,''),'|',COALESCE(strength,''),'|',COALESCE(form,''),'|',COALESCE(group_key,''),'|',COALESCE(company,''),'|',COALESCE(unit,''),'|',COALESCE(registration,'')) AS id, ${dimension.join(',')}, COUNT(*) AS count, SUM(amount) AS amount, SUM(quantity) AS quantity FROM (${base}) canonical WHERE ${p.sql} AND ${date} GROUP BY ${dimension.join(',')} ORDER BY CAST(SUM(amount) AS DECIMAL(28,3)) DESC, ingredient, strength, form, group_key, company, unit LIMIT 51 OFFSET ${page*50}`
     const rows=await adapter.query(source,sql,args)
-    return {source,page,items:rows.slice(0,50),hasMore:rows.length>50,panel:'competition'}
+    const items=rows.slice(0,50),registrantUnavailable=await enrichRegistrants(adapter,q,items)
+    return {source,page,items,hasMore:rows.length>50,panel:'competition',registrantUnavailable}
   }
   // Stable source identity orders pagination; each source stores one row per identity.
   const rows = await adapter.query(source, `SELECT * FROM (${base}) canonical WHERE ${p.sql} AND ${date} ORDER BY date DESC, id ASC LIMIT 51 OFFSET ${page * 50}`, args)

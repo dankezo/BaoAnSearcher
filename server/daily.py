@@ -37,7 +37,7 @@ def finished_today(block: dict | None = None, today: str | None = None) -> bool:
     block = _crawl() if block is None else block
     today = today or _today()
     daily = block.get("daily") if isinstance(block.get("daily"), dict) else {}
-    return daily.get("date") == today and all(daily.get(name) == "ok" for name in ("regulatory", "dav", "msc", "vss"))
+    return daily.get("date") == today and all(daily.get(name) == "ok" for name in ("regulatory", "dav", "msc", "msc_ycbg", "vss"))
 
 
 def _save_daily(step: str, state: str, message: str = "") -> None:
@@ -95,6 +95,19 @@ def _run_vss() -> None:
     rebuild_heat()
 
 
+def _run_ycbg() -> None:
+    from .ycbg import crawl
+    from .common import update_status
+    try:
+        result = crawl()
+        if result['errors']:
+            raise RuntimeError(f"YCBG còn {result['errors']} hồ sơ lỗi; sẽ thử lại.")
+    except Exception as exc:
+        update_status('msc_ycbg',state='error',message='YCBG chưa hoàn tất: '+type(exc).__name__)
+        raise
+    update_status('msc_ycbg', state='idle', progress=100, count=result['count'], meta=result, updated=result['updated'])
+
+
 def _run_regulatory(force: bool = False) -> None:
     command = ["node", str(ROOT / "scripts" / "crawl_regulatory.mjs")]
     if force:
@@ -127,7 +140,7 @@ def run_daily(force: bool = False) -> dict:
             return {"ok": False, "message": "Tự cập nhật đang tắt."}
         if not force and finished_today(block):
             return {"ok": True, "skipped": True, "message": "Hôm nay đã cập nhật pháp luật, DAV, MSC và VSS."}
-        steps = (("regulatory", _run_regulatory), ("dav", _run_dav), ("msc", _run_msc), ("vss", _run_vss))
+        steps = (("regulatory", _run_regulatory), ("msc_ycbg", _run_ycbg), ("dav", _run_dav), ("msc", _run_msc), ("vss", _run_vss))
         failures = []
         for name, action in steps:
             current = (_crawl().get("daily") or {})

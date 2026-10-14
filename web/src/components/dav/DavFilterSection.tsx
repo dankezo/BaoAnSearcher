@@ -174,13 +174,14 @@ export function DavFilterSection({
     <>
       <div className="filters-left">
         <div className="filter-actions">
-          <TagFilterDropdown
+          {compactFilters && <SuggestField label="Tìm kiếm" value={draft.q} onChange={v=>setLocal('q',v)} onSearch={v=>commit({q:v})} suggest={fieldSuggest('q')} placeholder="Tên thuốc, hoạt chất, SĐK, công ty…"/>}
+          {!compactFilters && <TagFilterDropdown
             selectedTags={draftTags}
             onChange={setDraftTags}
             configs={configs}
             userId={userId}
             deferApply
-          />
+          />}
           <button type="button" className="btn" onClick={() => commit()}>{Icons.search} Tìm kiếm</button>
           {modalFilters ? (
             <button
@@ -231,6 +232,7 @@ export function DavFilterSection({
         onClose={() => setFilterModalOpen(false)}
         onApply={() => commit()}
       >
+        {compactFilters && <TagFilterDropdown selectedTags={draftTags} onChange={setDraftTags} configs={configs} userId={userId} deferApply/>}
         {detailFields}
       </FilterModal>
     </>

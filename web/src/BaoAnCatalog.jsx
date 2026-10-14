@@ -85,6 +85,7 @@ export default function BaoAnCatalog({ localMode }) {
               <th>Dạng bào chế</th>
               <th>Đường dùng</th>
               <th>SĐK</th>
+              <th>Nhóm thầu</th>
             </tr>
           </thead>
           <tbody>
@@ -103,6 +104,10 @@ export default function BaoAnCatalog({ localMode }) {
                 <td>{row.form || '—'}</td>
                 <td>{row.route || '—'}</td>
                 <td className="mono">{row.reg || '—'}</td>
+                <td>
+                  {row.tenderGroup ? `Nhóm ${row.tenderGroup}` : 'Cần rà soát'}
+                  {!!row.groupEvidence?.length && <details><summary>Nhóm từng trúng: {[...new Set(row.groupEvidence.map(x=>x.group))].join(', ')}</summary><p className="muted small">Lịch sử trúng thầu dùng để tham chiếu; chưa xác nhận nhóm đủ điều kiện hiện tại.</p>{row.groupEvidence.map((e,i)=><p key={i} className="small">{e.source} · {e.group} · SĐK {e.matched_registration} · {e.row_count} dòng · {e.years?.join(', ')}{e.examples?.map((example,j)=><span key={j}> · {example.tender_no||example.buyer}{example.source_url && <a href={example.source_url} target="_blank" rel="noreferrer"> Nguồn ↗</a>}</span>)}</p>)}</details>}
+                </td>
               </tr>
             ))}
           </tbody>

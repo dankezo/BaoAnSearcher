@@ -6,6 +6,7 @@ import { GROUP_COLORS } from './mapGeo'
 import { resolveBidStatusFromRow } from './bidStatus'
 import { Modal } from './components'
 import { metricHelp } from './metricHelp'
+import { formatNumber } from './numbers'
 
 const MONTH_MS = 30.4375 * 24 * 3600 * 1000
 const DAY_MS = 86400000
@@ -52,7 +53,7 @@ export function fmtVndCompact(n) {
   if (amount >= 1e9) {
     const ty = amount / 1e9
     const digits = ty >= 100 ? 0 : ty >= 10 ? 1 : 3
-    const text = ty.toLocaleString('vi-VN', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+    const text = ty.toLocaleString('vi-VN', { maximumFractionDigits: digits })
     return `${sign}${text} tỷ VND`
   }
   if (amount >= 1e6) {
@@ -555,7 +556,7 @@ export function computeMscTenderCompound(items, total) {
       subMetrics: [
         { id: 'open_dxt', label: 'Đang mở', count: fmtInt(openN), tone: 'ok', patch: { _quick: 'open_dxt' } },
         { id: 'reviewing', label: 'Đang xét', count: fmtInt(reviewN), tone: 'warn', patch: { _quick: 'reviewing' } },
-        { id: 'new_72h', label: 'Mới <72h', count: fmtInt(newN), tone: 'ok', patch: { _quick: 'new_72h' } },
+        { id: 'new_72h', label: 'Gói mới trong vòng 72h', count: fmtInt(newN), tone: 'ok', patch: { _quick: 'new_72h' } },
         { id: 'closing_7d', label: 'Sắp đóng', count: fmtInt(closingN), tone: 'danger', patch: { _quick: 'closing_7d' } },
       ],
       segments: [
@@ -812,7 +813,7 @@ export function pricePointTooltip(point, group = '') {
   const quantities = new Map()
   for (const part of parts) quantities.set(part.unit, (quantities.get(part.unit) || 0) + Number(part.qty || 0))
   const total = [...quantities].map(([unit, qty]) => `${fmtInt(qty)} ${unit}`).join(' · ')
-  return { total, revenue: parts.reduce((sum, p) => sum + Number(p.revenue || 0), 0), rows: [...parts].sort((a,b) => Number(b.revenue || 0)-Number(a.revenue || 0)), lines: parts.map(p => {
+  return { total, revenue: parts.length?parts.reduce((sum, p) => sum + Number(p.revenue || 0), 0):Number(point?.revenue)||0, rows: [...parts].sort((a,b) => Number(b.revenue || 0)-Number(a.revenue || 0)), lines: parts.map(p => {
     const qty = Number(p.qty) || 0
     const price = qty ? Number(p.revenue) / qty : null
     const average = p.minPrice != null && p.maxPrice != null && Number(p.minPrice) !== Number(p.maxPrice)
@@ -857,7 +858,7 @@ export function MonthTrend({ series = [], groupViews = {}, selectedGroup = '' })
   const tooltip = point ? pricePointTooltip(point, hover.group) : null
   return <div className="price-trend" ref={boxRef} onMouseLeave={() => setHover(current => current?.pinned ? current : null)}>
     <div className="price-trend-plot">
-      <svg viewBox="0 0 100 38" preserveAspectRatio="none" role="img" aria-label="Xu hướng doanh thu 12 tháng theo nhóm">
+      <svg viewBox="0 0 100 38" preserveAspectRatio="none" role="img" aria-label="Xu hướng giá trị trúng thầu theo tháng và nhóm">
         <line x1="0" x2="100" y1="36" y2="36" className="price-trend-axis" vectorEffect="non-scaling-stroke" />
         {hover && <line x1={xAt(hover.index)} x2={xAt(hover.index)} y1="1" y2="36" className="price-trend-grid is-on" vectorEffect="non-scaling-stroke" />}
         {lines.map(line => {
@@ -871,7 +872,7 @@ export function MonthTrend({ series = [], groupViews = {}, selectedGroup = '' })
       </svg>
       {lines.map(line => line.series.map((p, index) => <button
         key={`${line.group}:${p.key}`} type="button" className="price-trend-point"
-        aria-label={`${line.group ? `N${line.group}` : 'Tổng'} · ${p.label || p.key} · ${pricePointTooltip(p, line.group).lines.join('; ') || 'Không có giao dịch'}`}
+        aria-label={`${line.group ? `N${line.group}` : 'Tổng'} · ${p.label || p.key} · ${pricePointTooltip(p, line.group).lines.join('; ') || fmtMoney(p.revenue)}`}
         style={{ left: `${xAt(index)}%`, top: `${yAt(p.revenue) / 38 * 100}%`, '--point-color': line.color, zIndex: selectedGroup === line.group ? 3 : !line.group ? 2 : 1, opacity: !line.group || selectedGroup === line.group || hover?.group === line.group && hover?.index === index ? 1 : 0.5 }}
         onMouseEnter={() => setHover(current => current?.pinned ? current : { group: line.group, index })} onFocus={() => setHover(current => current?.pinned ? current : { group: line.group, index })}
         onClick={() => setHover({ group: line.group, index, pinned: true })} onBlur={event => { if (!boxRef.current?.contains(event.relatedTarget)) setHover(current => current?.pinned ? current : null) }} />))}
@@ -913,7 +914,7 @@ function ProvinceRank({ title, note, rows, loading, empty, renderValue, onPick, 
   )
 }
 
-export function MscPriceSlice({ view, loading, onProvince, activeProvince = '' }) {
+export function MscPriceSlice({ view, loading, onProvince, activeProvince = '', source = 'msc_prices' }) {
   const [selectedGroup, setSelectedGroup] = useState('')
   const stripRef = useRef(null)
   useEffect(() => { setSelectedGroup('') }, [view])
@@ -932,11 +933,15 @@ export function MscPriceSlice({ view, loading, onProvince, activeProvince = '' }
   const groupTotal = groups.reduce((sum, value) => sum + (Number(value) || 0), 0)
   const months = Number(view?.months) || 12
   const yoyClass = view?.yoy == null ? 'flat' : view.yoy < 0 ? 'neg' : 'pos'
+  const quantityByUnit = new Map()
+  for (const point of view?.series || []) for (const part of point.breakdown || []) quantityByUnit.set(part.unit || 'đơn vị', (quantityByUnit.get(part.unit || 'đơn vị') || 0) + Number(part.qty || 0))
+  const quantities = view?.quantities?.length ? view.quantities : quantityByUnit.size ? [...quantityByUnit].map(([unit,quantity])=>({unit,quantity})) : view?.quantity != null ? [{unit:'đơn vị',quantity:view.quantity}] : []
   return (
-    <aside ref={stripRef} className={`price-strip${loading ? ' is-loading' : ''}`} aria-label="Chỉ số đơn giá" aria-busy={loading}>
+    <aside ref={stripRef} className={`price-strip${source==='vss'?' vss-price-strip':''}${loading ? ' is-loading' : ''}`} aria-label={source==='vss'?'Chỉ số BHYT VSS':'Chỉ số đơn giá'} aria-busy={loading}>
       <div className="price-strip-kpi">
-        <span>Doanh thu {months} tháng</span>
-        <strong>{fmtMoney(view?.revenue)}</strong>
+        <span>{view?.range?.from?`Giá trị ${view.range.from.split('-').reverse().join('/')}–${view.range.to.split('-').reverse().join('/')}`:`Giá trị trúng thầu ${months} tháng`}</span>
+        <div className="price-strip-main-value"><strong title={formatNumber(view?.revenue||0)+' đồng'}>{fmtMoney(view?.revenue)}</strong>{quantities.length>0&&<small className="price-strip-quantities">/ {quantities.slice(0,2).map(row=>`${formatNumber(row.quantity)} ${row.unit||'đơn vị'}`).join(' · ')}</small>}</div>
+        {quantities.length>2&&<details className="stat-quantity-detail"><summary>+ {quantities.length-2} đơn vị khác</summary><dl>{quantities.slice(2).map(row=><div key={row.unit||'unknown'}><dt>{row.unit||'Chưa rõ ĐVT'}</dt><dd>{formatNumber(row.quantity)}</dd></div>)}</dl></details>}
         <em className={yoyClass}>{view?.yoy == null ? 'Chưa có cùng kỳ' : `${fmtPct(view.yoy)} cùng kỳ`}</em>
         <div className="price-strip-share">
           <span>Nhóm 1–5</span>
@@ -957,13 +962,13 @@ export function MscPriceSlice({ view, loading, onProvince, activeProvince = '' }
         </div>
       </div>
       <div className="price-strip-trend">
-        <div className="price-trend-heading"><span>{trendRangeLabel()}</span><div className="price-group-picks">
+        <div className="price-trend-heading"><span>{view?.range?(source==='vss'?'Xu hướng theo ngày bắt đầu HĐ':'Xu hướng theo ngày KQLCNT'):trendRangeLabel()}</span><div className="price-group-picks">
           {Object.entries(baseView?.groupViews || {}).filter(([, group]) => group.coverage?.records > 0).map(([g]) => <button type="button" key={g} aria-pressed={selectedGroup === g} onClick={() => setSelectedGroup(selectedGroup === g ? '' : g)}><i style={{ background: GROUP_COLORS[Number(g) - 1] }} />N{g}</button>)}
         </div></div>
         <MonthTrend series={baseView?.series || []} groupViews={baseView?.groupViews || {}} selectedGroup={selectedGroup} />
-        {view?.coverage && <small className="price-coverage" role="status">{view.coverage.from ? `Đã tải: ${view.coverage.from} – ${view.coverage.to} · ${fmtInt(view.coverage.records)} dòng.` : 'Chưa có dữ liệu theo bộ lọc.'} {!view.coverage.previousRecords && ' Chưa có dữ liệu cùng kỳ năm trước; cần bổ sung lịch sử MSC để tính tăng trưởng.'}</small>}
+        {source!=='vss'&&view?.coverage && <small className="price-coverage" role="status">{view.coverage.from ? `Đã tải: ${view.coverage.from} – ${view.coverage.to} · ${fmtInt(view.coverage.records)} dòng.` : 'Chưa có dữ liệu theo bộ lọc.'} {!view.coverage.previousRecords && ' Chưa có dữ liệu cùng kỳ năm trước; cần bổ sung lịch sử MSC để tính tăng trưởng.'}</small>}
       </div>
-      <ProvinceRank
+      {source==='vss'?<dl className="vss-strip-counts"><div><dt title="Số bản ghi trúng thầu, chưa phải số mã TBMT riêng biệt">Số phần/lô</dt><dd>{fmtInt(view?.lots??0)}</dd></div><div><dt title="Số cơ sở y tế khác nhau trong bộ lọc">CSYT</dt><dd>{fmtInt(view?.facilities??0)}</dd></div></dl>:<ProvinceRank
         title="Top doanh thu tỉnh"
         rows={top}
         loading={loading}
@@ -971,7 +976,7 @@ export function MscPriceSlice({ view, loading, onProvince, activeProvince = '' }
         onPick={onProvince}
         active={activeProvince}
         renderValue={(row) => <em>{fmtMoney(row.value)}</em>}
-      />
+      />}
     </aside>
   )
 }
@@ -1040,11 +1045,12 @@ export function MscTenderSlice({ view, loading, activeId, onFilter, onExportMatc
                 type="button"
                 title={metricHelp({ id: 'match_exact' })}
                 className="match-stat-hit"
+                aria-pressed={activeId === 'match_exact'}
                 onClick={() => onFilter?.({ _quick: 'match_exact' }, 'match_exact')}
               >
                 <span className="match-dot exact" aria-hidden="true">!</span>
                 <strong>{fmtInt(exact)}</strong>
-                <span>Có đầu thuốc khớp!</span>
+                <span>Khớp</span>
               </button>
               {onExportMatch && (
                 <ExcelDownload
@@ -1059,11 +1065,12 @@ export function MscTenderSlice({ view, loading, activeId, onFilter, onExportMatc
                 type="button"
                 title={metricHelp({ id: 'match_near' })}
                 className="match-stat-hit"
+                aria-pressed={activeId === 'match_near'}
                 onClick={() => onFilter?.({ _quick: 'match_near' }, 'match_near')}
               >
                 <span className="match-dot near" aria-hidden="true">!</span>
                 <strong>{fmtInt(near)}</strong>
-                <span>Có đầu thuốc cần rà soát</span>
+                <span>Gần khớp</span>
               </button>
               {onExportMatch && (
                 <ExcelDownload
@@ -1089,7 +1096,7 @@ export function MscTenderSlice({ view, loading, activeId, onFilter, onExportMatc
           <ul className="tender-rhythm">
             {[
               ['open_all', 'Đang mở', view?.openCount],
-              ['new_72h', 'Mới 72 giờ', view?.newCount],
+              ['new_72h', 'Gói mới trong vòng 72h', view?.newCount],
               ['closing_7d', 'Sắp đóng', view?.closingCount],
               ['reviewing', 'Đang xét', view?.reviewCount],
             ].map(([id, label, count]) => <li key={id}><button type="button" aria-pressed={activeId === id} className={activeId === id ? 'on' : ''} title={metricHelp({ id, label })} onClick={() => onFilter?.({ _quick: id }, id)}><span>{label}</span><strong>{fmtInt(count)}</strong><span aria-hidden="true">↗</span></button></li>)}

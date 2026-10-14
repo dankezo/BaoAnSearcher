@@ -72,7 +72,7 @@ export function StatCards({
       <dl>
         <div>
           <dt>{range?`Giá trị ${range.from?`từ ${day(range.from)} `:''}đến ${day(range.to)}`:`Giá trị ${months} tháng`}</dt>
-          <dd>{fmtVndCompact(stats.value)}{quantities.length>0&&<span className="stat-quantities"> / {quantities.slice(0,2).map(row=>`${fmtInt(row.quantity)} ${row.unit||'chưa rõ ĐVT'}`).join(' · ')}</span>}{quantities.length>2&&<details className="stat-quantity-detail"><summary>+ {quantities.length-2} đơn vị khác</summary><dl>{quantities.slice(2).map(row=><div key={row.unit||'unknown'}><dt>{row.unit||'Chưa rõ ĐVT'}</dt><dd>{fmtInt(row.quantity)}</dd></div>)}</dl></details>}</dd>
+          <dd title={`${Number(stats.value).toLocaleString('vi-VN')} đồng`}>{fmtVndCompact(stats.value)}{quantities.length>0&&<span className="stat-quantities"> / {quantities.slice(0,2).map(row=>`${fmtInt(row.quantity)} ${row.unit||'chưa rõ ĐVT'}`).join(' · ')}</span>}{quantities.length>2&&<details className="stat-quantity-detail"><summary>+ {quantities.length-2} đơn vị khác</summary><dl>{quantities.slice(2).map(row=><div key={row.unit||'unknown'}><dt>{row.unit||'Chưa rõ ĐVT'}</dt><dd>{fmtInt(row.quantity)}</dd></div>)}</dl></details>}</dd>
         </div>
         <div>
           <dt>Tăng/giảm cùng kỳ</dt>

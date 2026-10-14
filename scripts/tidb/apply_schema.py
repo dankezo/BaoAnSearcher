@@ -27,7 +27,7 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Apply TiDB schema 001 through 008.")
     parser.add_argument("--yes-remote", action="store_true", help="Execute on the configured cluster.")
-    parser.add_argument("--only", choices=("001", "002", "003", "004", "005", "006", "007", "008"), help="Apply one idempotent migration only.")
+    parser.add_argument("--only", choices=("001", "002", "003", "004", "005", "006", "007", "008", "011"), help="Apply one idempotent migration only.")
     args = parser.parse_args()
     statements = describe()
     if args.only:

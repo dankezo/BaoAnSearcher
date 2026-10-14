@@ -122,8 +122,11 @@
 }
 .home-radar-group > h3 { margin: 0; padding: 2px 0; }
 .home-watch-group { display: grid; gap: 8px; }
-.home-tender.fresh { background: #e7f6ec; border-color: #b7e4c7; }
-.home-tender.closing { background: #fdecec; border-color: #f5c2c2; }
+.home-tender.fresh { border-color: #16a34a; }
+.home-tender.closing { border-color: #dc2626; }
+.home-tender.exact { background: #e7f6ec; }
+.home-detail .scope-exact { background: #e7f6ec; }
+.home-detail .scope-near { background: #fff5dd; }
 .home-radar-card {
   border: 1px solid var(--line);
   background: var(--surface-2);
@@ -585,3 +588,21 @@
 @media(min-width:1024px){.home-sheet-left-desktop{align-items:stretch;justify-content:flex-start}.home-sheet-left-desktop .home-sheet{width:min(960px,85vw);height:100%;max-height:none;border-radius:0 14px 14px 0;animation:home-sheet-enter-left .2s var(--ease,ease-out)}.home-sheet-left-desktop .home-sheet-handle{display:none}}
 @keyframes home-sheet-enter-left{from{transform:translateX(-36px);opacity:.6}to{transform:translateX(0);opacity:1}}
 @media(prefers-reduced-motion:reduce){.home-sheet-left-desktop .home-sheet{animation:none}}
+
+/* One scroll owner per drawer; Radix keeps closing content until animation ends. */
+.home-animated-sheet{position:fixed;right:0;top:0;z-index:81;outline:none;min-height:0;animation:none}
+.home-animated-sheet .home-sheet-body{min-height:0;flex:1;overflow:auto}
+.home-animated-sheet .home-radar-panel{max-height:none;overflow:visible}
+.home-sheet-root[data-state="open"]{animation:home-shade-in .24s ease-out}
+.home-sheet-root[data-state="closed"]{animation:home-shade-in .2s ease-in reverse}
+.home-animated-sheet[data-state="open"]{animation:home-drawer-in .26s cubic-bezier(.22,.61,.36,1)}
+.home-animated-sheet[data-state="closed"]{animation:home-drawer-in .2s ease-in reverse}
+@keyframes home-drawer-in{from{transform:translateX(100%)}to{transform:translateX(0)}}
+@keyframes home-shade-in{from{opacity:0}to{opacity:1}}
+@media(min-width:1024px){.home-sheet-right-desktop{width:min(960px,85vw);height:100dvh;max-height:none;border-radius:14px 0 0 14px}}
+@media(max-width:1023px){.home-animated-sheet.home-sheet-bottom{top:auto;bottom:0;right:0;width:min(940px,100%)}.home-animated-sheet[data-state="open"]{animation-name:home-bottom-in}.home-animated-sheet[data-state="closed"]{animation-name:home-bottom-in}@keyframes home-bottom-in{from{transform:translateY(100%)}to{transform:translateY(0)}}}
+@media(max-width:640px){.home-animated-sheet{top:auto;bottom:0;height:auto;max-height:90dvh}}
+@media(prefers-reduced-motion:reduce){.home-animated-sheet[data-state],.home-sheet-root[data-state]{animation-duration:.001s}}
+
+.home-watch-more{grid-column:1/-1}.home-watch-more summary{cursor:pointer;padding:12px 0;font-weight:650}.home-watch-more .home-watch-form{margin-top:8px}
+.home-app-updates{border:1px solid var(--line,#dce3ea);border-radius:10px;background:var(--surface,#fff);padding:10px 14px;font-size:13px}.home-app-updates summary{cursor:pointer;font-weight:600}.home-app-updates time{margin-left:8px;font-size:11px;font-weight:400;color:var(--muted,#64748b)}.home-app-updates ul{margin:10px 0 2px;padding-left:20px;line-height:1.7}.home-app-updates li+li{margin-top:5px}

@@ -31,11 +31,21 @@ export default async function handler(req, res) {
     const code = codeFrom(req)
     if (!DATASET_CODES.has(code)) return json(res, 404, { error: 'Không tìm thấy tập dữ liệu.' })
     const dataset = await getDataRegistry(code)
-    const url = safeR2Url(dataset?.r2DownloadUrl)
+    const format = new URL(req.url || '/', 'https://app.baoanpharma.com').searchParams.get('format') || 'csv'
+    if(!['csv','xlsx'].includes(format))return json(res,400,{error:'Định dạng tải không hợp lệ.'})
+    let url = safeR2Url(dataset?.r2DownloadUrl)
     if (!url) {
       return json(res, 409, { error: 'Bản Snapshot R2 chưa sẵn sàng cho tập dữ liệu này.' })
     }
-    return json(res, 200, { code, url, filename: `${code.toLowerCase()}-snapshot.csv` })
+    if(format==='xlsx'){
+      const target=new URL(url)
+      target.pathname=target.pathname.replace(/\.csv$/i,'.xlsx')
+      if(target.toString()===url)return json(res,409,{error:'Snapshot Excel chưa được tạo.'})
+      const ready=await fetch(target,{method:'HEAD',signal:AbortSignal.timeout(8000)})
+      if(!ready.ok)return json(res,409,{error:'Snapshot Excel chưa sẵn sàng. Chọn bộ lọc để tải Excel tùy chỉnh hoặc tải CSV đầy đủ.'})
+      url=target.toString()
+    }
+    return json(res, 200, { code, url, filename: `${code.toLowerCase()}-snapshot.${format}` })
   } catch (error) {
     return json(res, error.status || 500, { error: error.message || String(error) })
   }

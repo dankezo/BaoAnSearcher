@@ -94,7 +94,7 @@ function zipStored(files) {
 }
 
 /* ---------------- SpreadsheetML ---------------- */
-function xmlEsc(s) {
+export function xmlEsc(s) {
   return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -128,22 +128,37 @@ function cellXml(ref, value, isHeader) {
   return `<c r="${ref}" t="inlineStr"${style}><is><t${preserve}>${text}</t></is></c>`
 }
 
-function sheetXml(headers, rows, widths) {
+function sheetXml(headers, rows, widths, sumColumns = []) {
+  const hasSummary = sumColumns.some(Boolean)
+  const firstDataRow = hasSummary ? 3 : 2
   const cols = widths
     .map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${Math.min(60, Math.max(8, w))}" customWidth="1"/>`)
     .join('')
   const out = []
   out.push(`<row r="1">${headers.map((h, i) => cellXml(`${colLetter(i)}1`, h, true)).join('')}</row>`)
+  if (hasSummary) {
+    const labelColumn = sumColumns.indexOf(false)
+    out.push(`<row r="2">${headers.map((_, ci) => {
+      const ref = `${colLetter(ci)}2`
+      if (sumColumns[ci]) {
+        const total = rows.reduce((sum, row) => sum + (typeof row[ci] === 'number' && Number.isFinite(row[ci]) ? row[ci] : 0), 0)
+        return rows.length
+          ? `<c r="${ref}" s="5"><f>SUM(${colLetter(ci)}3:${colLetter(ci)}${rows.length + 2})</f><v>${total}</v></c>`
+          : `<c r="${ref}" s="5"><v>0</v></c>`
+      }
+      return ci === labelColumn ? `<c r="${ref}" t="inlineStr" s="5"><is><t>Tổng</t></is></c>` : `<c r="${ref}" s="5"/>`
+    }).join('')}</row>`)
+  }
   rows.forEach((r, ri) => {
-    const rn = ri + 2
+    const rn = ri + firstDataRow
     out.push(`<row r="${rn}">${r.map((v, ci) => cellXml(`${colLetter(ci)}${rn}`, v, false)).join('')}</row>`)
   })
-  const lastRef = `${colLetter(Math.max(0, headers.length - 1))}${rows.length + 1}`
+  const lastRef = `${colLetter(Math.max(0, headers.length - 1))}${rows.length + (hasSummary ? 2 : 1)}`
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
     `<dimension ref="A1:${lastRef}"/>` +
-    `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` +
+    `<sheetViews><sheetView workbookViewId="0"><pane ySplit="${hasSummary ? 2 : 1}" topLeftCell="A${firstDataRow}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` +
     `<sheetFormatPr defaultRowHeight="15"/>` +
     `<cols>${cols}</cols>` +
     `<sheetData>${out.join('')}</sheetData>` +
@@ -182,9 +197,11 @@ export function buildXlsx(columns, rows, getValue, sheetName = 'Data', extraShee
     }
     return w
   })
-  const sheets = [{ name: sheetName, xml: sheetXml(headers, matrix, widths) }, ...extraSheets.map((sheet) => ({
+  const sheets = [{ name: sheetName, xml: sheetXml(headers, matrix, widths, columns.map(c => c.sum === true)) }, ...extraSheets.map((sheet) => ({
     name: String(sheet.name),
-    xml: heatmapSheetXml(sheet.rows, sheet.note),
+    xml: sheet.columns
+      ? sheetXml(sheet.columns.map(c=>c.label||c.key),sheet.rows.map(row=>sheet.columns.map(c=>row[c.key])),sheet.columns.map(()=>32),sheet.columns.map(c=>c.sum === true))
+      : heatmapSheetXml(sheet.rows, sheet.note),
   }))]
   return packageWorkbook(sheets, workbookStyles())
 }
@@ -268,8 +285,8 @@ function workbookStyles() {
   const colors = ['FFD1FAE5', 'FFFEE2E2', 'FFE2E8F0']
   return STYLES_XML.replace('<fills count="3">', '<fills count="6">')
     .replace('</fills>', colors.map(rgb => `<fill><patternFill patternType="solid"><fgColor rgb="${rgb}"/><bgColor indexed="64"/></patternFill></fill>`).join('') + '</fills>')
-    .replace('<cellXfs count="2">', '<cellXfs count="5">')
-    .replace('</cellXfs>', colors.map((_, i) => `<xf numFmtId="0" fontId="1" fillId="${i + 3}" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>`).join('') + '</cellXfs>')
+    .replace('<cellXfs count="2">', '<cellXfs count="6">')
+    .replace('</cellXfs>', colors.map((_, i) => `<xf numFmtId="0" fontId="1" fillId="${i + 3}" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>`).join('') + '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>')
 }
 
 function heatmapSheetXml(provinces = [], note = '') {

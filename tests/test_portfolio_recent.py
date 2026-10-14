@@ -18,3 +18,10 @@ class PortfolioRecentTest(unittest.TestCase):
         from scripts.tidb.rows import build_vss_row
         row = build_vss_row({'fingerprint': 'date-test', 'raw': {'tungay': '2026-06-25 00:00:00'}})
         self.assertEqual(row['tungay_hd'], '2026-06-25')
+
+    def test_sync_does_not_fill_missing_contract_date_from_award_date(self):
+        from scripts.tidb.rows import build_vss_row
+        for missing in ('',None):
+            row=build_vss_row({'fingerprint':'missing-contract','raw':{'tungay_hd':missing,'tungay':'2026-06-25','congbo':'2026-06-26'}})
+            self.assertIsNone(row['tungay_hd'])
+            self.assertIsNone(row['tungay_hd_raw'])

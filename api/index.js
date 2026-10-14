@@ -11,6 +11,8 @@ import { matchRoute, requestPath, restoreRequestUrl } from '../api-lib/routeTabl
 const LOADERS = {
   analytics: () => import('../api-lib/routes/analytics.js'),
   tenderSearch: () => import('../api-lib/routes/tenderSearch.js'),
+  tenderRefresh: () => import('../api-lib/routes/tenderRefresh.js'),
+  tenderReport: () => import('../api-lib/routes/tenderReport.js'),
   tenderCount: () => import('../api-lib/routes/tenderCount.js'),
   tenderMetrics: () => import('../api-lib/routes/tenderMetrics.js'),
   tenderBootstrap: () => import('../api-lib/routes/tenderBootstrap.js'),

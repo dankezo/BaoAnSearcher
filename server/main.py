@@ -169,6 +169,7 @@ def local_data_registry():
         item("DAV", "DAV", "Danh mục thuốc Cục Quản lý Dược", "dav"),
         item("MSC_PRICE", "MSC Đơn giá", "Đơn giá trúng thầu thuốc", "msc", "prices"),
         item("MSC_BID", "MSC Gói thầu", "Kế hoạch và thông báo mời thầu", "msc", "tenders", meta_only=True),
+        item("MSC_YCBG", "MSC - YCBG", "Yêu cầu báo giá thuốc và hồ sơ", "msc_ycbg"),
         item("VSS", "VSS", "Danh mục thuốc BHYT", "vss"),
     ]}
 
@@ -181,9 +182,12 @@ def status():
     dav_state = st.setdefault("dav", {})
     msc_state = st.setdefault("msc", {})
     vss_state = st.setdefault("vss", {})
+    ycbg_state = st.setdefault('msc_ycbg', {})
     dav_meta = _queue_meta_refresh("dav", dav.meta_info)
     msc_meta = _queue_meta_refresh("msc", msc.meta_info)
     vss_meta = _queue_meta_refresh("vss", vss.meta_info)
+    from . import ycbg
+    ycbg_meta = _queue_meta_refresh('msc_ycbg', ycbg.meta_info)
     for section, meta in ((dav_state, dav_meta), (msc_state, msc_meta), (vss_state, vss_meta)):
         if meta.get("error"):
             section["metaError"] = meta["error"]
@@ -197,6 +201,9 @@ def status():
         msc_state["count"] = msc_meta.get("prices", 0)
     if not vss_meta.get("error"):
         vss_state["count"] = vss_meta.get("count", vss_state.get("count", 0))
+    if not ycbg_meta.get('error'):
+        ycbg_state['meta'] = ycbg_meta
+        ycbg_state['count'] = ycbg_meta.get('count',0)
     return st
 
 
@@ -253,6 +260,11 @@ def baoan_catalog():
             "route": item.get("route") or "",
             "reg": item.get("reg_number") or "",
             "manufacturer": item.get("manufacturer") or "",
+            "tenderGroup": item.get("tender_group") or "",
+            "tenderGroupStatus": item.get("tender_group_status") or "Cần rà soát",
+            "observedTenderGroups": item.get("observed_tender_groups") or [],
+            "groupEvidence": item.get("group_evidence") or [],
+            "oldRegistrations": item.get("old_registrations") or [],
         })
     return {"items": items}
 
@@ -384,7 +396,7 @@ def msc_search(body: dict[str, Any]):
     kind = body.get("kind") or "prices"
     filters = body.get("filters") or {}
     page = int(body.get("page") or 0)
-    size = int(body.get("size") or 50)
+    size = int(body.get("size") or (100 if kind == 'ycbg' else 50))
     try:
         return msc.search(kind, filters, page=page, size=size, cursor=body.get("cursor"))
     except Exception as e:
@@ -425,12 +437,43 @@ def msc_crawl_tenders(body: CrawlBody):
     return msc.start_tender_browser(pages=body.pages)
 
 
+@app.post('/api/msc/crawl/ycbg')
+def msc_crawl_ycbg(body: CrawlBody):
+    from .ycbg import start_crawl
+    return start_crawl(full=body.fullScan)
+
+
+@app.get('/api/msc/ycbg/meta')
+def msc_ycbg_meta():
+    from .ycbg import meta_info
+    return meta_info()
+
+
 @app.post("/api/vss/search")
 def vss_search(body: dict[str, Any]):
     filters = body.get("filters") or body
     page = int(body.get("page") or 0)
     size = int(body.get("size") or 50)
     return vss.search_bids(filters, page=page, size=size, cursor=body.get("cursor"))
+
+
+@app.post('/api/tender/report')
+def tender_report(body: dict[str, Any]):
+    from .tender_report import report_inputs
+    try:
+        return report_inputs(body)
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+
+
+@app.post('/api/admin/datasets/export')
+def dataset_export(body: dict[str, Any]):
+    from .dataset_export import create_export
+    try:
+        path, code, fmt = create_export(body)
+        return FileResponse(path,filename=f'{code}_du_lieu.{fmt}',media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' if fmt == 'xlsx' else 'text/csv; charset=utf-8')
+    except (ValueError, FileNotFoundError) as error:
+        raise HTTPException(400, str(error))
 
 
 @app.post("/api/vss/crawl")

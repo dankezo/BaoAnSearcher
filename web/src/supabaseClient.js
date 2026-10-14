@@ -85,7 +85,9 @@ function authStorage() {
 
 /** Drop cached client so next getSupabase() picks new storage / remember flag. */
 export function resetSupabaseClient() {
+  const previous = client
   client = null
+  if (previous) void previous.auth.dispose().catch(() => {})
 }
 
 export function getSupabase() {

@@ -93,7 +93,7 @@ test('cloud DAV detects static HTML, falls back to RPC and forwards normalized a
     plugins: [{ name: 'supabase-fixture', setup(build) {
       build.onResolve({ filter: /supabaseClient$/ }, () => ({ path: 'client', namespace: 'fixture' }))
       build.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: `
-        export const supabaseConfigured = true;
+        export const supabaseConfigured = true;export const isCompanyEmail=()=>true;export const ALLOWED_EMAIL_DOMAIN="example.test";
         export const getSupabase = () => ({ auth: { getSession: async () => ({ data: { session: { access_token: 'fixture-token' } } }) }, rpc: async (name, params) => {
           globalThis.__davRpc = { name, params };
           return { data: { total: 1, items: [{ id: '1', ten_thuoc: 'Thuốc thử', con_hieu_luc: true }] }, error: null };

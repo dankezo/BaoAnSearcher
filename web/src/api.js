@@ -1,7 +1,7 @@
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 async function request(path, opts = {}) {
-  const { timeoutMs = 55000, ...fetchOpts } = opts
+  const { timeoutMs = 55000, responseType, ...fetchOpts } = opts
   const ctrl = new AbortController()
   const external = fetchOpts.signal
   if (external) {
@@ -17,9 +17,11 @@ async function request(path, opts = {}) {
     })
     if (!res.ok) {
       const text = await res.text()
-      throw new Error(text || res.statusText)
+      let message=text
+      try { const parsed=JSON.parse(text);message=parsed.detail||parsed.error||text } catch {}
+      throw new Error(message || res.statusText)
     }
-    return res.json()
+    return responseType === 'blob' ? res.blob() : res.json()
   } catch (e) {
     if (e?.name === 'AbortError') {
       throw new Error('Hết thời gian chờ API (có thể server đang bận crawl). Thử lại sau vài giây.')
@@ -39,6 +41,8 @@ export async function health() {
 }
 
 export const api = {
+  datasetDownload: (body, signal) => request('/api/admin/datasets/export', { method:'POST', body:JSON.stringify(body), signal, responseType:'blob', timeoutMs:600000 }),
+  tenderReport: (body, signal) => request('/api/tender/report', { method: 'POST', body: JSON.stringify(body), signal, timeoutMs: 90000 }),
   health,
   status: () => request('/api/status', { timeoutMs: 8000 }),
   secrets: ({ revealPassword = false } = {}) => request(`/api/secrets${revealPassword ? '?revealPassword=true' : ''}`),
@@ -62,6 +66,8 @@ export const api = {
   mscPrices: (body) => request('/api/msc/crawl/prices', { method: 'POST', body: JSON.stringify(body) }),
   mscPricesBrowser: (body) => request('/api/msc/crawl/prices/browser', { method: 'POST', body: JSON.stringify(body) }),
   mscTenders: (body) => request('/api/msc/crawl/tenders', { method: 'POST', body: JSON.stringify(body) }),
+  mscYcbg: (body = {}) => request('/api/msc/crawl/ycbg', { method: 'POST', body: JSON.stringify(body) }),
+  mscYcbgMeta: () => request('/api/msc/ycbg/meta'),
   vssSearch: (body) => request('/api/vss/search', { method: 'POST', body: JSON.stringify(body) }),
   vssCrawl: (body) => request('/api/vss/crawl', { method: 'POST', body: JSON.stringify(body || {}) }),
   vssCrawlStop: () => request('/api/vss/crawl/stop', { method: 'POST', body: '{}' }),
@@ -318,7 +324,7 @@ export function getStaticStatus() {
 
 /** Extract {updated, count} for a section from a status payload. */
 export function sectionMeta(status, section) {
-  const s = status?.[section.startsWith('msc_') ? 'msc' : section]
+  const s = status?.[section==='msc_ycbg' ? 'msc_ycbg' : section.startsWith('msc_') ? 'msc' : section]
   if (!s) return { updated: null, count: null }
   const meta = s.meta || {}
   // MSC exposes two independent stores.  Its headline must be the unit-price
@@ -335,6 +341,10 @@ export function fmtDateTime(v) {
   if (!m) return s
   const y = parseInt(m[1], 10)
   if (y < 2000 || y > 2035) return ''
+  if (/[T ].*(?:Z|[+-]\d{2}:?\d{2})$/.test(s)) {
+    const d = new Date(s)
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }).replace(',', '')
+  }
   return m[4] ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : `${m[3]}/${m[2]}/${m[1]}`
 }
 

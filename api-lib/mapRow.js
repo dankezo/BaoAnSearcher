@@ -27,7 +27,7 @@ export function mapTursoRow(row) {
   for (const [k, v] of Object.entries(row)) {
     out[k] = v
     const camel = snakeToCamelKey(k)
-    if (camel !== k && !(camel in out)) out[camel] = v
+    if (k !== 'scope_lines' && camel !== k && !(camel in out)) out[camel] = v
   }
   if ('conHieuLuc' in out || 'con_hieu_luc' in out) {
     const raw = out.conHieuLuc ?? out.con_hieu_luc

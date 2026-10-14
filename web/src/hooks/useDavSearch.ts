@@ -16,6 +16,7 @@ import { useTagFilterState } from '../TagFilterDropdown'
 import { DEFAULT_TAG_CONFIGS, enrichRowTag } from '../tagConfig'
 import { userKeyPart } from '../userPrefs'
 import { applyMetricQuick } from '../metrics'
+import { tableSnapshot } from '../savedResultStore'
 import { EMPTY_FILTERS, SERVER_MAP } from '../components/dav/davConfig'
 import { useDavColumns } from '../components/dav/useDavColumns'
 import { api, cloudDavSearch, davErrorMessage } from '../services/davService'
@@ -38,6 +39,7 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
   const userId = userKeyPart(user)
   const [filters, setFilters] = useState<DavFilters>(EMPTY_FILTERS)
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>({})
+  const [appliedColumnFilters, setAppliedColumnFilters] = useState<ColumnFilters>({})
   const [filtersRow, setFiltersRow] = useState(false)
   const [filterModalOpen, setFilterModalOpen] = useState(false)
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT)
@@ -78,6 +80,7 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
   const { selectedTags, draftTags, setDraftTags, setSelectedTags, commitDraft, configs } = useTagFilterState(userId)
   const filtersRef = useRef(filters)
   const columnFiltersRef = useRef(columnFilters)
+  const appliedColumnFiltersRef = useRef(appliedColumnFilters)
   const selectedTagsRef = useRef(selectedTags)
   const pageSizeRef = useRef(pageSize)
   const pageRef = useRef(0)
@@ -93,7 +96,7 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
   const mergedFilters = useCallback(
     (cf?: ColumnFilters, tagsOverride?: string[] | null): DavFilters => ({
       ...filtersRef.current,
-      ...serverFilters(cf ?? columnFiltersRef.current, SERVER_MAP),
+      ...serverFilters(cf ?? appliedColumnFiltersRef.current, SERVER_MAP),
       tags: tagsOverride ?? selectedTagsRef.current,
     }),
     [],
@@ -110,6 +113,7 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
       const stale = () => id !== reqSeq.current
       const size = resolvePageSize(pageSizeRef.current)
       const active = { ...mergedFilters(cf, tagsOverride), ...(override || {}) }
+      if (cf) { appliedColumnFiltersRef.current = cf; setAppliedColumnFilters(cf) }
       const check = { ...active }
       if (Array.isArray(check.tags) && check.tags.length >= DEFAULT_TAG_CONFIGS.length) check.tags = null
       if (skipShortTextSearch(check, DAV_TEXT_KEYS, EMPTY_FILTERS)) {
@@ -321,7 +325,7 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
     (override?: Partial<DavFilters>) => {
       setSuggestOpen(false)
       const tags = commitDraft()
-      search(0, undefined, override || null, tags)
+      search(0, columnFiltersRef.current, override || null, tags)
     },
     [search, commitDraft],
   )
@@ -332,14 +336,14 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
     setFilters(next)
     setSuggestOpen(false)
     const tags = commitDraft()
-    search(0, undefined, null, tags)
+    search(0, columnFiltersRef.current, null, tags)
   }, [search, commitDraft])
 
   const rows = useMemo(() => {
-    let list = applyColumnFilters(data.items, cols, columnFilters)
+    let list = applyColumnFilters(data.items, cols, appliedColumnFilters)
     list = applyMetricQuick(list, metricQuick, 'dav')
     return list
-  }, [data.items, cols, columnFilters, metricQuick])
+  }, [data.items, cols, appliedColumnFilters, metricQuick])
   const rowKey = useCallback(
     (r: DrugItem, i: number) => (r.id != null ? `id:${r.id}` : `${r.soDangKy}|${page}|${i}`),
     [page],
@@ -382,7 +386,7 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
     const searchFn = localMode
       ? (p: number, size: number) => api.davSearch({ filters: mergedFilters(), page: p, size })
       : (p: number, size: number, cursor?: Record<string, string> | null) => cloudDavSearch({ filters: mergedFilters(), page: p, size, cursor })
-    return fetchAllPages(searchFn, { onProgress: setExportPct })
+    return fetchAllPages(searchFn, { size:5000, cap:50000, strict:true, onProgress: setExportPct })
   }, [localMode, mergedFilters, filters, selectedTags])
 
   const doExport = async () => {
@@ -395,7 +399,7 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
         fetchAll,
         filename: 'DAV_thuoc',
         sheetName: 'DAV',
-        columnFilters,
+        columnFilters: appliedColumnFilters,
       })
       if (!n) setErr('Không có dòng nào để xuất.')
     } catch (e) {
@@ -406,6 +410,7 @@ export function useDavSearch({ localMode, embedded = false }: DavSectionProps) {
   }
 
   return {
+    getSnapshot: async () => tableSnapshot('Danh mục số đăng ký DAV', cols, sel.size ? [...sel.selected.values()] : applyMetricQuick(applyColumnFilters((await fetchAll()).map(enrichRowTag), cols, appliedColumnFilters), metricQuick, 'dav'), { ...mergedFilters(), columnFilters:appliedColumnFilters, metricQuick, selectionOnly:sel.size>0 }),
     metricsError,
     retryMetrics: () => setMetricsRetry((k) => k + 1),
     filters,

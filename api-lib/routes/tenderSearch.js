@@ -13,8 +13,14 @@ import { buildSearchSql, cursorOf } from '../db/searchSql.js'
 import * as tursoDb from '../db/turso.js'
 import * as tidbDb from '../db/tidb.js'
 import { attachScope, refreshCloudScopes } from '../scopeMatch.js'
+import { sharedQuery } from '../sharedQueryCache.js'
 
 const ADAPTERS = { turso: tursoDb, tidb: tidbDb }
+
+export function radarPage(payload) {
+  const fields=['source_id','tender_no','name','buyer','province','status_code','status_label','close_date','open_date','published','bid_price','bid_form','source_url','ingredient','dosage_form','baoan_match']
+  return {...payload,items:payload.items.map(row=>({...Object.fromEntries(fields.filter(key=>key in row).map(key=>[key,row[key]])),scope_lines:(row.scope_lines||[]).map(({code,name,strength,form,route,qty,unit,price,group,match,status})=>({code,name,strength,form,route,qty,unit,price,group,match,status}))}))}
+}
 
 async function rowsOf(db, sql, args) {
   if (db?.dialect && typeof db.query === 'function') {
@@ -33,6 +39,10 @@ function normalizeKind(kind) {
 }
 
 async function runSearch(db, kind, filters, page, size, cursor) {
+  if (normalizeKind(kind) === 'msc_ycbg') {
+    const { searchQuotes } = await import('../ycbg.js')
+    return searchQuotes(db, filters, page, size)
+  }
   if (normalizeKind(kind) === 'msc_tenders') await refreshCloudScopes(db)
   const dialect = db?.dialect || 'turso'
   const built = buildSearchSql({ kind, filters, page, size, cursor, dialect })
@@ -96,11 +106,20 @@ export default async function handler(req, res) {
     const backend = searchBackend()
     const db0 = performance.now()
     let payload
-    if (backend === 'supabase') {
+    if (kind === 'msc_ycbg') {
+      payload = await runSearch(tidbDb, kind, body.filters || {}, page, size, null)
+    } else if (backend === 'supabase') {
       payload = await searchSupabase(accessToken, kind, body.filters, page, size, body.cursor || null)
     } else {
       const db = ADAPTERS[backend] || tursoDb
-      payload = await runSearch(db, kind, body.filters, page, size, body.cursor || null)
+      const load=async()=>{
+        if(backend==='tidb'&&kind==='msc_tenders')await refreshCloudScopes(db,true)
+        const value=await runSearch(db, kind, body.filters, page, size, body.cursor || null)
+        return kind==='msc_tenders'&&body.view==='radar'?radarPage(value):value
+      }
+      payload=backend==='tidb'&&!body.filters?._export&&size<=200
+        ?await sharedQuery('search',{kind,filters:body.filters||{},page,size,cursor:body.cursor||null,view:body.view||''},load)
+        :await load()
     }
     timing.noteDb(performance.now() - db0)
     payload = { ...payload, items: mapTursoItems(payload.items) }

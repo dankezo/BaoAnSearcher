@@ -4,6 +4,7 @@ import {Dialog} from './ui'
 import {request} from './client'
 import {count,money} from './Charts'
 import {DEFAULT_QUERY,SOURCE_LABELS} from './types'
+import {DataTable} from '../components'
 import type {AnalyticsQuery,DetailPage,DetailRow} from './types'
 
 type PackageSource='msc_prices'|'vss'
@@ -11,7 +12,7 @@ type WorkspaceRow=DetailRow&{source?:PackageSource}
 const PackageDialog=Dialog as typeof Dialog & ((props:Parameters<typeof Dialog>[0]&{className?:string})=>ReturnType<typeof Dialog>)
 const show=(value:unknown)=>value==null||value===''?'—':String(value)
 
-export default function PackageWorkspace({relatedQuery,scope,packageRow,onOpenPackage,onClose}:{relatedQuery?:AnalyticsQuery;scope?:AnalyticsQuery;packageRow?:DetailRow;onOpenPackage:(row:DetailRow)=>void;onClose:()=>void}){
+export default function PackageWorkspace({relatedQuery,scope,packageRow,initialSource='msc_prices',onOpenPackage,onClose}:{relatedQuery?:AnalyticsQuery;initialSource?:PackageSource;scope?:AnalyticsQuery;packageRow?:DetailRow;onOpenPackage:(row:DetailRow)=>void;onClose:()=>void}){
  const [detail,setDetail]=useState<DetailPage>(),[loading,setLoading]=useState(false),[error,setError]=useState('')
  const selected=packageRow as WorkspaceRow|undefined
  const source=selected?.source||'msc_prices'
@@ -31,11 +32,8 @@ export default function PackageWorkspace({relatedQuery,scope,packageRow,onOpenPa
  },[selected?.id,source,tenderNo])
  const sourceUrl=selected?.source_url&&/^https?:\/\//.test(selected.source_url)?selected.source_url:''
  const isVss=source==='vss',multipleLines=Number(selected?.line_count||1)>1
- return <PackageDialog open={Boolean(relatedQuery||packageRow)} onClose={onClose} title={isVss?'Chi tiết bản ghi VSS':`Gói thầu ${tenderNo||'liên quan'}`} className="analytics-package-dialog">
+ return <PackageDialog open={Boolean(relatedQuery||packageRow)} onClose={onClose} title={isVss?'Chi tiết bản ghi VSS':`Gói thầu ${tenderNo||'liên quan'}`} className={`analytics-package-dialog ${packageRow&&!relatedQuery?'package-only':''}`}>
   <div className={`analytics-package-layout ${packageRow?'has-package':''}`}>
-   <section className="analytics-package-awards" aria-label="Các kết quả trúng thầu liên quan">
-    {relatedQuery?<RecentAwards query={awardsQuery} scope={scope} onOpenPackage={onOpenPackage}/>:<p className="muted">Chọn một dòng trúng thầu để xem chi tiết.</p>}
-   </section>
    {packageRow&&selected&&<section className="analytics-package-detail" aria-label={isVss?'Chi tiết bản ghi VSS':'Chi tiết gói thầu MSC'}>
     <h2>{isVss?'Bản ghi VSS':`Mã TBMT ${tenderNo||'Chưa có mã'}`}</h2>
     <dl className="analytics-package-facts">
@@ -48,7 +46,18 @@ export default function PackageWorkspace({relatedQuery,scope,packageRow,onOpenPa
      {selected.package_bid_price&&<div><dt>Giá gói công bố</dt><dd>{money(selected.package_bid_price)}</dd></div>}<div><dt>Giá trị trúng thầu trong phạm vi lọc</dt><dd>{money(selected.amount)}</dd></div><div><dt>Trạng thái</dt><dd>{show(selected.status)}</dd></div>
     </dl>
     {sourceUrl&&<p><a href={sourceUrl} target="_blank" rel="noreferrer">Mở nguồn gốc ↗</a></p>}
-    {isVss?<p className="muted small">VSS không cung cấp mã TBMT ổn định; đây là chi tiết của bản ghi đã chọn.</p>:<><h3>Danh sách thuốc trong gói · tối đa 50 dòng</h3>{loading&&<p role="status">Đang tải danh sách thuốc…</p>}{error&&<p role="alert">{error}</p>}{detail?.reason&&<p>{detail.reason}</p>}<div className="analytics-table"><table><thead><tr><th>Thuốc</th><th>Hoạt chất · hàm lượng · dạng</th><th className="analytics-sdk">SĐK</th><th>Nhóm · đơn vị</th><th>Số lượng × đơn giá</th><th>Giá trị</th><th>Nhà thầu</th></tr></thead><tbody>{detail?.items.map(row=><tr key={row.id}><td>{show(row.name)}</td><td>{[row.ingredient,row.strength,row.form].filter(Boolean).join(' · ')||'—'}</td><td className="analytics-sdk">{show(row.registration)}</td><td>{[row.group_key,row.unit].filter(Boolean).join(' · ')||'—'}</td><td>{count(row.quantity)} × {money(row.price)}</td><td>{money(row.amount)}</td><td>{show(row.company)}</td></tr>)}</tbody></table>{!loading&&!error&&detail&&!detail.items.length&&<p>Không có dòng thuốc trong mã TBMT này.</p>}{detail?.hasMore&&<p className="muted small">Đang hiển thị 50 dòng đầu.</p>}</div></>}
+    {isVss?<p className="muted small">VSS không cung cấp mã TBMT ổn định; đây là chi tiết của bản ghi đã chọn.</p>:<details key={tenderNo} open={typeof window==='undefined'||!window.matchMedia('(max-width:640px)').matches}><summary>Danh sách thuốc trong gói · tối đa 50 dòng</summary>{loading&&<p role="status">Đang tải danh sách thuốc…</p>}{error&&<p role="alert">{error}</p>}{detail?.reason&&<p>{detail.reason}</p>}<DataTable rows={detail?.items||[]} rowKey={(row:DetailRow)=>row.id} selectable={false} showIndex={false} filtersVisible={false} loading={loading} minWidth={800} emptyText="Không có dòng thuốc trong mã TBMT này." cardKeys={['name','ingredient','registration','group_key','quantity','amount','company']} columns={[
+     {key:'name',label:'Thuốc',render:(value:unknown)=>show(value)},
+     {key:'ingredient',label:'Hoạt chất · hàm lượng · dạng',render:(_:unknown,row:DetailRow)=>[row.ingredient,row.strength,row.form].filter(Boolean).join(' · ')||'—'},
+     {key:'registration',label:'SĐK',render:(value:unknown)=>show(value)},
+     {key:'group_key',label:'Nhóm · đơn vị',render:(_:unknown,row:DetailRow)=>[row.group_key,row.unit].filter(Boolean).join(' · ')||'—'},
+     {key:'quantity',label:'Số lượng × đơn giá',render:(_:unknown,row:DetailRow)=>`${count(row.quantity)} × ${money(row.price)}`},
+     {key:'amount',label:'Giá trị',render:(_:unknown,row:DetailRow)=>money(row.amount)},
+     {key:'company',label:'Nhà thầu',render:(value:unknown)=>show(value)},
+    ]}/>{detail?.hasMore&&<p className="muted small">Đang hiển thị 50 dòng đầu.</p>}</details>}
+   </section>}
+   {relatedQuery&&<section className="analytics-package-awards" aria-label="Các kết quả trúng thầu liên quan">
+    {relatedQuery?<RecentAwards initialSource={initialSource} query={awardsQuery} scope={scope} onOpenPackage={onOpenPackage}/>:<p className="muted">Chọn một dòng trúng thầu để xem chi tiết.</p>}
    </section>}
   </div>
  </PackageDialog>

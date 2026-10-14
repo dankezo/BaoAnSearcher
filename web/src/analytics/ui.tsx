@@ -4,7 +4,7 @@ import * as TabsPrimitive from '@radix-ui/react-tabs'
 import { X } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
 export function Dialog({open,onClose,title,children,className=''}:{open:boolean;onClose:()=>void;title:string;children:ReactNode;className?:string}){
-  return <DialogPrimitive.Root open={open} onOpenChange={v=>{if(!v)onClose()}}><DialogPrimitive.Portal><DialogPrimitive.Overlay className="analytics-overlay"/><DialogPrimitive.Content className={`analytics-dialog analytics-app ${className}`} aria-describedby={undefined}><DialogPrimitive.Title>{title}</DialogPrimitive.Title><DialogPrimitive.Close className="analytics-close" aria-label="Đóng"><X size={18}/></DialogPrimitive.Close>{children}</DialogPrimitive.Content></DialogPrimitive.Portal></DialogPrimitive.Root>
+  return <DialogPrimitive.Root open={open} onOpenChange={v=>{if(!v)onClose()}}><DialogPrimitive.Portal><DialogPrimitive.Overlay className="analytics-overlay"/><DialogPrimitive.Content className={`analytics-dialog analytics-app ${className}`} aria-describedby={undefined}><div className="analytics-dialog-header"><DialogPrimitive.Title>{title}</DialogPrimitive.Title><DialogPrimitive.Close className="analytics-close" aria-label="Đóng"><X size={18}/></DialogPrimitive.Close></div>{children}</DialogPrimitive.Content></DialogPrimitive.Portal></DialogPrimitive.Root>
 }
 export const Tabs=TabsPrimitive.Root
 export const TabsList=TabsPrimitive.List

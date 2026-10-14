@@ -5,7 +5,7 @@ exact  = hoạt chất + dạng bào chế + hàm lượng (+ nhóm thầu khi c
 near   = cùng hoạt chất, khác nhẹ về mg hoặc dạng
 A package with any exact line stays exact even if other lines are only near.
 
-Danh mục Bảo An (baoan_products.json) chưa có trường nhóm; khi đó exact = INN + dạng + hàm lượng.
+Thiếu nhóm ở một trong hai phía: cần rà soát, không tự xác nhận exact.
 """
 from __future__ import annotations
 
@@ -227,16 +227,16 @@ def _form_eligible(target: str, candidate: str) -> tuple[bool | None, bool]:
 def _tender_group(text: str) -> str:
     """Nhóm 1–5 from MSC groupMedicine / group_name."""
     token = fold(text)
-    match = re.search(r"([1-5])", token)
+    match = re.fullmatch(r"(?:nhom|group|n)?\s*([1-5])", token.strip())
     return match.group(1) if match else ""
 
 
-def _group_ok(lot_group: str, catalog_group: str) -> bool:
+def _group_ok(lot_group: str, catalog_group: str) -> bool | None:
     lot_g = _tender_group(lot_group)
     cat_g = _tender_group(catalog_group)
     if lot_g and cat_g:
         return lot_g == cat_g
-    return True
+    return None
 
 
 @lru_cache(maxsize=1)
@@ -260,6 +260,8 @@ def catalog() -> tuple[dict, ...]:
                 "strength": item.get("strength") or "",
                 "form": item.get("dosage_form") or "",
                 "reg": item.get("reg_number") or "",
+                "group": item.get("tender_group") or item.get("group") or "",
+                "groupEvidence": item.get("group_evidence") or [],
             },
         })
     return tuple(rows)
@@ -290,10 +292,12 @@ def classify_lot(lot: dict) -> tuple[str | None, list[dict]]:
         item_route = item.get("route") or ""
         route_ok = route == item_route if route and item_route else None
         strength_ok = strength == item["strength"] if strength and item["strength"] else None
-        group_ok = _group_ok(lot.get("groupMedicine") or lot.get("group") or "", item.get("group") or "")
-        hard_conflict = route_ok is False or not group_ok
+        group_ok = _group_ok(lot.get("groupMedicine") or lot.get("nhomTCKT") or lot.get("group") or "", item.get("group") or "")
+        if str(lot.get("medicines")) == "1" and _tender_group(item.get("group") or ""):
+            group_ok = False
+        hard_conflict = route_ok is False or group_ok is False
         soft_conflict = strength_ok is False or form_ok is False
-        complete = strength_ok is not None and route_ok is not None and form_ok is not None
+        complete = strength_ok is not None and route_ok is not None and form_ok is not None and group_ok is True
         if not hard_conflict and not soft_conflict and complete:
             exact.append(item["card"])
             continue
@@ -301,7 +305,7 @@ def classify_lot(lot: dict) -> tuple[str | None, list[dict]]:
         # candidate.  Missing or different form/strength remains a yellow
         # HSMT review case, not a green eligibility result.
         if not hard_conflict:
-            near.append((all_inns, strength_ok is True, form_ok is True, route_ok is True, group_ok, legal_form, item["card"]))
+            near.append((all_inns, strength_ok is True, form_ok is True, route_ok is True, group_ok is True, legal_form, item["card"]))
     if exact:
         return "exact", exact[:6]
     if near:
@@ -356,7 +360,8 @@ def public_lines(lots) -> list[dict]:
             "qty": lot.get("quantity"),
             "unit": lot.get("uom") or "",
             "price": lot.get("pricePlan"),
-            "group": lot.get("groupMedicine") or "",
+            "group": lot.get("groupMedicine") or lot.get("nhomTCKT") or lot.get("group") or ("Biệt dược gốc" if str(lot.get("medicines")) == "1" else ""),
+            "reviewReason": "Chưa xác minh nhóm thầu của thuốc Bảo An" if level == "near" and any(not hit.get("group") for hit in hits) else "",
             "match": level or "",
             "formCompatible": form_compatible,
             "hits": hits,

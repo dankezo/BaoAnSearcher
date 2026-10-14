@@ -131,9 +131,11 @@ function literalOnPage(value,pages){const needle=normalizedLiteral(value);return
 function taxIdOnPage(value,pages){
  const digits=String(value||'').replace(/\D/g,'');if(![10,13].includes(digits.length))return false
  return pages.some(page=>{
-  const text=fold(page.text),at=text.indexOf(digits);if(at<0)return false
-  const context=text.slice(Math.max(0,at-100),at+digits.length+80)
-  return /ma so thue|mst\b|tax (?:id|code|identification)/i.test(context)
+  const text=fold(page.text)
+  return [...text.matchAll(new RegExp(`(?<![0-9])${digits}(?![0-9])`,'g'))].some(match=>{
+   const at=match.index,context=text.slice(Math.max(0,at-100),at+digits.length+80)
+   return /ma so thue|mst\b|tax (?:id|code|identification)/i.test(context)
+  })
  })
 }
 function legalKey(value){

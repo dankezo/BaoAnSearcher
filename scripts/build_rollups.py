@@ -48,15 +48,8 @@ def year_of(nam, ym: str) -> int:
     return 0
 
 
-def line_amount(thanhtien, gia, soluong):
-    total = parse_vn_number(thanhtien)
-    if total is not None:
-        return total
-    price = parse_vn_number(gia)
-    qty = parse_vn_number(soluong)
-    if price is None or qty is None:
-        return 0.0
-    return price * qty
+def line_amount(thanhtien):
+    return parse_vn_number(thanhtien) or 0.0
 
 
 def connect_ro(path: Path):
@@ -74,19 +67,18 @@ def build_vss(path: Path):
         cur = con.execute(
             """
             SELECT COALESCE(loai, ''), nam, tungay_hd, COALESCE(ma_tinh, ''), COALESCE(nhomthau, ''),
-                   json_extract(raw, '$.thanhtien'), json_extract(raw, '$.gia'),
-                   json_extract(raw, '$.soluong'), json_extract(raw, '$.congbo'),
+                   json_extract(raw, '$.thanhtien'),
                    hoatchat, sodk, duongdung, nuocsx, loai_thau, ten,
                    json_extract(raw, '$.tennhathau'), json_extract(raw, '$.nhasx'),
                    json_extract(raw, '$.ten_cskcb'), json_extract(raw, '$.ten_tinh')
             FROM bids
             """
         )
-        for loai, nam, tungay, ma_tinh, nhom, thanhtien, gia, soluong, congbo, hoatchat, sodk, duongdung, nuocsx, loai_thau, ten, tennhathau, nhasx, ten_cskcb, ten_tinh in cur:
-            ym = ym_of(tungay, congbo)
+        for loai, nam, tungay, ma_tinh, nhom, thanhtien, hoatchat, sodk, duongdung, nuocsx, loai_thau, ten, tennhathau, nhasx, ten_cskcb, ten_tinh in cur:
+            ym = ym_of(tungay)
             key = (blank(loai), year_of(nam, ym), ym, blank(ma_tinh), blank(nhom))
             bucket = groups[key]
-            bucket[0] += line_amount(thanhtien, gia, soluong)
+            bucket[0] += line_amount(thanhtien)
             bucket[1] += 1
             for field, value in (
                 ("hoatchat", hoatchat),

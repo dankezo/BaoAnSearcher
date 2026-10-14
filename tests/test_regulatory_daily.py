@@ -29,10 +29,11 @@ class RegulatoryDailyTest(unittest.TestCase):
             daily._run_regulatory = failed_news
             daily._run_dav = lambda: calls.append('dav')
             daily._run_msc = lambda: calls.append('msc')
+            daily._run_ycbg = lambda: calls.append('msc_ycbg')
             daily._run_vss = lambda: calls.append('vss')
             result = daily.run_daily()
             self.assertFalse(result['ok'])
-            self.assertEqual(calls, ['regulatory', 'dav', 'msc', 'vss'])
+            self.assertEqual(calls, ['regulatory', 'msc_ycbg', 'dav', 'msc', 'vss'])
             self.assertIn('Source unavailable', data['autoCrawl']['daily']['message'])
             self.assertEqual(data['autoCrawl']['daily']['dav'], 'ok')
             self.assertFalse(daily.finished_today())

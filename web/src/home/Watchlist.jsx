@@ -1,3 +1,4 @@
+import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { useEffect, useRef, useState } from 'react'
 import { REGION_ORDER } from '../mapGeo'
 import { loadUserJson, saveUserJson } from '../userPrefs'
@@ -20,37 +21,8 @@ import {
 } from './watchTopics'
 
 function WatchDialog({ open, title, onClose, children }) {
-  const closeRef = useRef(onClose)
-  closeRef.current = onClose
-  useEffect(() => {
-    if (!open || typeof document === 'undefined') return undefined
-    const onKey = (event) => { if (event.key === 'Escape') closeRef.current() }
-    document.addEventListener('keydown', onKey)
-    const previous = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = previous
-    }
-  }, [open])
-  if (!open) return null
-  return (
-    <div className="home-sheet-root home-sheet-left-desktop" role="presentation" onClick={onClose}>
-      <aside
-        className="home-sheet home-watch-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="home-sheet-bar">
-          <h2>{title}</h2>
-          <button type="button" className="home-icon-btn" onClick={onClose} aria-label="Đóng">×</button>
-        </header>
-        <div className="home-sheet-body">{children}</div>
-      </aside>
-    </div>
-  )
+ const retained=useRef({title,children});if(open)retained.current={title,children}
+ return <DialogPrimitive.Root open={open} onOpenChange={value=>{if(!value)onClose()}}><DialogPrimitive.Portal><DialogPrimitive.Overlay className="home-sheet-root"/><DialogPrimitive.Content className="home-sheet home-watch-sheet home-animated-sheet home-sheet-right-desktop" aria-describedby={undefined} aria-label={retained.current.title}><header className="home-sheet-bar"><DialogPrimitive.Title asChild><h2>{retained.current.title}</h2></DialogPrimitive.Title><DialogPrimitive.Close className="home-icon-btn" aria-label="Đóng">×</DialogPrimitive.Close></header><div className="home-sheet-body">{retained.current.children}</div></DialogPrimitive.Content></DialogPrimitive.Portal></DialogPrimitive.Root>
 }
 
 const VALUE_KEY = {
@@ -66,78 +38,23 @@ const VALUE_KEY = {
 }
 
 function WatchBuilder({ draft, setDraft, onSubmit, submitLabel }) {
-  const flag = (key, checked) => setDraft(current => {
-    const next = { ...current, [key]: checked }
-    if (!checked) next[VALUE_KEY[key]] = ''
-    if (checked && key === 'status' && !next.statusValue) next.statusValue = 'open'
-    return next
-  })
-  const text = (key, value) => setDraft(current => ({ ...current, [key]: value }))
-  const fieldClass = (on) => `home-watch-field${on ? ' is-on' : ' is-off'}`
-  return (
-    <form
-      className="home-watch-form"
-      onSubmit={(event) => {
-        event.preventDefault()
-        onSubmit()
-      }}
-    >
-      <label className={fieldClass(draft.ingredient)}>
-        <input type="checkbox" aria-label="Hoạt chất" checked={draft.ingredient} onChange={event => flag('ingredient', event.target.checked)} />
-        <span>Hoạt chất</span>
-        <input aria-label="Giá trị hoạt chất" value={draft.ingredientText} disabled={!draft.ingredient} placeholder="Metformin" onChange={event => text('ingredientText', event.target.value)} />
-      </label>
-      <label className={fieldClass(draft.strength)}>
-        <input type="checkbox" aria-label="Hàm lượng" checked={draft.strength} onChange={event => flag('strength', event.target.checked)} />
-        <span>Hàm lượng</span>
-        <input aria-label="Giá trị hàm lượng" value={draft.strengthText} disabled={!draft.strength} placeholder="500mg" onChange={event => text('strengthText', event.target.value)} />
-      </label>
-      <label className={fieldClass(draft.form)}>
-        <input type="checkbox" aria-label="Dạng bào chế" checked={draft.form} onChange={event => flag('form', event.target.checked)} />
-        <span>Dạng bào chế</span>
-        <input aria-label="Giá trị dạng bào chế" value={draft.formText} disabled={!draft.form} placeholder="Viên nén" onChange={event => text('formText', event.target.value)} />
-      </label>
-      <label className={fieldClass(draft.region)}>
-        <input type="checkbox" aria-label="Khu vực" checked={draft.region} onChange={event => flag('region', event.target.checked)} />
-        <span>Khu vực</span>
-        <select aria-label="Chọn khu vực" value={draft.regionValue} disabled={!draft.region} onChange={event => text('regionValue', event.target.value)}>
-          <option value="">Chọn khu vực</option>
-          {REGION_ORDER.map(name => <option key={name} value={name}>{name}</option>)}
-        </select>
-      </label>
-      <label className={fieldClass(draft.province)}>
-        <input type="checkbox" aria-label="Tỉnh" checked={draft.province} onChange={event => flag('province', event.target.checked)} />
-        <span>Tỉnh</span>
-        <select aria-label="Chọn tỉnh" value={draft.provinceValue} disabled={!draft.province} onChange={event => text('provinceValue', event.target.value)}>
-          <option value="">Chọn tỉnh</option>
-          {PROVINCE_NAMES.map(name => <option key={name} value={name}>{name}</option>)}
-        </select>
-      </label>
-      <label className={fieldClass(draft.company)}>
-        <input type="checkbox" aria-label="Công ty" checked={draft.company} onChange={event => flag('company', event.target.checked)} />
-        <span>Công ty</span>
-        <input aria-label="Giá trị công ty" value={draft.companyText} disabled={!draft.company} placeholder="Bên mời thầu hoặc nhà sản xuất" onChange={event => text('companyText', event.target.value)} />
-      </label>
-      <label className={fieldClass(draft.contractor)}>
-        <input type="checkbox" aria-label="Nhà thầu" checked={draft.contractor} onChange={event => flag('contractor', event.target.checked)} />
-        <span>Nhà thầu</span>
-        <input aria-label="Giá trị nhà thầu" value={draft.contractorText} disabled={!draft.contractor} placeholder="Tên nhà thầu" onChange={event => text('contractorText', event.target.value)} />
-      </label>
-      <label className={fieldClass(draft.status)}>
-        <input type="checkbox" aria-label="Trạng thái gói" checked={draft.status} onChange={event => flag('status', event.target.checked)} />
-        <span>Trạng thái gói</span>
-        <select aria-label="Chọn trạng thái" value={draft.statusValue} disabled={!draft.status} onChange={event => text('statusValue', event.target.value)}>
-          {WATCH_STATUSES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-        </select>
-      </label>
-      <label className={fieldClass(draft.sdk)}>
-        <input type="checkbox" aria-label="SĐK mới liên quan hoạt chất" checked={draft.sdk} onChange={event => flag('sdk', event.target.checked)} />
-        <span>SĐK mới liên quan hoạt chất</span>
-        <input aria-label="Hoạt chất SĐK mới" value={draft.sdkText} disabled={!draft.sdk} placeholder="Hoạt chất của số đăng ký mới" onChange={event => text('sdkText', event.target.value)} />
-      </label>
-      <button type="button" className="home-watch-submit" onClick={onSubmit}>{submitLabel}</button>
-    </form>
-  )
+  const fields = [
+    ['ingredient','Hoạt chất','Metformin'], ['company','Bệnh viện / CĐT','Bệnh viện Đa khoa Sơn Tây'], ['province','Tỉnh',''],
+    ['strength','Hàm lượng','500mg'], ['form','Dạng bào chế','Viên nén'], ['region','Khu vực',''],
+    ['contractor','Nhà thầu','Tên nhà thầu'], ['status','Trạng thái gói',''], ['sdk','SĐK mới liên quan hoạt chất','Hoạt chất'],
+  ]
+  const text = (key, value) => setDraft(current => ({ ...current, [VALUE_KEY[key]]: value, [key]: Boolean(value.trim()) }))
+  const render = ([key,label,placeholder]) => {
+    const options = key==='province'?PROVINCE_NAMES.map(value=>[value,value]):key==='region'?REGION_ORDER.map(value=>[value,value]):key==='status'?WATCH_STATUSES:null
+    return <label key={key} className="home-watch-field"><span>{label}</span>{options?
+      <select aria-label={key==='province'?'Chọn tỉnh':key==='region'?'Chọn khu vực':'Chọn trạng thái'} value={draft[VALUE_KEY[key]]} onChange={event=>text(key,event.target.value)}><option value="">Tất cả</option>{options.map(([value,name])=><option key={value} value={value}>{name}</option>)}</select>:
+      <input aria-label={key==='ingredient'?'Giá trị hoạt chất':label} value={draft[VALUE_KEY[key]]} placeholder={placeholder} onChange={event=>text(key,event.target.value)}/>}</label>
+  }
+  return <form className="home-watch-form" onSubmit={event=>{event.preventDefault();onSubmit()}}>
+    {fields.slice(0,3).map(render)}
+    <details className="home-watch-more"><summary>Thêm điều kiện: hàm lượng, dạng, nhà thầu…</summary><div className="home-watch-form">{fields.slice(3).map(render)}</div></details>
+    <button type="submit" className="home-watch-submit">{submitLabel}</button>
+  </form>
 }
 
 function TopicNameField({ label, value, onChange, onBlur }) {
@@ -319,7 +236,7 @@ export default function Watchlist({ user, rows, capped, expanded = false, onTogg
             ))}
           </div>
         )}
-        <p className="home-note">Đặt tên tiêu chí, tick hoạt chất, hàm lượng, dạng bào chế, khu vực, tỉnh, công ty, nhà thầu, trạng thái gói hoặc SĐK mới liên quan hoạt chất, rồi bấm Xác nhận.</p>
+        <p className="home-note">Nhập hoạt chất hoặc bệnh viện bạn quan tâm, rồi bấm Lưu theo dõi. Ô để trống sẽ không lọc.</p>
         <TopicNameField
           label="Tên tiêu chí"
           value={nameValue}
@@ -328,7 +245,7 @@ export default function Watchlist({ user, rows, capped, expanded = false, onTogg
             setName(value.slice(0, 80))
           }}
         />
-        <WatchBuilder draft={draft} setDraft={setDraft} onSubmit={confirm} submitLabel="Xác nhận" />
+        <WatchBuilder draft={draft} setDraft={setDraft} onSubmit={confirm} submitLabel="Lưu theo dõi" />
         {hint && <p className="home-note" role="status">{hint}</p>}
       </WatchDialog>
     </article>

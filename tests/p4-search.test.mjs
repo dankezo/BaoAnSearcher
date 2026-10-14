@@ -8,6 +8,14 @@ function placeholders(sql) {
   return (sql.match(/\?/g) || []).length
 }
 
+test('facility and buyer filters match Vietnamese words independently with OR across selections',()=>{
+  const built=buildSearchSql({kind:'msc_tenders',filters:{buyer:['Bệnh viện đa khoa Sơn Tây','Bạch Mai']},dialect:'tidb'})
+  assert.match(built.sql,/REPLACE\(LOWER\(buyer\), 'đ', 'd'\) COLLATE utf8mb4_unicode_ci LIKE \?/)
+  assert.ok(built.args.includes('%son%'));assert.ok(built.args.includes('%tay%'))
+  assert.ok(built.args.includes('%bach%'));assert.ok(!built.args.includes('%benh vien da khoa son tay%'))
+  assert.equal(placeholders(built.sql),built.args.length)
+})
+
 test('substring cillin stays LIKE on the folded search column', () => {
   for (const dialect of ['turso', 'tidb']) {
     const built = buildSearchSql({
@@ -100,10 +108,16 @@ test('tender label is derived from displayed line matches, not a stale crawl lab
   assert.equal(packageMatchFromLines([{ match: '' }]), '')
 })
 
+test('a declared originator lot does not match a generic technical group',()=>{
+  const lot={lotName:'Paracetamol',nongDo:'500mg',dangBaoChe:'Viên nén',duongDung:'Uống',medicines:'1'}
+  const result=classifyLot(lot,[{inn:'Paracetamol',strength:'500mg',dosage_form:'Viên nén',route:'Uống',tender_group:'4'}])
+  assert.equal(result.status,'MISMATCH');assert.equal(result.level,null)
+})
+
 test('current legal rule accepts Fenofibrat/Fenofibrate generic tablet eligibility', () => {
   const result = classifyLot(
-    { tenHoatChat: 'Fenofibrate', nongDo: '145 mg', dangBaoChe: 'Viên', duongDung: 'Uống' },
-    [{ brand_name: 'Fenoba', inn: 'Fenofibrat', strength: '145 mg', dosage_form: 'Viên nén bao phim', route: 'Uống' }],
+    { tenHoatChat: 'Fenofibrate', nongDo: '145 mg', dangBaoChe: 'Viên', duongDung: 'Uống', groupMedicine:'4' },
+    [{ brand_name: 'Fenoba', inn: 'Fenofibrat', strength: '145 mg', dosage_form: 'Viên nén bao phim', route: 'Uống', tender_group:'4' }],
   )
   assert.equal(result.status, 'MATCH')
   assert.equal(result.level, 'exact')
@@ -140,8 +154,8 @@ test('ingredient comparison uses whole tokens, never a substring', () => {
 
 test('a declared salt form still matches its named base ingredient', () => {
   const result = classifyLot(
-    { lotName: 'Ciprofloxacin (dưới dạng Ciprofloxacin hydrochloride)', nongDo: '500mg', dangBaoChe: 'Viên', duongDung: 'Uống' },
-    [{ inn: 'Ciprofloxacin', strength: '500mg', dosage_form: 'Viên nén bao phim', route: 'Uống' }],
+    { lotName: 'Ciprofloxacin (dưới dạng Ciprofloxacin hydrochloride)', nongDo: '500mg', dangBaoChe: 'Viên', duongDung: 'Uống', groupMedicine:'4' },
+    [{ inn: 'Ciprofloxacin', strength: '500mg', dosage_form: 'Viên nén bao phim', route: 'Uống', tender_group:'4' }],
   )
   assert.equal(result.status, 'MATCH')
 })

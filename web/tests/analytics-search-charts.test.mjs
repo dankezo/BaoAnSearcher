@@ -17,7 +17,7 @@ const built=await build({entryPoints:entries,outdir:'out',bundle:true,write:fals
 }}]})
 function loadEntry(name){const file=built.outputFiles.find(f=>f.path.includes(name));assert.ok(file,`missing compiled entry ${name}`);const mod=new Module(name);mod.paths=Module._nodeModulePaths(process.cwd());mod._compile(file.text,`${name}.cjs`);return mod.exports}
 const {default:OmniFilterBar}=loadEntry('OmniFilterBar')
-const {PriceComparison,GroupChart,Trend}=loadEntry('Charts')
+const {PriceComparison,GroupChart,Trend,TenderChart}=loadEntry('Charts')
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms))
 const query=(mode,entity,role='winner',entityField='ingredient')=>({mode,entity,role,entityField,territoryField:'province',months:12,comparison:'yoy',filters:{}})
 function inputOf(view){return view.root.find(el=>el.type==='input'&&el.props['aria-label']==='Tìm thuốc, doanh nghiệp, địa bàn')}
@@ -97,6 +97,14 @@ test('unit donuts compare current/prior values and legend or slice selects unit 
  await act(async()=>view.unmount())
 })
 
+test('unavailable trend reports the source failure instead of implying there are no formulations',async()=>{
+ let view
+ await act(async()=>{view=create(React.createElement(Trend,{stats:{status:'unavailable',reason:'Nguồn chưa sẵn sàng. Thử lại.',rows:[]},source:'msc_prices'}))})
+ assert.match(JSON.stringify(view.toJSON()),/Nguồn chưa sẵn sàng/)
+ assert.doesNotMatch(JSON.stringify(view.toJSON()),/Chưa có cơ cấu quy cách/)
+ await act(async()=>view.unmount())
+})
+
 test('unit without a prior value and empty group data use compact unavailable states',async()=>{
  let view
  await act(async()=>{view=create(React.createElement(PriceComparison,{stats:{rows:[{kind:'unit',label:'gói',period:'current',amount:'42'}]}}))})
@@ -144,4 +152,49 @@ test('VSS trend provides all-period and monthly group value/share details; selec
   await act(async()=>clear());assert.equal(n1().props['aria-pressed'],false)
  }
  await act(async()=>view.unmount())
+})
+
+test('combination choice defaults on and stores the selected preference in the applied query',async()=>{
+ const previous=global.localStorage,values=new Map();global.localStorage={setItem:(key,value)=>values.set(key,value),getItem:key=>values.get(key)}
+ let view,last;try{await act(async()=>{view=create(React.createElement(OmniFilterBar,{query:query('drug','Silymarin'),onApply:q=>{last=q},onExport:()=>{},exporting:false}))});await act(async()=>view.root.findAllByType('button').find(b=>b.children.includes('Bộ lọc nâng cao')).props.onClick());const checkbox=view.root.find(el=>el.type==='input'&&el.props.type==='checkbox');assert.equal(checkbox.props.checked,true);await act(async()=>checkbox.props.onChange({target:{checked:false}}));await apply(view);assert.equal(last.includeCombinations,false);assert.equal(values.get('baoan.analytics.includeCombinations'),'false')}finally{await act(async()=>view?.unmount());global.localStorage=previous}
+})
+
+test('tender rhythm orders months chronologically and omits undated and comparison facts',async()=>{
+ let view;
+ await act(async()=>{view=create(React.createElement(TenderChart,{stats:{rows:[{kind:'month',period:'current',label:'2026-08',count:2},{kind:'month',period:'current',label:'2025-10',count:1},{kind:'month',period:'current',label:null,count:4},{kind:'month',period:'previous',label:'2024-10',count:9}]}}))});
+ const chart=view.root.find(el=>Array.isArray(el.props.data));
+ assert.deepEqual(chart.props.data.map(row=>[row.month,row.count]),[['2025-10',1],['2026-08',2]]);
+ await act(async()=>view.unmount());
+});
+
+
+test('form composition uses complete current aggregates and toggles independently of technical groups',async()=>{
+ let view
+ await act(async()=>{view=create(React.createElement(GroupChart,{dimension:'form',stats:{rows:[{kind:'form',label:'Viên nén',period:'current',amount:'600'},{kind:'form',label:'Dung dịch',period:'current',amount:'400'},{kind:'form',label:'Viên nang',period:'previous',amount:'2000'},{kind:'group',label:'4',period:'current',amount:'1000'}]}}))})
+ const legends=view.root.findAll(el=>el.type==='button'&&String(el.props.className||'').includes('analytics-legend-button'))
+ assert.equal(legends.length,2)
+ assert.ok(JSON.stringify(view.toJSON()).includes('60%'))
+ assert.ok(!JSON.stringify(view.toJSON()).includes('Viên nang'))
+ await act(async()=>{legends[0].props.onClick()})
+ assert.equal(legends[0].props['aria-pressed'],true)
+ await act(async()=>{legends[0].props.onClick()})
+ assert.equal(legends[0].props['aria-pressed'],false)
+ await act(async()=>view.unmount())
+})
+
+
+test('typed company searches use the same scope across casing and can research a name absent from suggestions',async()=>{
+ const applied=[]
+ globalThis.__analyticsLoadSuggestions=async()=>({items:[]})
+ const upper='CÔNG TY TNHH DƯỢC PHẨM BÁCH GIA'
+ let view
+ try{
+  await act(async()=>{view=create(React.createElement(OmniFilterBar,{query:query('macro',''),onApply:value=>applied.push(value),onExport:()=>{},exporting:false}))})
+  for(const name of ['công ty tnhh dược phẩm bách gia',upper,'Công ty TNHH Dược phẩm Bách Gia']){
+   await typeAndResolve(view,name);await apply(view)
+   assert.equal(applied.at(-1).entity,upper)
+   assert.equal(applied.at(-1).mode,'company');assert.equal(applied.at(-1).role,'all');assert.equal(applied.at(-1).companyFocus,'business')
+  }
+  assert.deepEqual(applied[0],applied[1]);assert.deepEqual(applied[1],applied[2])
+ }finally{act(()=>view?.unmount());delete globalThis.__analyticsLoadSuggestions}
 })

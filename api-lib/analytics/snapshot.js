@@ -18,7 +18,7 @@ export async function readSnapshot(q, fetchImpl=fetch) {
     const r=await fetchImpl(target,{signal:AbortSignal.timeout(3000)})
     if(!r.ok) return null
     const data=await r.json()
-    if(data.version!==2 || queryKey(data.query)!==queryKey(q) || !data.sources) return null
+    if(data.version!==2 || data.aggregationRevision!==3 || queryKey(data.query)!==queryKey(q) || !data.sources) return null
     return {...data,cached:true,snapshot:true}
   } catch {return null}
 }

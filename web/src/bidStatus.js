@@ -38,10 +38,13 @@ const OTHER = {
   rowClass: '',
 }
 
-function parseCloseMs(closeTime) {
+export function parseCloseMs(closeTime) {
   if (closeTime == null || closeTime === '') return null
   if (typeof closeTime === 'number' && Number.isFinite(closeTime)) return closeTime
   const s = String(closeTime).trim()
+  // Date-only sources do not establish a closing hour. Keep today's tender
+  // in the open-day scope, rather than inventing a midnight deadline.
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return Date.parse(`${s}T23:59:59.999+07:00`)
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
   if (m) {
     const t = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime()

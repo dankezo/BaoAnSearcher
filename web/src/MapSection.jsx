@@ -6,6 +6,8 @@ import { cloudCatalog, cloudMap, cloudMapFacilityIngredients, cloudMscSearch, cl
 import { StatCards } from './areaStats'
 import { DetailModal, Field, SuggestField } from './components'
 import { fmtInt, fmtMoney, fmtVndCompact } from './metrics'
+import SaveResultButton from './SaveResultButton'
+import { tableSnapshot } from './savedResultStore'
 import { VN_PROVINCES } from './vnProvinces'
 import { baoanLinesForIngredient } from './baoanIngredient'
 import {
@@ -33,12 +35,12 @@ const STATUS_OPTIONS = [
 ]
 
 const EMPTY = {
-  source: 'vss',
+  source: 'msc',
   hoatchat: '',
   region: '',
   province: '',
   group: '',
-  status: '',
+  status: 'open',
   q: '',
 }
 
@@ -792,6 +794,7 @@ export default function MapSection({ localMode = true }) {
           <div className="filter-actions">
             <button type="submit" className="btn sm">Tìm</button>
             <button type="button" className="btn secondary sm" onClick={clearFilters}>Xóa lọc</button>
+            <SaveResultButton source="map" defaultName={`Bản đồ · ${query.hoatchat||query.q||'Thị trường'}`} disabled={loading||!data} getSnapshot={()=>{if(data?.truncated||Number(data?.packageTotal||0)>(data?.packages||[]).length&&isMscSource)throw new Error('Danh sách trên bản đồ chưa đầy đủ. Thu hẹp tỉnh, hoạt chất hoặc cơ sở để lưu đủ kết quả.');const rows=isMscSource?(data?.packages||[]):(data?.dots||[]);return {...tableSnapshot('Bản đồ thị trường',Object.keys(rows[0]||{}).filter(key=>typeof rows[0][key]!=='object').map(key=>({key,label:key})),rows,query),data}}}/>
           </div>
         </form>
       </header>

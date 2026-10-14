@@ -1,0 +1,35 @@
+.tender-report h1{margin:0}.report-switches{display:flex;flex-wrap:wrap;gap:22px;margin-top:16px}.report-switches label{display:flex;align-items:center;gap:8px}.report-switches input{accent-color:#155e75;width:17px;height:17px}.report-results{padding:0}.report-scroll{overflow:auto;max-height:68vh}.tender-report table,.report-dialog table{width:100%;border-collapse:collapse;font-size:12px}.tender-report th,.tender-report td,.report-dialog th,.report-dialog td{padding:9px 10px;border-bottom:1px solid #dce3ea;vertical-align:top;text-align:left;min-width:100px}.tender-report th,.report-dialog th{position:sticky;top:0;background:#eef3f6;z-index:2;white-space:nowrap}.tender-report td:first-child,.tender-report th:first-child{min-width:45px}.tender-report td:nth-child(9),.tender-report td:nth-child(10){min-width:60px;text-align:center}.tender-report .report-number,.report-dialog .report-number{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.tender-report td small{display:block;color:#64748b}.report-block td{padding:14px 10px;border-top:2px solid #cbd5e1}.report-child td{font-size:11px;box-shadow:inset 0 0 0 100px #ffffff80}.report-child td:nth-child(2){padding-left:20px}.report-sdk,.report-expand{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:#155e75;padding:0;min-height:28px;cursor:pointer}.report-sdk:hover{text-decoration:underline}.report-dialog.analytics-dialog{width:min(1150px,calc(100vw - 28px));max-height:90vh;overflow:auto}.report-dialog .report-scroll{max-height:52vh}.report-results>.analytics-note{padding:12px}.tender-report .field{min-width:240px}.report-results tr:not(.report-block):hover td{filter:brightness(.97)}
+.tender-report .analytics-controls>label{display:grid;min-width:0;gap:4px}.tender-report .analytics-controls>label input,.tender-report .analytics-controls>label select{width:100%;min-width:0;box-sizing:border-box}
+.tender-report .analytics-controls{align-items:end}
+.report-line-count{border:0;background:transparent;color:#0f6070;cursor:pointer;font:inherit;padding:0}.report-guide summary{cursor:pointer}.report-block .analytics-tooltip{white-space:normal;max-width:min(300px,80vw)}
+.report-product-info{display:none}
+@media(max-width:700px){.tender-report .analytics-controls{gap:12px}.tender-report .analytics-controls>label{flex:1 1 140px}.tender-report .field{flex:1 1 100%}.tender-report .analytics-heading h1{font-size:21px}.report-dialog.analytics-dialog{padding:18px}.tender-report .analytics-note{line-height:1.6}}
+.tender-report .report-search-controls{display:grid;grid-template-columns:repeat(3,minmax(160px,1fr)) repeat(2,minmax(140px,.7fr));align-items:end;gap:12px}.tender-report .report-search-controls .field{min-width:0;margin:0;display:grid;gap:4px}.tender-report .report-child{background:#f1f3f5}.tender-report .report-child td{box-shadow:none}.tender-report .report-search-controls input{width:100%;box-sizing:border-box}.tab-pane[hidden]{display:none!important}
+@media(max-width:1050px){.tender-report .report-search-controls{grid-template-columns:repeat(3,minmax(140px,1fr))}}@media(max-width:700px){.tender-report .report-search-controls{grid-template-columns:repeat(2,minmax(0,1fr))}.tender-report .report-search-controls .field{grid-column:1/-1}}
+@media(max-width:640px){
+ .report-card-view{padding:8px;max-height:none}
+ .report-card-view table,.report-card-view tbody{display:block;min-width:0;width:100%}
+ .report-card-view thead{display:none}
+ .report-card-view tr{display:flex;flex-direction:column;gap:0;margin:0 0 8px;border:1px solid #dce3ea;border-radius:10px;padding:8px;overflow:hidden}
+ .report-card-view td{display:grid;grid-template-columns:90px minmax(0,1fr);gap:8px;min-width:0!important;padding:4px 0;text-align:left!important;white-space:normal!important;overflow-wrap:anywhere;font-size:12px}
+ .report-card-view td::before{content:attr(data-label);color:#64748b;font-weight:400}
+ .report-card-view td:first-child,.report-card-view td[data-empty=true]{display:none}
+ .report-card-view td:nth-child(3){order:-1;font-weight:700;font-size:14px}
+ .report-card-view td:nth-child(15){font-weight:700;color:#155e75}
+ .report-card-view td small{grid-column:2;margin-top:-8px}
+ .report-card-view td:nth-child(6),.report-card-view td:nth-child(7),.report-card-view td:nth-child(8),.report-card-view td:nth-child(11),.report-card-view td:nth-child(12){display:none}
+ .report-card-view td span small{display:inline;margin:0}
+ .report-card-view .report-product-info{display:block;flex-basis:100%;font-size:11px}
+ .report-product-info summary{cursor:pointer;color:#0f6070;padding:6px 0}
+ .report-product-info dl{display:grid;grid-template-columns:90px minmax(0,1fr);gap:6px;margin:4px 0}
+ .report-product-info dt{color:#64748b}.report-product-info dd{margin:0;overflow-wrap:anywhere}
+ .report-card-view .report-product-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+ .report-card-view tr.report-block{overflow:visible}
+ .report-card-view tr.report-block{border:0;border-radius:8px;padding:12px}
+ .report-card-view tr.report-block td,.report-card-view td[colspan]{display:block;border:0;padding:0}
+ .report-card-view tr.report-block td::before,.report-card-view td[colspan]::before{content:none}
+ .report-card-view .report-child td:nth-child(2){padding-left:0}
+ .report-card-view .report-sdk,.report-card-view .report-expand{min-height:44px;max-width:100%;white-space:normal;text-align:left;overflow-wrap:anywhere}
+ .report-dialog.analytics-dialog{padding:16px}
+ .report-dialog .result-cards{padding:0}
+}

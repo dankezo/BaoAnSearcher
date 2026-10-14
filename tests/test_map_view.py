@@ -179,7 +179,7 @@ class MapViewTest(unittest.TestCase):
                 "form": "vien nen",
                 "route": "uong",
                 "strength": baoan_match._strengths("500 mg"),
-                "group": "",
+                "group": "1",
                 "card": {"brand": "Hapacol", "strength": "500 mg", "form": "Viên nén", "reg": "VD-111"},
             },
             {
@@ -194,7 +194,7 @@ class MapViewTest(unittest.TestCase):
         with patch.object(baoan_match, "catalog", return_value=fake):
             inn_only = rank_ingredients([("Paracetamol", 10, 1)])
             self.assertEqual(inn_only[0]["baoanHits"], [])
-            lot = {"tenHoatChat": "Paracetamol", "nongDo": "500mg", "dangBaoChe": "Viên nén", "duongDung": "Uống"}
+            lot = {"tenHoatChat": "Paracetamol", "nongDo": "500mg", "dangBaoChe": "Viên nén", "duongDung": "Uống", "groupMedicine": "1"}
             exact = rank_ingredients([("Paracetamol", 10, 1, lot)])
         self.assertEqual(exact[0]["baoanHits"][0]["reg"], "VD-111")
         self.assertEqual(len(exact[0]["baoanHits"]), 1)

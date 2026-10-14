@@ -97,6 +97,12 @@ def search_where(kind: str, filters: dict, indexed: bool = False):
         values = raw if isinstance(raw, list) else [raw]
         values = [fold(v).strip() for v in values if str(v or "").strip()]
         if values:
+            if key == "buyer":
+                clauses.append("(" + " OR ".join("(" + " AND ".join("fold(coalesce(json_extract(normalized, ?),'')) LIKE ?" for _ in val.split()) + ")" for val in values) + ")")
+                for val in values:
+                    for word in val.split():
+                        args.extend([path, f"%{word}%"])
+                continue
             clauses.append("(" + " OR ".join("fold(coalesce(json_extract(normalized, ?),'')) LIKE ?" for _ in values) + ")")
             for val in values:
                 args.extend([path, f"%{val}%"])
@@ -114,15 +120,21 @@ def search_where(kind: str, filters: dict, indexed: bool = False):
     if published_from:
         y0 = str(published_from)[:10]
         clauses.append(
-            "(json_extract(normalized, '$.published') IS NULL OR "
-            "substr(coalesce(json_extract(normalized, '$.published'), ''), 1, 10) >= ?)"
+            "substr(json_extract(normalized, '$.published'), 1, 10) >= ?" if filters.get('strictDates') else
+            "(json_extract(normalized, '$.published') IS NULL OR substr(coalesce(json_extract(normalized, '$.published'), ''), 1, 10) >= ?)"
         )
         args.append(y0)
+    if filters.get('publishedTo'):
+        clauses.append("substr(json_extract(normalized, '$.published'), 1, 10) <= ?")
+        args.append(str(filters['publishedTo'])[:10])
 
     return clauses, args
 
 
 def search(kind: str, filters: dict, page: int = 0, size: int = 50, cursor: str | None = None) -> dict:
+    if kind == 'ycbg':
+        from .ycbg import search as quote_search
+        return quote_search(filters, page, size)
     core = _import_core()
     if not MSC_DB.exists():
         return {"total": None, "page": page, "size": size, "hasMore": False, "items": []}

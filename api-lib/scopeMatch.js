@@ -9,8 +9,8 @@ let cloudScopes = []
 let cloudScopesUntil = 0
 let cloudScopesRequest = null
 
-export async function refreshCloudScopes(db) {
-  if (db?.dialect !== 'tidb' || Date.now() < cloudScopesUntil) return
+export async function refreshCloudScopes(db, force = false) {
+  if (db?.dialect !== 'tidb' || !force && Date.now() < cloudScopesUntil) return
   if (!cloudScopesRequest) {
     cloudScopesRequest = db.query('SELECT notify_id, tender_no, lots FROM msc_scope_lots').then((result) => {
       cloudScopes = (result.rows || []).map((row) => ({ id: row.notify_id, tender_no: row.tender_no, lots: typeof row.lots === 'string' ? JSON.parse(row.lots) : row.lots }))
@@ -55,7 +55,7 @@ export function matchingTenderNos({ needle = '', groups = null } = {}) {
     const lots = row.lots || []
     const ok = lots.some((lot) => {
       const ingredientOk = !want || fold(`${lot.tenHoatChat || ''} ${lot.lotName || ''}`).includes(want)
-      const groupOk = !groupNeed || groupNeed.has(groupDigit(lot.groupMedicine || lot.group || ''))
+      const groupOk = !groupNeed || groupNeed.has(groupDigit(lot.groupMedicine || lot.nhomTCKT || lot.group || ''))
       return ingredientOk && groupOk
     })
     if (ok && row.tender_no) hits.add(String(row.tender_no))
@@ -82,7 +82,8 @@ export function publicLines(lots, catalog = baoanProducts()) {
       qty: lot.quantity,
       unit: lot.uom || '',
       price: lot.pricePlan,
-      group: lot.groupMedicine || lot.group || '',
+      group: lot.groupMedicine || lot.nhomTCKT || lot.group || (String(lot.medicines) === '1' ? 'Biệt dược gốc' : ''),
+      reviewReason: classified.level === 'near' && classified.matchedCriteria?.group == null ? 'Chưa xác minh nhóm thầu của thuốc Bảo An' : '',
       match: classified.level || '',
       status: classified.status,
       formCompatible: Boolean(classified.formCompatible),
@@ -149,8 +150,8 @@ export function scopeTenderNos(filters = {}) {
 }
 
 function priceOf(value) {
-  const n = Number(value)
-  return Number.isFinite(n) ? n : null
+  const number=Number(value)
+  return Number.isFinite(number)?number:null
 }
 
 function closeIso(raw) {
@@ -163,14 +164,16 @@ function closeIso(raw) {
 export function matchRows(items, level) {
   const wanted = level === 'exact' || level === 'near' ? level : 'all'
   const rowsOut = []
-  for (const item of items || []) {
+  for (const [itemIndex,item] of (items || []).entries()) {
     const packageLevel = item.baoan_match || ''
-    for (const line of item.scope_lines || publicLines(scopeFor(item)?.lots || [])) {
+    const sourceKey=notifyId(item)||item.source_id||item.tender_no||itemIndex
+    for (const [lineIndex,line] of (item.scope_lines || publicLines(scopeFor(item)?.lots || [])).entries()) {
       const hitLevel = line.match || ''
       if (wanted === 'exact' && hitLevel !== 'exact') continue
       if (wanted === 'near' && !(hitLevel === 'near' && packageLevel === 'near')) continue
       if (wanted === 'all' && hitLevel !== 'exact' && hitLevel !== 'near') continue
       const hits = line.hits?.length ? line.hits : [{}]
+      const quantity=priceOf(line.qty),price=priceOf(line.price)
       for (const hit of hits) {
         rowsOut.push({
           tenderNo: item.tender_no || '',
@@ -182,7 +185,10 @@ export function matchRows(items, level) {
           formMt: line.form || '',
           routeMt: line.route || '',
           unit: line.unit || '',
-          price: priceOf(line.price),
+          price,
+          quantity,
+          totalValue: price != null && quantity != null ? price * quantity : null,
+          scopeLineKey: `${sourceKey}:${lineIndex}`,
           inn: hit.inn || '',
           brand: hit.brand || '',
           strength: hit.strength || '',

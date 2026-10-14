@@ -54,12 +54,15 @@ class MscSearchIndexTest(unittest.TestCase):
         for field in ("sodk", "ten", "nhasx", "ma_cskcb", "ten_cskcb", "tennhathau", "loai", "loai_thau", "duongdung", "nuocsx", "hamluong", "donvitinh"):
             self.assertIn(field, where)
         self.assertIn("tungay_hd >= ?", where)
-        self.assertIn("coalesce(denngay_hd,'') <= ?", where)
+        # VSS map dates follow contract start (tungay_hd); the requested
+        # range is inclusive at both ends without excluding longer contracts.
+        self.assertIn("tungay_hd < date(?, '+1 day')", where)
         self.assertIn("json_extract(raw,'$.congbo')", where)
         self.assertIn("%nha may a%", args)
         self.assertIn("%nha may b%", args)
         self.assertIn("2025-12-01", args)
-        self.assertIn("2026-09-30 23:59:59", args)
+        self.assertIn("2026-09-30", args)  # explicit filter upper bound
+        self.assertIn("2026-10-05", args)  # map metric window upper bound
 
 
 if __name__ == "__main__":

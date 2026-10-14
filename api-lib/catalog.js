@@ -119,7 +119,7 @@ function emptyBootstrap(section) {
 
 async function readTidb(section) {
   try {
-    const rs = await tidbDb.query('SELECT key_name, total_records, updated_at FROM app_metadata')
+    const rs = await tidbDb.query("SELECT key_name, total_records, DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at FROM app_metadata")
     const meta = Object.fromEntries((rs.rows || []).map((row) => [
       row.key_name,
       { total: Number(row.total_records || 0), updated: row.updated_at || null },

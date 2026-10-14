@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
 from concurrent.futures import Future
 
 import requests
@@ -96,7 +97,7 @@ def compute(action, body=None, q=''):
         if action == 'overview':
             try:
                 value = json.loads(report_path.read_text(encoding='utf-8'))
-                if value.get('version') == 2 and value.get('sources'):
+                if value.get('version') == 2 and value.get('aggregationRevision') == 2 and value.get('sources'):
                     value = dict(value, cached=True)
                     with _lock:
                         _cache[key] = (time.time(), value)
@@ -196,7 +197,12 @@ def company_profile(body):
     except (OSError,ValueError):
         records={}
     profiles=[value for name,value in records.items() if phrase in name][:20]
-    if not body.get('refresh'):
+    def fresh(profile):
+        try:
+            age=time.time()-datetime.fromisoformat(profile.get('checkedAt','').replace('Z','+00:00')).timestamp()
+            return profile.get('status')=='web_verified' and profile.get('sourceUrls') and 0<=age<30*86400
+        except (ValueError,TypeError,AttributeError):return False
+    if not body.get('refresh') and any(fresh(p) for p in profiles):
         return {'profiles':profiles}
     name=body.get('legalName') or q['entity']
     if not isinstance(name,str) or len(name)>700:raise HTTPException(400,'Tên pháp nhân không hợp lệ.')
@@ -213,9 +219,12 @@ def company_profile(body):
     profile['sourceUrls']=list(dict.fromkeys([*(found.get('sourceUrls') or []),*(previous.get('sourceUrls') or [])]))[:10]
     profile['officeAddress']=found.get('address') or previous.get('officeAddress')
     profile['officeProvince']=province(found.get('address')) or previous.get('officeProvince')
-    connection=connect(require_config())
     try:
-        upsert(connection,profile);connection.commit();mirror(connection)
-    finally:connection.close()
+        connection=connect(require_config())
+        try:
+            upsert(connection,profile);connection.commit();mirror(connection)
+        finally:connection.close()
+    except Exception:
+        return {'profiles':[profile,*[p for p in profiles if key(p.get('legalName'))!=key(profile['legalName'])]],'reason':'Đã tra cứu web; chưa lưu được vào kho hồ sơ.'}
     clear_cache()
     return {'profiles':[profile,*[p for p in profiles if key(p.get('legalName'))!=key(profile['legalName'])]]}

@@ -16,6 +16,8 @@ import { slicePayload } from '../metricSlice.js'
 import { baoanCatalogItems } from '../baoanCatalog.js'
 import { buildPortfolio } from '../portfolioCloud.js'
 import * as tidbDb from '../db/tidb.js'
+import { sharedQuery } from '../sharedQueryCache.js'
+import { refreshCloudScopes } from '../scopeMatch.js'
 
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
@@ -75,7 +77,11 @@ export default async function handler(req, res) {
     isSlice = Boolean(body.slice || body.mode === 'slice' || section === 'msc_match')
     if (isSlice) {
       const db0 = performance.now()
-      const payload = await slicePayload(query, { ...body, section })
+      const load=async()=>{
+        if(backend==='tidb'&&section==='msc_tenders')await refreshCloudScopes(tidbDb,true)
+        return slicePayload(query, { ...body, section })
+      }
+      const payload=backend==='tidb'&&!force&&section!=='msc_match'?await sharedQuery('metrics-slice',{...body,section},load):await load()
       timing.noteDb(performance.now() - db0)
       return json(res, 200, payload, timing)
     }
@@ -90,7 +96,8 @@ export default async function handler(req, res) {
     }
     if (backend === 'tidb') {
       const db0 = performance.now()
-      const payload = await readSection((sql, args) => tidbDb.query(sql, args), section)
+      const load=()=>readSection((sql, args) => tidbDb.query(sql, args), section)
+      const payload=force?await load():await sharedQuery('metrics',{section},load)
       timing.noteDb(performance.now() - db0)
       return json(res, 200, payload, timing)
     }

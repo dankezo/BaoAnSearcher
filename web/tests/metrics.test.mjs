@@ -15,10 +15,25 @@ const compiled = new Module('dashboard-test')
 compiled._compile(result.outputFiles[0].text, 'dashboard-test.cjs')
 const {
   METRICS_YEAR, VSS_METRICS_YEARS,
+  fmtVndCompact,
   computeDavCompound, computeMscPriceCompound, computeVssCompound,
   scopeMscMetricsRows, scopeVssMetricsRows,
   buildProvinceTable, buildProvinceYoYTable, fetchAllPages,
 } = compiled.exports
+
+test('VSS currency shows 6.57 billion without padding it into a misleading 6,570',()=>{
+  assert.equal(fmtVndCompact(6570134000),'6,57 tỷ VND')
+  assert.equal(fmtVndCompact(47751173480),'47,8 tỷ VND')
+})
+test('strict downloads refuse incomplete, repeated or capped pages and forward the cursor',async()=>{
+ const first={items:[1,2],hasMore:true,nextCursor:'next'}
+ await assert.rejects(()=>fetchAllPages(async page=>page?{items:[],hasMore:false}:first,{strict:true,cap:10}),/đủ trang/)
+ await assert.rejects(()=>fetchAllPages(async page=>page?{items:[1,2],hasMore:true,nextCursor:'next'}:first,{strict:true,cap:10}),/lặp/)
+ await assert.rejects(()=>fetchAllPages(async page=>page?{items:[3,4],hasMore:false}:first,{strict:true,cap:3}),/vượt/)
+ let received
+ assert.deepEqual(await fetchAllPages(async(page,size,cursor)=>{if(page)received=cursor;return page?{items:[3],hasMore:false}:first},{strict:true,cap:3}),[1,2,3])
+ assert.equal(received,'next')
+})
 
 const visualBundle = await build({
   entryPoints: [`${fileURLToPath(new URL('..', import.meta.url))}/src/metrics.jsx`],
@@ -175,6 +190,9 @@ test('group selection switches the metric view, retains baseline, and resets out
       React.createElement('table', { id: 'price-table' }, React.createElement('tbody', null, React.createElement('tr', null, React.createElement('td', null, 'Bảng giữ nguyên')))),
     )) })
     const pick = () => root.root.findAllByType('button').find(button => textOf(button.props.children).trim() === 'N1')
+    const main = root.root.findByProps({ className: 'price-strip-main-value' })
+    assert.equal(textOf(main.findByType('strong')), '100.000')
+    assert.equal(textOf(main.findByType('small')), '/ 20 viên')
     await act(async () => pick().props.onClick())
     assert.equal(pick().props['aria-pressed'], true)
     let text = textOf(root.toJSON())

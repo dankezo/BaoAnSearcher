@@ -18,6 +18,16 @@ async function unzipStored(blob) {
   return files
 }
 
+test('custom export writes its filter worksheet as a table with literal values', async () => {
+  const filters=[{key:'Từ ngày',value:'2025-06-01'},{key:'Đến ngày',value:'2026-10-01'},{key:'Số dòng',value:34},{key:'SĐK',value:'0590110425723'}]
+  const files=await unzipStored(buildXlsx([{key:'sodk',label:'SĐK'}],[{sodk:'0590110425723'}],undefined,'VSS',[{name:'Bo_loc',columns:[{key:'key',label:'Tiêu chí'},{key:'value',label:'Giá trị'}],rows:filters}]))
+  const sheet=files.get('xl/worksheets/sheet2.xml')
+  assert.match(sheet,/dimension ref="A1:B5"/)
+  for(const text of ['Tiêu chí','Giá trị','2025-06-01','2026-10-01','0590110425723'])assert.ok(sheet.includes(text))
+  assert.match(sheet,/<c r="B4"><v>34<\/v><\/c>/)
+  assert.doesNotMatch(sheet,/HEATMAP|NaN|undefined/)
+})
+
 test('VSS XLSX preserves selected data and exports an independent, colored Heatmap worksheet', async () => {
   const provinces = [
     {code:'01',name:'Hà Nội',value:120,prev:100,yoy:20,groups:[120,0,0,0,0]},

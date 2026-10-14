@@ -1,3 +1,4 @@
+import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { userKeyPart } from '../userPrefs'
@@ -5,48 +6,26 @@ import { StatusBadge } from '../bidStatus'
 import { regulatoryRequest } from '../services/regulatoryService'
 import { analyzeLegal, analyzeNews } from '../services/geminiService'
 import { cloudMetricsSlice, cloudMscSearch } from '../supabaseCloud'
+import {resetQueryCache} from '../queryCache'
 import ReadingText from '../components/regulatory/ReadingText'
 import { editorialTitle } from '../components/regulatory/RegulatoryViews'
 import { LEGAL_CORE, LEGAL_FILTERS, LEGAL_STATUS, filterLegal } from './legalCatalog'
 import { natureOf, sourceBadge, splitBrief } from './briefSplit'
-import { countdownLabel, mergeTenders, moneyLabel, parseDateMs, radarView, techGroup } from './tenderRadar'
+import { countdownLabel, mergeTenders, moneyLabel, radarView, techGroup } from './tenderRadar'
 import { countTopic, defaultTopicName, topicSentence } from './watchTopics'
 import Watchlist from './Watchlist'
 import '../home.css'
 
-function Sheet({ open, title, onClose, children, bottom = false, leftDesktop = false }) {
-  const closeRef = useRef(onClose)
-  closeRef.current = onClose
-  useEffect(() => {
-    if (!open || typeof document === 'undefined') return undefined
-    const onKey = (event) => { if (event.key === 'Escape') closeRef.current() }
-    document.addEventListener('keydown', onKey)
-    const previous = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = previous
-    }
-  }, [open])
-  if (!open) return null
-  return (
-    <div className={`home-sheet-root${bottom ? ' home-sheet-bottom-root' : ''}${leftDesktop ? ' home-sheet-left-desktop' : ''}`} role="presentation" onClick={onClose}>
-      <aside
-        className={`home-sheet${bottom ? ' home-sheet-bottom' : ''}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="home-sheet-handle" aria-hidden="true" />
-        <header className="home-sheet-bar">
-          <h2>{title}</h2>
-          <button type="button" className="home-icon-btn" onClick={onClose} aria-label="Đóng">×</button>
-        </header>
-        <div className="home-sheet-body">{children}</div>
-      </aside>
-    </div>
-  )
+function Sheet({ open, title, onClose, children, bottom = false, wideDesktop = false }) {
+  const retained=useRef({title,children});if(open)retained.current={title,children}
+  return <DialogPrimitive.Root open={open} onOpenChange={value=>{if(!value)onClose()}}><DialogPrimitive.Portal>
+    <DialogPrimitive.Overlay className="home-sheet-root"/>
+    <DialogPrimitive.Content className={`home-sheet home-animated-sheet${bottom?' home-sheet-bottom':''}${wideDesktop?' home-sheet-right-desktop':''}`} aria-describedby={undefined} aria-label={retained.current.title}>
+      <div className="home-sheet-handle" aria-hidden="true"/>
+      <header className="home-sheet-bar"><DialogPrimitive.Title asChild><h2>{retained.current.title}</h2></DialogPrimitive.Title><DialogPrimitive.Close className="home-icon-btn" aria-label="Đóng">×</DialogPrimitive.Close></header>
+      <div className="home-sheet-body">{retained.current.children}</div>
+    </DialogPrimitive.Content>
+  </DialogPrimitive.Portal></DialogPrimitive.Root>
 }
 
 function TenderRadar({ localMode, user, onOpenMsc }) {
@@ -56,35 +35,40 @@ function TenderRadar({ localMode, user, onOpenMsc }) {
   const [state, setState] = useState({ loading: true, openItems: [], recentItems: [], error: '', capped: false, matchExact: null })
   const [picked, setPicked] = useState(null)
   const [retry, setRetry] = useState(0)
+  useEffect(()=>{if(typeof window==='undefined'||!window.addEventListener)return;const updated=()=>{resetQueryCache();setRetry(n=>n+1)};window.addEventListener('baoan-data-updated',updated);return()=>window.removeEventListener('baoan-data-updated',updated)},[])
 
   useEffect(() => {
     let live = true
     setState(s => ({ ...s, loading: true, error: '' }))
+    const loadSlice = () => (localMode
+      ? api.metricsSlice({ section: 'msc_tenders', months: 12, filters: {} })
+      : cloudMetricsSlice({ section: 'msc_tenders', months: 12, filters: {} }))
     const load = async () => {
       const searchOpen = () => (localMode
         ? api.mscSearch({ kind: 'tenders', filters: { metricQuick: 'open_all' }, page: 0, size: 80 })
-        : cloudMscSearch({ kind: 'tenders', filters: { metricQuick: 'open_all', metricMonths: 12 }, page: 0, size: 80 }))
+        : cloudMscSearch({ kind: 'tenders', filters: { metricQuick: 'open_all', metricMonths: 12 }, page: 0, size: 80, view: 'radar' }))
       const searchRecent = () => (localMode
         ? api.mscSearch({ kind: 'tenders', filters: {}, page: 0, size: 80 })
-        : cloudMscSearch({ kind: 'tenders', filters: {}, page: 0, size: 80 }))
-      const loadSlice = () => (localMode
-        ? api.metricsSlice({ section: 'msc_tenders', months: 12, filters: {} })
-        : cloudMetricsSlice({ section: 'msc_tenders', months: 12, filters: {} }))
-      const slicePromise = loadSlice().catch(() => null)
-      // Cloud search shares one abort key per kind, so these two must not run together.
-      const openRes = await searchOpen()
-      const recentRes = await searchRecent()
-      const slice = await slicePromise
+        : cloudMscSearch({ kind: 'tenders', filters: {}, page: 0, size: 80, view: 'radar' }))
+      const [openRes,recentRes] = await Promise.all([searchOpen(),searchRecent()])
       const exactOnPage = (openRes.items || []).filter((row) => row?.baoan_match === 'exact').length
       return {
         openItems: openRes.items || [],
         recentItems: recentRes.items || [],
         capped: !!(openRes.hasMore || recentRes.hasMore),
-        matchExact: Number.isFinite(Number(slice?.matchExact)) ? Number(slice.matchExact) : exactOnPage,
+        openCapped: !!openRes.hasMore,
+        matchExact: exactOnPage,
       }
     }
     load()
-      .then(data => { if (live) setState({ loading: false, error: '', ...data }) })
+      .then(data => {
+        if(!live)return
+        setState({ loading: false, error: '', ...data })
+        // Show both cards before the optional annual matching total arrives.
+        void loadSlice().then(slice=>{
+          if(live&&slice?.matchExact!=null&&Number.isFinite(Number(slice.matchExact)))setState(s=>({...s,matchExact:Number(slice.matchExact)}))
+        }).catch(()=>{})
+      })
       .catch(error => { if (live) setState({ loading: false, openItems: [], recentItems: [], error: error.message, capped: false, matchExact: null }) })
     return () => { live = false }
   }, [localMode, retry])
@@ -116,7 +100,7 @@ function TenderRadar({ localMode, user, onOpenMsc }) {
         <div className="home-radar-row">
           <article className={`home-radar-card${panel === 'open' ? ' on' : ''}`} aria-label="Đang mở">
             <button type="button" className="home-open-toggle" aria-expanded={panel === 'open'} onClick={() => togglePanel('open')}>
-              <strong>{state.loading ? '…' : `${view.counts.open.toLocaleString('vi-VN')}${state.capped ? '+' : ''}`}</strong>
+              <strong>{state.loading ? '…' : `${view.counts.open.toLocaleString('vi-VN')}${state.openCapped ? '+' : ''}`}</strong>
               <span>Đang mở <em className="home-match-note">{matchNote}</em></span>
               <span>Gói thầu đang mở</span>
             </button>
@@ -136,7 +120,7 @@ function TenderRadar({ localMode, user, onOpenMsc }) {
             onTopics={rememberTopics}
           />
         </div>
-        <Sheet leftDesktop open={!!panel} title={panelLabel} onClose={() => setPanel(null)} bottom>
+        <Sheet wideDesktop open={!!panel} title={panelLabel} onClose={() => setPanel(null)} bottom>
           <div className="home-radar-panel" aria-live="polite" aria-label={panelLabel}>
             {panel === 'open' && (
               <PackageList
@@ -177,7 +161,7 @@ function TenderRadar({ localMode, user, onOpenMsc }) {
         </Sheet>
       </div>
       {localMode && !state.loading && matchCount === 0 && <p className="home-note">Chưa thấy gói khớp. Ở Dữ liệu, chạy «Quét hồ sơ gói đang mở» để đối chiếu danh mục Bảo An.</p>}
-      <Sheet leftDesktop open={!!picked} title={picked?.tender_no || 'Chi tiết gói thầu'} onClose={() => setPicked(null)}>
+      <Sheet wideDesktop open={!!picked} title={picked?.tender_no || 'Chi tiết gói thầu'} onClose={() => setPicked(null)}>
         {picked && <TenderDetail row={picked} />}
       </Sheet>
     </section>
@@ -204,7 +188,7 @@ function PackageList({ rows, tone = '', loading = false, emptyLabel, onPick, tag
     return (
       <button
         type="button"
-        className={`home-tender${tone ? ` ${tone}` : ''}${labels.length ? ' has-tag' : ''}`}
+        className={`home-tender${tone ? ` ${tone}` : ''}${row.baoan_match === 'exact' ? ' exact' : ''}${labels.length ? ' has-tag' : ''}`}
         key={row.tender_no || row.name}
         onClick={() => onPick(row)}
       >
@@ -254,7 +238,7 @@ function WatchPackages({ topics, rows, capped, onPick }) {
 
 function TenderLines({ row }) {
   const flagged = row.baoan_match === 'exact' || row.baoan_match === 'near'
-  const close = countdownLabel(parseDateMs(row.close_date))
+  const close = countdownLabel(row.close_date)
   return (
     <>
       <div className="home-tender-line">
@@ -264,35 +248,41 @@ function TenderLines({ row }) {
       </div>
       <p>{row.buyer || 'Chưa rõ bên mời thầu'} · {row.province || 'Chưa rõ địa bàn'}</p>
       <p><strong>{row.name || 'Chưa có tên gói'}</strong> · {moneyLabel(row.bid_price)} · {techGroup(row)}</p>
-      {flagged && <span className="home-match">Khớp SKU</span>}
+      <small>Ngày đăng: {row.published ? String(row.published).slice(0, 10).split('-').reverse().join('/') : 'Chưa rõ'}</small>
+      {flagged && <span className="home-match">{row.baoan_match === 'exact' ? 'Khớp hợp lệ' : 'Gần khớp · cần rà soát'}</span>}
     </>
   )
 }
 
 function TenderDetail({ row }) {
+  const [matchFilter, setMatchFilter] = useState('all')
   const lines = Array.isArray(row.scope_lines) ? row.scope_lines : []
+  const level = line => line.match || (line.status === 'MATCH' ? 'exact' : line.status === 'POTENTIAL' ? 'near' : '')
+  const visible = lines.filter(line => matchFilter === 'all' || (matchFilter === 'matched' ? ['exact', 'near'].includes(level(line)) : level(line) === matchFilter))
   const href = /^https:\/\/muasamcong\.mpi\.gov\.vn\//.test(row.source_url || '') ? row.source_url : ''
   return (
     <div className="home-detail">
       <TenderLines row={row} />
       <h3>Phần thầu trong hồ sơ</h3>
+      {!!lines.length && <label className="field">Danh mục thuốc <select aria-label="Lọc hợp chất khớp" value={matchFilter} onChange={event => setMatchFilter(event.target.value)}><option value="all">Tất cả ({lines.length})</option><option value="matched">Khớp và gần khớp</option><option value="exact">Khớp hợp lệ ({lines.filter(line => level(line) === 'exact').length})</option><option value="near">Gần khớp ({lines.filter(line => level(line) === 'near').length})</option></select></label>}
       {!lines.length && <p>Chưa có bảng phạm vi cung cấp. Quét hồ sơ gói đang mở ở Dữ liệu, hoặc mở E-HSMT gốc.</p>}
       {!!lines.length && (
         <div className="home-table-wrap">
           <table>
             <thead><tr><th>Hoạt chất</th><th>Hàm lượng / dạng</th><th>Nhóm</th><th>Giá kế hoạch</th><th>Khớp</th></tr></thead>
             <tbody>
-              {lines.map((line, index) => (
-                <tr key={`${line.code}-${index}`}>
+              {visible.map((line, index) => (
+                <tr key={`${line.code}-${index}`} className={level(line) ? `scope-${level(line)}` : ''}>
                   <td>{line.name || '—'}</td>
                   <td>{[line.strength, line.form].filter(Boolean).join(' · ') || '—'}</td>
-                  <td>{line.group || '—'}</td>
+                  <td>{line.group || 'Hồ sơ đã tải chưa có nhóm'}</td>
                   <td>{moneyLabel(line.price)}</td>
-                  <td>{line.status === 'MATCH' || line.match === 'exact' ? 'Khớp hợp lệ' : line.status === 'POTENTIAL' || line.match === 'near' ? 'Cần rà soát' : '—'}</td>
+                  <td>{level(line) === 'exact' ? 'Khớp hợp lệ' : level(line) === 'near' ? 'Gần khớp · cần rà soát' : '—'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {!visible.length && <p>Không có hợp chất theo bộ lọc này.</p>}
         </div>
       )}
       <p className="home-note">Giá vốn gia công không nằm trong hồ sơ MSC. Đối chiếu COGS tại Danh mục Bảo An trước khi chốt giá chào.</p>
@@ -534,6 +524,14 @@ export default function HomeDashboard({ localMode, user, onOpenMsc, onOpenAdmin 
         </div>
         <p>Theo dõi gói thầu, tin ngành dược và chính sách liên quan. Bấm một thẻ để xem chi tiết.</p>
       </header>
+      <details className="home-app-updates">
+        <summary>Cập nhật ứng dụng <time dateTime="2026-10-14">14/10/2026</time></summary>
+        <ul>
+          <li>Gói thầu có nút cập nhật mới ngoài lịch buổi sáng, kèm tiến trình và tự tải lại danh sách.</li>
+          <li>Tra cứu trên điện thoại gọn hơn; Khớp/Gần khớp bấm lọc được. Bộ lọc chạy khi bấm Tìm kiếm hoặc Áp dụng.</li>
+          <li>Bảng đơn giá hiển thị nhà thầu trúng riêng; phân tích hiện tiến trình thật và phiên đăng nhập tự gia hạn.</li>
+        </ul>
+      </details>
       <TenderRadar localMode={localMode} user={user} onOpenMsc={onOpenMsc} />
       <div className="home-lower">
         <NewsBlock onOpenAdmin={onOpenAdmin} />

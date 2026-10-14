@@ -4,6 +4,20 @@ import { mapWindow } from '../api-lib/mapPayload.js'
 import { mscPriceSlice, shapePriceRows } from '../api-lib/metricSlice.js'
 import { buildPortfolio, compareAwards, mscProfileUrl } from '../api-lib/portfolioCloud.js'
 
+test('custom MSC range includes older months and counts overlapping comparison periods independently', async () => {
+  const filters={name:'Lacikez 2mg',publishedFrom:'2025-06-01',publishedTo:'2026-10-01',strictDates:true}
+  const rows=[{metric_scope:'series',published:'2025-06-01',unit:'Viên',qty:100,revenue:420000,cnt:1},{metric_scope:'series',published:'2026-10-01',unit:'Viên',qty:200,revenue:800000,cnt:1}]
+  const view=await mscPriceSlice(async(sql,args)=>{
+    assert.match(sql,/GROUP BY day, group_name, unit/)
+    assert.ok(args.includes('2025-06-01'));assert.ok(args.includes('2026-10-01'))
+    return {rows}
+  },filters)
+  assert.equal(view.revenue,1220000)
+  assert.equal(view.prevRevenue,420000)
+  assert.equal(view.series.length,17)
+  assert.deepEqual(view.range,{from:'2025-06-01',to:'2026-10-01'})
+})
+
 test('12 month window crosses year and includes the current month through today', () => {
   const window = mapWindow(12, new Date(2026, 9, 5, 12))
   const localDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -49,7 +63,7 @@ test('filtered MSC price metric uses shared whereFor predicates instead of rollu
   for (const field of ['ingredient_f', 'group_name', 'buyer', 'province_f', 'manufacturer', 'country', 'route', 'dosage_form', 'medicine_type']) {
     assert.ok(captured.sql.includes(field), `missing ${field} predicate`)
   }
-  for (const value of ['paracetamol%', 'N1', '%Bệnh viện A%', '%ha noi%', '%Nhà máy B%', '%Việt Nam%', '%Uống%', '%Viên nén%', '%Generic%', '2026-01-01']) {
+  for (const value of ['paracetamol%', 'N1', '%benh%', '%vien%', '%a%', '%ha noi%', '%Nhà máy B%', '%Việt Nam%', '%Uống%', '%Viên nén%', '%Generic%', '2026-01-01']) {
     assert.ok(captured.args.includes(value), `missing bound filter ${value}`)
   }
 })

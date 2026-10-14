@@ -78,3 +78,55 @@ test('a 200-row table keeps a short DOM window', () => {
   assert.ok(bodyRows.length > 0, 'expected a visible window')
   assert.ok(bodyRows.length < 60, `rendered ${bodyRows.length} rows`)
 })
+
+test('mobile cards format values, select independently, and open detail without table controls', () => {
+  const previousWindow = globalThis.window
+  globalThis.window = { matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) }
+  const row = { id: 'sdk', name: 'Lacidipin', amount: 6570134000 }
+  const opened = []
+  function MobileTable() {
+    const [selected, setSelected] = useState(new Set())
+    return React.createElement(DataTable, {
+      rows: [row], rowKey: r => r.id, selected,
+      columns: [{ key: 'name', label: 'Thuốc' }, { key: 'amount', label: 'Thành tiền', text: r => r.amount, render: v => v.toLocaleString('vi-VN') }],
+      filtersVisible: false, onRowDoubleClick: r => opened.push(r),
+      onToggleRow: key => setSelected(new Set(selected.has(key) ? [] : [key])),
+    })
+  }
+  let tree
+  try {
+    act(() => { tree = create(React.createElement(MobileTable)) })
+    assert.equal(tree.root.findAllByType('article').length, 1)
+    assert.equal(tree.root.findAllByType('table').length, 0)
+    assert.match(JSON.stringify(tree.toJSON()), /6\.570\.134\.000/)
+    const selection = () => tree.root.findAllByType('input').find(node => node.props['aria-label'] === 'Chọn dòng 1')
+    act(() => selection().props.onChange())
+    assert.equal(selection().props.checked, true)
+    assert.equal(opened.length, 0)
+    act(() => tree.root.findAllByType('button').find(node => node.props['aria-label'] === 'Xem chi tiết dòng 1').props.onClick())
+    assert.equal(opened[0], row)
+    assert.equal(tree.root.findAllByType('button').filter(node => ['Bảng','Thẻ'].includes(node.children.join(''))).length, 0)
+    assert.equal(selection().props.checked, true)
+  } finally {
+    act(() => tree?.unmount())
+    globalThis.window = previousWindow
+  }
+})
+
+test('large mobile pages keep a short virtual card window', () => {
+  const previousWindow = globalThis.window
+  globalThis.window = { matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) }
+  let tree
+  try {
+    act(() => { tree = create(React.createElement(DataTable, {
+      rows: Array.from({ length: 500 }, (_, id) => ({ id, name: `Thuốc ${id}` })), rowKey: r => String(r.id),
+      columns: [{ key: 'name', label: 'Thuốc' }], selectable: false, filtersVisible: false,
+    })) })
+    const cards = tree.root.findAllByType('article').length
+    assert.ok(cards > 0 && cards < 60, `rendered ${cards} cards`)
+    assert.equal(tree.root.findAllByType('table').length,0)
+  } finally {
+    act(() => tree?.unmount())
+    globalThis.window = previousWindow
+  }
+})

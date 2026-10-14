@@ -456,8 +456,8 @@ def _vss_where(filters: dict, start, end):
     # ``tungay_hd`` is the leading column of idx_bids_effective_province.
     # Nulls never belong to a dated metric window, so COALESCE would only
     # prevent SQLite from using that index.
-    clauses = ["tungay_hd >= ?", "tungay_hd <= ?"]
-    args: list = [start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d 23:59:59")]
+    clauses = ["tungay_hd >= ?", "tungay_hd < date(?, '+1 day')"]
+    args: list = [start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")]
     token = fold(filters.get("hoatchat") or "")
     if token:
         clauses.append("fold(coalesce(hoatchat,'')) LIKE ?")
@@ -508,8 +508,8 @@ def _vss_where(filters: dict, start, end):
         clauses.append("coalesce(tungay_hd,'') >= ?")
         args.append(str(filters["tuNgay"])[:10])
     if filters.get("denNgay"):
-        clauses.append("coalesce(tungay_hd,'') <= ?")
-        args.append(str(filters["denNgay"])[:10] + " 23:59:59")
+        clauses.append("tungay_hd < date(?, '+1 day')")
+        args.append(str(filters["denNgay"])[:10])
     years = filters.get("nam") or []
     if isinstance(years, (str, int)):
         years = [years] if str(years).strip() else []
@@ -581,6 +581,7 @@ def _vss_facilities(filters: dict, start, end, limit: int = 220, with_dots: bool
                            ) AS rn
                     FROM bids
                     {where}
+                    AND NULLIF(TRIM(json_extract(raw,'$.ma_cskcb')), '') IS NOT NULL
                     GROUP BY 1, 3
                 ) WHERE rn <= 20
                 """,
@@ -592,6 +593,12 @@ def _vss_facilities(filters: dict, start, end, limit: int = 220, with_dots: bool
                 counts[key] = max(counts.get(key, 0), int(facility_count or 0))
             dots = [row[:6] for row in sorted(by_province, key=lambda row: float(row[4] or 0), reverse=True)[:limit]]
             by_province = [row[:6] for row in by_province]
+        else:
+            for code, count in con.execute(
+                f"SELECT coalesce(ma_tinh,''), count(DISTINCT NULLIF(TRIM(json_extract(raw,'$.ma_cskcb')), '')) FROM bids {where} GROUP BY coalesce(ma_tinh,'')", args
+            ):
+                key = str(code or '')
+                counts[key.zfill(2) if key.isdigit() else key] = int(count or 0)
     finally:
         con.close()
     return counts, dots, by_province

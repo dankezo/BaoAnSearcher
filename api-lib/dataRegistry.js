@@ -4,9 +4,9 @@
  */
 import * as tidbDb from './db/tidb.js'
 
-export const DATASET_CODES = new Set(['DAV', 'MSC_PRICE', 'MSC_BID', 'VSS'])
+export const DATASET_CODES = new Set(['DAV', 'MSC_PRICE', 'MSC_BID', 'MSC_YCBG', 'VSS'])
 
-const ORDER = "FIELD(dataset_code, 'DAV', 'MSC_PRICE', 'MSC_BID', 'VSS')"
+const ORDER = "FIELD(dataset_code, 'DAV', 'MSC_PRICE', 'MSC_BID', 'MSC_YCBG', 'VSS')"
 
 function asNumber(value) {
   const number = Number(value)
@@ -30,7 +30,7 @@ function shape(row) {
 export async function listDataRegistry() {
   const result = await tidbDb.query(
     `SELECT id, dataset_code, dataset_name, description, total_records, status,
-            last_synced_at, r2_download_url, file_size_mb
+            DATE_FORMAT(last_synced_at, '%Y-%m-%dT%H:%i:%sZ') AS last_synced_at, r2_download_url, file_size_mb
        FROM data_registry_meta
       ORDER BY ${ORDER}`,
   )
@@ -40,7 +40,7 @@ export async function listDataRegistry() {
 export async function getDataRegistry(code) {
   const result = await tidbDb.query(
     `SELECT id, dataset_code, dataset_name, description, total_records, status,
-            last_synced_at, r2_download_url, file_size_mb
+            DATE_FORMAT(last_synced_at, '%Y-%m-%dT%H:%i:%sZ') AS last_synced_at, r2_download_url, file_size_mb
        FROM data_registry_meta
       WHERE dataset_code = ? LIMIT 1`,
     [String(code || '').toUpperCase()],

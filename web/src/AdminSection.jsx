@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, fmtDateTime, relativeTime, sectionMeta } from './api'
-import { cloudDataRegistry, cloudDatasetDownload } from './supabaseCloud'
+import { cloudDataRegistry } from './supabaseCloud'
 import { ErrorNote, Field, LoadingOverlay } from './components'
+import DatasetDownload from './DatasetDownload'
+import DateInput, { validateDateInputs } from './DateInput'
+import SavedResults from './SavedResults'
+import { useAuth } from './auth'
 
 const STATE_LABEL = { idle: 'Sẵn sàng', running: 'Đang chạy', error: 'Lỗi' }
 const REGISTRY_STATE = {
@@ -10,7 +14,7 @@ const REGISTRY_STATE = {
   warning: { label: 'Cần kiểm tra', icon: '●' },
 }
 
-function RegistryCard({ dataset, downloading, onOpen, onDownload }) {
+function RegistryCard({ dataset, onOpen, onCustomDownload }) {
   const state = REGISTRY_STATE[dataset.status] || REGISTRY_STATE.warning
   const size = dataset.fileSizeMb == null ? '' : ` · ${Number(dataset.fileSizeMb).toLocaleString('vi-VN')} MB`
   return (
@@ -32,16 +36,19 @@ function RegistryCard({ dataset, downloading, onOpen, onDownload }) {
         <div><dt>Snapshot CSV</dt><dd>{dataset.r2DownloadUrl ? `Sẵn sàng${size}` : 'Chưa xuất Snapshot'}</dd></div>
       </dl>
       <div className="registry-actions">
+        <button type="button" className="btn" onClick={() => onCustomDownload(dataset)}>Tải tùy chỉnh / Excel</button>
         <button type="button" className="btn secondary" onClick={() => onOpen(dataset.code)}>Tra cứu dữ liệu</button>
-        <button type="button" className="btn" disabled={!dataset.r2DownloadUrl || downloading === dataset.code} onClick={() => onDownload(dataset.code)}>
-          {downloading === dataset.code ? 'Đang mở tải…' : 'Tải bản Snapshot (CSV)'}
-        </button>
       </div>
     </article>
   )
 }
 
-function DataRegistryHub({ registry, loading, error, downloading, onOpen, onDownload, onRefresh }) {
+export function DataRegistryHub({ registry, loading, error, onOpen, onRefresh, localMode }) {
+  const [download,setDownload] = useState(null)
+  const {user}=useAuth()
+  const [view,setView]=useState(()=>{try{return sessionStorage.getItem('baoan.data.saved')==='1'?'saved':'sources'}catch{return 'sources'}})
+  useEffect(()=>{if(typeof window==='undefined')return;const open=()=>setView('saved');window.addEventListener('baoan-open-saved-results',open);return()=>window.removeEventListener('baoan-open-saved-results',open)},[])
+  useEffect(()=>{try{sessionStorage.setItem('baoan.data.saved',view==='saved'?'1':'0')}catch{}},[view])
   const datasets = registry?.datasets || []
   const healthy = datasets.length === 4 && datasets.every((dataset) => dataset.status === 'healthy')
   const syncing = datasets.some((dataset) => dataset.status === 'syncing')
@@ -50,21 +57,23 @@ function DataRegistryHub({ registry, loading, error, downloading, onOpen, onDown
     <section className="data-registry-hub" aria-labelledby="data-registry-title">
       <header className="data-registry-head">
         <div>
-          <span className="kicker">Data Management Hub</span>
-          <h1 id="data-registry-title">Trung tâm Dữ liệu Dữ liệu</h1>
-          <p>Giám sát 4 nguồn lõi bằng snapshot metadata. Trang này không tải hay đếm bảng dữ liệu thô.</p>
+          {view==='sources'&&<span className="kicker">Data Management Hub</span>}
+          <h1 id="data-registry-title">Trung tâm Dữ liệu</h1>
+          {view==='sources'&&<p>Giám sát 4 nguồn lõi bằng snapshot metadata. Trang này không tải hay đếm bảng dữ liệu thô.</p>}
         </div>
-        <div className={`registry-overall ${healthy ? 'healthy' : syncing ? 'syncing' : 'warning'}`}>
+        {view==='sources'&&<div className={`registry-overall ${healthy ? 'healthy' : syncing ? 'syncing' : 'warning'}`}>
           <span>{healthy ? '●' : syncing ? '●' : '●'}</span>{headline}
           <button type="button" className="btn ghost sm" onClick={onRefresh} disabled={loading}>Làm mới</button>
-        </div>
+        </div>}
       </header>
+      <div className="data-hub-tabs" role="group" aria-label="Mục dữ liệu"><button className="btn ghost sm" aria-pressed={view==='sources'} onClick={()=>setView('sources')}>Nguồn dữ liệu</button><button className="btn ghost sm" aria-pressed={view==='saved'} onClick={()=>setView('saved')}>Kết quả lưu</button></div>
       {error && <ErrorNote>{error}</ErrorNote>}
-      <div className="registry-grid">
-        {datasets.map((dataset) => <RegistryCard key={dataset.code} dataset={dataset} downloading={downloading} onOpen={onOpen} onDownload={onDownload} />)}
+      {view==='saved'?<SavedResults key={user?.id}/>:<div className="registry-grid">
+        {datasets.map((dataset) => <RegistryCard key={dataset.code} dataset={dataset} onOpen={onOpen} onCustomDownload={setDownload} />)}
         {!loading && !datasets.length && <div className="empty-state">Chưa có metadata. Chạy migration TiDB 004 để khởi tạo 4 nguồn dữ liệu.</div>}
         {loading && !datasets.length && <div className="empty-state">Đang tải 4 nguồn dữ liệu…</div>}
-      </div>
+      </div>}
+      {download && <DatasetDownload dataset={download} localMode={localMode} onClose={()=>setDownload(null)}/>}
     </section>
   )
 }
@@ -162,7 +171,6 @@ export default function AdminSection({ localMode }) {
   const [registry, setRegistry] = useState({ datasets: [] })
   const [registryLoading, setRegistryLoading] = useState(true)
   const [registryError, setRegistryError] = useState('')
-  const [downloading, setDownloading] = useState('')
   const refreshInFlight = useRef(false)
   const refreshFailures = useRef(0)
   const transferMonitoring = useRef(false)
@@ -180,7 +188,7 @@ export default function AdminSection({ localMode }) {
           if (sync) setProductionSync(sync)
           refreshFailures.current = 0
           setErr((previous) => previous.startsWith('Không lấy được trạng thái') ? '' : previous)
-          return { ok: true, running: [s.dav, s.msc, s.vss, s.msc_scope].some((item) => item?.state === 'running') }
+          return { ok: true, running: [s.dav, s.msc, s.vss, s.msc_scope, s.msc_ycbg].some((item) => item?.state === 'running') }
         } catch (error) {
           lastError = error
           if (attempt === 0) await new Promise((resolve) => window.setTimeout(resolve, 400))
@@ -225,19 +233,6 @@ export default function AdminSection({ localMode }) {
     window.dispatchEvent(new CustomEvent('baoan-open-dataset', { detail: code }))
   }
 
-  const downloadDataset = async (code) => {
-    setDownloading(code)
-    try {
-      const result = await cloudDatasetDownload(code)
-      if (!result?.url) throw new Error('Snapshot chưa sẵn sàng.')
-      window.location.assign(result.url)
-    } catch (error) {
-      setRegistryError(String(error.message || 'Không mở được Snapshot R2.'))
-    } finally {
-      setDownloading('')
-    }
-  }
-
   const pullCloudData = async () => {
     const result = await api.cloudCrawlPull()
     setMsg(result.message || '')
@@ -262,7 +257,8 @@ export default function AdminSection({ localMode }) {
     return () => { stopped = true; if (timer) window.clearTimeout(timer) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const run = (fn) => async () => {
+  const run = (fn, dates = false) => async () => {
+    if (dates && !validateDateInputs()) return
     try {
       const r = await fn()
       if (r && r.ok === false && r.message) setMsg(r.message)
@@ -349,7 +345,7 @@ export default function AdminSection({ localMode }) {
   if (!localMode) {
     return (
       <div className="section">
-        <DataRegistryHub registry={registry} loading={registryLoading} error={registryError} downloading={downloading} onOpen={openDataset} onDownload={downloadDataset} onRefresh={refreshRegistry} />
+        <DataRegistryHub localMode={localMode} registry={registry} loading={registryLoading} error={registryError} onOpen={openDataset} onRefresh={refreshRegistry} />
       </div>
     )
   }
@@ -388,8 +384,7 @@ export default function AdminSection({ localMode }) {
           {cloudCrawl.transfer.counts._errors.map((failure) => <li key={failure}>{failure}</li>)}
         </ul>}
       </div>
-
-      <DataRegistryHub registry={registry} loading={registryLoading} error={registryError} downloading={downloading} onOpen={openDataset} onDownload={downloadDataset} onRefresh={refreshRegistry} />
+      <DataRegistryHub localMode={localMode} registry={registry} loading={registryLoading} error={registryError} onOpen={openDataset} onRefresh={refreshRegistry} />
 
       <div className="admin-grid">
         <StatusCard index="Cloud" title="Tự cập nhật trên cloud" source="GitHub Actions → TiDB" status={{ state: cloudCrawl.run?.status === 'in_progress' ? 'running' : cloudCrawl.run?.conclusion === 'failure' ? 'error' : 'idle', message: cloudCrawl.available ? `${cloudCrawl.enabled ? 'Đang bật' : 'Đang tắt'} · ${cloudCrawl.schedule}` : 'Chưa kết nối lịch cloud' }}>
@@ -418,14 +413,14 @@ export default function AdminSection({ localMode }) {
         >
           <p className="muted small">Gói thầu: {status.msc?.meta?.tenders != null ? Number(status.msc.meta.tenders).toLocaleString('vi-VN') : '—'} bản ghi — được quản lý riêng trong tab Gói thầu.</p>
           <div className="date-range">
-            <Field label="Từ ngày"><input type="date" value={mscDates.from} onChange={(e) => setMscDates((d) => ({ ...d, from: e.target.value }))} /></Field>
-            <Field label="Đến ngày"><input type="date" value={mscDates.to} onChange={(e) => setMscDates((d) => ({ ...d, to: e.target.value }))} /></Field>
+            <Field label="Từ ngày"><DateInput aria-label="Từ ngày cập nhật" value={mscDates.from} onValueChange={value=>setMscDates(d=>({...d,from:value}))} /></Field>
+            <Field label="Đến ngày"><DateInput aria-label="Đến ngày cập nhật" value={mscDates.to} onValueChange={value=>setMscDates(d=>({...d,to:value}))} /></Field>
           </div>
           <button
             type="button"
             className="btn"
             disabled={!mscDates.from || !mscDates.to}
-            onClick={run(() => api.mscPricesBrowser({ dateFrom: mscDates.from, dateTo: mscDates.to }))}
+            onClick={run(() => api.mscPricesBrowser({ dateFrom: mscDates.from, dateTo: mscDates.to }), true)}
           >
             Cập nhật đơn giá mới / thay đổi (browser)
           </button>
@@ -433,7 +428,7 @@ export default function AdminSection({ localMode }) {
             type="button"
             className="btn warn"
             disabled={!mscDates.to}
-            onClick={run(() => api.mscPricesBrowser({ dateFrom: '2024-01-01', dateTo: mscDates.to, fullScan: true }))}
+            onClick={run(() => api.mscPricesBrowser({ dateFrom: '2024-01-01', dateTo: mscDates.to, fullScan: true }), true)}
           >
             Quét tổng thể đơn giá 2024 → nay
           </button>
@@ -441,7 +436,7 @@ export default function AdminSection({ localMode }) {
             type="button"
             className="btn warn"
             disabled={!mscDates.to}
-            onClick={run(() => api.mscPricesBrowser({ dateFrom: '2014-01-01', dateTo: mscDates.to, fullScan: true }))}
+            onClick={run(() => api.mscPricesBrowser({ dateFrom: '2014-01-01', dateTo: mscDates.to, fullScan: true }), true)}
           >
             Quét toàn bộ lịch sử 2014 → nay
           </button>
@@ -449,7 +444,7 @@ export default function AdminSection({ localMode }) {
             type="button"
             className="btn secondary"
             disabled={!mscDates.from || !mscDates.to}
-            onClick={run(() => api.mscPricesBrowser({ dateFrom: mscDates.from, dateTo: mscDates.to, fullScan: true }))}
+            onClick={run(() => api.mscPricesBrowser({ dateFrom: mscDates.from, dateTo: mscDates.to, fullScan: true }), true)}
           >
             Quét đủ khoảng đã chọn
           </button>
@@ -457,6 +452,12 @@ export default function AdminSection({ localMode }) {
             Cập nhật gói mới / đang hoạt động (browser)
           </button>
           <p className="muted small">Cập nhật từ mốc lần hoàn tất, quét chồng 3 ngày và chỉ ghi dòng mới / thay đổi. Gói thầu dừng khi qua mốc đó; gói còn mở, chờ kết quả hoặc đang xét được kiểm tra riêng tối đa một lần/ngày. Hồ sơ thuốc tải lại khi thông báo đổi hoặc sau 24 giờ. Đơn giá tải đủ cửa sổ cập nhật cho từng nhóm, không cố lấy 20 trang. Các nút quét tổng thể vẫn dùng Export để đối chiếu lịch sử. Nếu được hỏi, xác nhận captcha trong cửa sổ MSC.</p>
+        </StatusCard>
+
+        <StatusCard index="02c" title="MSC - YCBG" source="Yêu cầu báo giá · thầu thuốc · khớp tất cả từ (phân biệt dấu)" status={status.msc_ycbg}>
+          <p className="muted small">Lần đầu lấy toàn bộ các trang, 50 bản ghi/trang và lưu hồ sơ chi tiết. Hằng ngày lấy tối thiểu 3 trang gần nhất, quét chồng 7 ngày, kiểm tra lại YCBG còn nhận báo giá và thử lại hồ sơ lỗi. Hồ sơ đính kèm chưa có danh mục được ghi cần rà soát.</p>
+          <button type="button" className="btn" disabled={status.msc_ycbg?.state === 'running'} onClick={run(() => api.mscYcbg())}>Cập nhật YCBG</button>
+          <button type="button" className="btn secondary" disabled={status.msc_ycbg?.state === 'running'} onClick={run(() => api.mscYcbg({ fullScan: true }))}>Lấy toàn bộ YCBG & hồ sơ</button>
         </StatusCard>
 
         <StatusCard index="02b" title="MSC — Hồ sơ gói đang mở" source="Tải danh mục thuốc từ trang nguồn và đối chiếu Bảo An" status={status.msc_scope}>

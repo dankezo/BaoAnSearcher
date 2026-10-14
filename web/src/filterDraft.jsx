@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 
 /**
  * Owns in-progress filter text. The parent state (and the results table)
- * updates only when commit() or reset() runs — Tìm kiếm, Enter, or a suggestion.
+ * updates only when commit() or reset() runs — Tìm kiếm or Enter.
  */
 export const FilterDraft = forwardRef(function FilterDraft({ applied, children }, ref) {
   const [draft, setDraft] = useState(applied)

@@ -20,7 +20,7 @@ const bundle = await build({
   plugins: [{
     name: 'routing-fixtures',
     setup(buildApi) {
-      buildApi.onResolve({ filter: /\/(api|auth|components|supabaseCloud|DavSection|MscSection|VssSection|AdminSection|HomeDashboard|PortfolioCockpit|BaoAnCatalog|MapSection)$/ }, (args) => ({ path: args.path, namespace: 'fixture' }))
+      buildApi.onResolve({ filter: /\/(api|auth|components|supabaseCloud|DavSection|MscSection|VssSection|YcbgSection|AdminSection|HomeDashboard|PortfolioCockpit|BaoAnCatalog|MapSection|TenderMarketReport|analytics\/AnalyticsApp)$/ }, (args) => ({ path: args.path, namespace: 'fixture' }))
       buildApi.onLoad({ filter: /.*/, namespace: 'fixture' }, (args) => {
         if (args.path.endsWith('/api')) return { contents: 'export const api = { health: () => globalThis.routingHealth() }' }
         if (args.path.endsWith('/auth')) return { contents: 'export const useAuth = () => ({ user: null, signOut: async () => {} })' }

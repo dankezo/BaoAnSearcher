@@ -39,7 +39,7 @@ def status():
         runs = github('api', f'repos/{REPO}/actions/workflows/{WORKFLOW}/runs?per_page=1')
         latest = next(iter(runs.get('workflow_runs') or []), {})
         value = {'available': True, 'enabled': workflow.get('state') == 'active',
-                'schedule': '05:17 hằng ngày (giờ Việt Nam)',
+                'schedule': '05:17 thứ Hai–thứ Bảy (giờ Việt Nam), nghỉ Chủ nhật',
                 'run': {key: latest.get(key) for key in ('status', 'conclusion', 'html_url', 'created_at')},
                 'transfer': dict(_transfer)}
     except (RuntimeError, OSError, subprocess.TimeoutExpired):

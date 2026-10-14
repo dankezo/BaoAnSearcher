@@ -1,0 +1,5 @@
+.date-input { position:relative; display:block; min-width:0; width:100%; }
+.date-input > input[data-date-input] { width:100%; padding-right:38px; }
+.date-input-picker { position:absolute; right:4px; top:50%; transform:translateY(-50%); width:30px; height:30px; padding:0; display:grid; place-items:center; border:0; background:transparent; color:inherit; cursor:pointer; }
+.date-input-picker:disabled { cursor:default; opacity:.5; }
+.date-input > input.date-input-native { position:absolute; bottom:0; left:0; width:1px; height:1px; opacity:0; padding:0; border:0; pointer-events:none; }

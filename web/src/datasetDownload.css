@@ -1,0 +1,1 @@
+.dataset-download .download-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.dataset-download .download-fields label{display:grid;min-width:0;gap:5px}.dataset-download input,.dataset-download select{width:100%;box-sizing:border-box}.dataset-download p{line-height:1.6}.dataset-download.analytics-dialog{width:min(660px,calc(100vw - 28px))}

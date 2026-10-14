@@ -199,7 +199,8 @@ def build_vss_row(item: dict):
     soluong, soluong_raw = split_qty(_text(data, "soluong"))
     gia, gia_raw = split_money(_text(data, "gia"))
     thanhtien, thanhtien_raw = split_money(_text(data, "thanhtien"))
-    tungay, tungay_raw = split_date(_text(data, "tungay_hd") or _text(data, "tungay") or item.get("tungay_hd"))
+    # An explicitly empty contract date must not inherit the award/publication date.
+    tungay, tungay_raw = split_date(_text(data, "tungay_hd") or item.get("tungay_hd") or (_text(data, "tungay") if "tungay_hd" not in data else None))
     denngay, denngay_raw = split_date(_text(data, "denngay_hd") or item.get("denngay_hd"))
     congbo, congbo_raw = split_date(_text(data, "congbo"))
     hoatchat = _text(data, "hoatchat")

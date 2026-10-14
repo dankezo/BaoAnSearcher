@@ -101,8 +101,9 @@ class IncrementalTest(unittest.TestCase):
                 for ident,changed in [('fresh',-2),('changed',0),('due',-30)]:
                     core.save_records(con,'tenders',[tender(ids[ident])],observed_at=(now+timedelta(hours=changed)).isoformat())
             con=msc_scope._connect()
+            complete_lots=json.dumps([{'groupMedicine':'1','dangBaoChe':'Viên'}])
             for ident,age in [('fresh',-1),('changed',-1),('due',-25)]:
-                con.execute('INSERT INTO scope_lots VALUES(?,?,?)',(ids[ident],'[]',(now+timedelta(hours=age)).isoformat()))
+                con.execute('INSERT INTO scope_lots VALUES(?,?,?)',(ids[ident],complete_lots,(now+timedelta(hours=age)).isoformat()))
             con.commit();con.close()
             with patch.object(msc_scope,'_save_scope',return_value='none') as save:
                 result=msc_scope.refresh(limit=None)

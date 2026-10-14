@@ -6,21 +6,23 @@ export function stableKey(path, body) {
 
 const memory = new Map()
 const flights = new Map()
+let revision = 0
 
 export function cachedQuery(key, factory, { freshMs = 10000, staleMs = 60000 } = {}) {
   const now = Date.now()
   const hit = memory.get(key)
   if (hit && now - hit.at < freshMs) return Promise.resolve(hit.value)
   const refresh = () => {
+    const startedRevision = revision
     const pending = Promise.resolve()
       .then(factory)
       .then((value) => {
-        memory.set(key, { at: Date.now(), value })
-        flights.delete(key)
+        if(startedRevision === revision) memory.set(key, { at: Date.now(), value })
+        if(flights.get(key) === pending) flights.delete(key)
         return value
       })
       .catch((error) => {
-        flights.delete(key)
+        if(flights.get(key) === pending) flights.delete(key)
         throw error
       })
     flights.set(key, pending)
@@ -35,6 +37,7 @@ export function cachedQuery(key, factory, { freshMs = 10000, staleMs = 60000 } =
 }
 
 export function resetQueryCache() {
+  revision += 1
   memory.clear()
   flights.clear()
 }

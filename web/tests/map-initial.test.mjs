@@ -20,6 +20,8 @@ const bundle = await build({
   plugins: [{
     name: 'map-fixtures',
     setup(buildApi) {
+      buildApi.onResolve({filter:/\/SaveResultButton$/},()=>({path:'save-button',namespace:'save-fixture'}))
+      buildApi.onLoad({filter:/.*/,namespace:'save-fixture'},()=>({contents:'export default ()=>null'}))
       buildApi.onResolve({ filter: /^leaflet$/ }, () => ({ path: 'leaflet', namespace: 'fixture' }))
       buildApi.onResolve({ filter: /\/(api|supabaseCloud|areaStats|components|metrics)$/ }, (args) => ({ path: args.path, namespace: 'fixture' }))
       buildApi.onLoad({ filter: /.*/, namespace: 'fixture' }, (args) => {
@@ -93,6 +95,7 @@ test('map renders before facility selection and reports selected detail loading/
     assert.match(textOf(root.toJSON()), /Bản đồ nhiệt/)
     assert.match(textOf(root.toJSON()), /Chưa có hoạt chất trong 12 tháng này\./)
 
+    const mscButton=root.root.findAllByType('button').find(node=>textOf(node.children)==='MSC gói thầu');assert.equal(mscButton.props['aria-pressed'],true,'map defaults to MSC packages');await act(async()=>{root.root.findAllByType('button').find(node=>textOf(node.children)==='VSS').props.onClick();await wait()});
     const facilityButton = root.root.findAllByType('button').find(button => textOf(button.children).includes('Bệnh viện Hà Nội'))
     assert.ok(facilityButton, 'facility is listed and selectable')
     await act(async () => { facilityButton.props.onClick(); await wait() })

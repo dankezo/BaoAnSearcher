@@ -74,7 +74,7 @@ function priceWhere(filters, from, to) {
 
 function hasActivePriceFilters(filters = {}) {
   return Object.entries(filters).some(([key, value]) => {
-    if (key === 'metricMonths' || key === 'metricQuick') return false
+    if (key === 'metricMonths' || key === 'metricQuick' || key === 'strictDates') return false
     if (Array.isArray(value)) return value.some((item) => String(item || '').trim())
     return String(value || '').trim() !== ''
   })
@@ -82,7 +82,9 @@ function hasActivePriceFilters(filters = {}) {
 
 async function compactPriceRows(query, filters, window, rollup) {
   const to = iso(window.now), curFrom = iso(window.curFrom), prevFrom = iso(window.prevFrom), prevEnd = iso(window.prevEnd)
-  const where = priceWhere(filters, prevFrom, to)
+  const where = priceWhere({...filters,publishedFrom:'',publishedTo:''}, prevFrom, to)
+  const seriesDay = window.range ? 'day' : "DATE_FORMAT(day,'%Y-%m-01')"
+  const provinceDay = window.range ? 'day' : 'CASE WHEN day >= ? THEN ? ELSE ? END'
   const base = rollup
     ? `SELECT day, province, group_name, unit, revenue, quantity AS qty, cnt, min_price AS minPrice, max_price AS maxPrice
          FROM agg_msc_price_daily_units WHERE day >= ? AND day <= ?`
@@ -95,24 +97,24 @@ async function compactPriceRows(query, filters, window, rollup) {
   const rows = await rowsOf(query, `WITH filtered AS (${base}), eligible AS (
       SELECT * FROM filtered WHERE day >= ? OR day <= ?
     )
-    SELECT 'series' AS metric_scope, DATE_FORMAT(day,'%Y-%m-01') AS published,
+    SELECT 'series' AS metric_scope, MIN(day) AS published,
       '' AS province, COALESCE(group_name,'') AS group_name, COALESCE(unit,'') AS unit,
       SUM(revenue) AS revenue, SUM(qty) AS qty, SUM(cnt) AS cnt,
       MIN(minPrice) AS minPrice, MAX(maxPrice) AS maxPrice
-      FROM eligible GROUP BY DATE_FORMAT(day,'%Y-%m-01'), group_name, unit
+      FROM eligible GROUP BY ${seriesDay}, group_name, unit
     UNION ALL
-    SELECT 'province' AS metric_scope, CASE WHEN day >= ? THEN ? ELSE ? END AS published,
+    SELECT 'province' AS metric_scope, ${provinceDay} AS published,
       COALESCE(province,'') AS province, COALESCE(group_name,'') AS group_name, '' AS unit,
       SUM(revenue) AS revenue, SUM(qty) AS qty, SUM(cnt) AS cnt,
       MIN(minPrice) AS minPrice, MAX(maxPrice) AS maxPrice
-      FROM eligible GROUP BY CASE WHEN day >= ? THEN ? ELSE ? END, province, group_name`,
-    [...(rollup ? [prevFrom, to] : where.args), curFrom, prevEnd, curFrom, curFrom, prevFrom, curFrom, curFrom, prevFrom])
+      FROM eligible GROUP BY ${provinceDay}, province, group_name`,
+    [...(rollup ? [prevFrom, to] : where.args), curFrom, prevEnd, ...(window.range ? [] : [curFrom, curFrom, prevFrom, curFrom, curFrom, prevFrom])])
   if (rows.length >= 10000) throw new Error('Kết quả tổng hợp vượt giới hạn API; chưa thể tính metric đầy đủ.')
   return rows
 }
 
 export async function mscPriceSlice(query, filters = {}, months = 12) {
-  const window = mapWindow(months)
+  const window = mapWindow(months, new Date(), {tuNgay:filters.publishedFrom,denNgay:filters.publishedTo})
   let rows = null, source = 'tiflash'
   if (!hasActivePriceFilters(filters)) {
     try {
@@ -175,7 +177,8 @@ export function shapePriceRows(rows, window, source = 'tiflash', includeGroups =
       if (row.minPrice != null) part.minPrice = part.minPrice == null ? num(row.minPrice) : Math.min(part.minPrice, num(row.minPrice))
       if (row.maxPrice != null) part.maxPrice = part.maxPrice == null ? num(row.maxPrice) : Math.max(part.maxPrice, num(row.maxPrice))
       if (digit) groups[Number(digit) - 1] += revenue
-    } else {
+    }
+    if (previous) {
       prov.prev += revenue
       prevRevenue += revenue
     }
@@ -209,6 +212,7 @@ export function shapePriceRows(rows, window, source = 'tiflash', includeGroups =
     section: 'msc_prices',
     source,
     months: window.months,
+    range: window.range,
     series: points,
     topGrowth: ranked.slice(0, 3),
     topProvinces: byValue.slice(0, 6).map((row) => ({

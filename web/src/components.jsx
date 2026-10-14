@@ -264,7 +264,7 @@ export function MultiSelectField({
   const filtered = useMemo(() => {
     const n = fold(q)
     if (!n) return normOpts
-    return normOpts.filter((o) => fold(o.label).includes(n) || fold(o.value).includes(n))
+    return normOpts.filter((o) => n.trim().split(/\s+/).every(word => fold(o.label).includes(word) || fold(o.value).includes(word)))
   }, [normOpts, q])
 
   const summary = selected.length === 0
@@ -390,7 +390,6 @@ export function SuggestField({
     onChange(text)
     setOpen(false)
     setItems([])
-    onSearch?.(text)
   }
 
   const onKey = (e) => {
@@ -497,7 +496,6 @@ export function SuggestInput({
     onChange(text)
     setOpen(false)
     setItems([])
-    onSearch?.(text)
   }
 
   return (
@@ -522,7 +520,7 @@ export function SuggestInput({
         }}
       />
       {value ? (
-        <button type="button" className="clear" aria-label="Xóa" onClick={() => { onChange(''); setItems([]); onSearch?.('') }}>{I.x}</button>
+        <button type="button" className="clear" aria-label="Xóa" onClick={() => { onChange(''); setItems([]) }}>{I.x}</button>
       ) : null}
       {show && (
         <ul className="suggest-list col" role="listbox">
@@ -945,11 +943,12 @@ export function UpdatedNote({ updated, count, source }) {
   return (
     <div className="updated-note" title={updated ? String(updated) : undefined}>
       {I.clock}
-      <span>
+      <span className="updated-note-full">
         {updated ? <>Dữ liệu cập nhật từ <strong>{fmtDateTime(updated)}</strong> <em>({relativeTime(updated)})</em></> : 'Chưa rõ thời điểm cập nhật'}
         {count != null && <> · {Number(count).toLocaleString('vi-VN')} bản ghi</>}
         {source && <> · {source}</>}
       </span>
+      <span className="updated-note-compact">Cập nhật<br/>{updated?fmtDateTime(updated):'Chưa rõ ngày'}</span>
     </div>
   )
 }
@@ -1158,14 +1157,14 @@ export function TableToolbar({
   return (
     <div className="toolbar">
       <div className="toolbar-title">
-        {kicker && <span className="kicker">{kicker}</span>}
+        {kicker && kicker !== 'Bảng chính' && <span className="kicker">{kicker}</span>}
         <h2>{title}</h2>
       </div>
       <div className="toolbar-actions">
         {children}
         <button
           type="button"
-          className={`btn ghost sm${filtersVisible ? ' on' : ''}`}
+          className={`btn ghost sm toolbar-column-filter${filtersVisible ? ' on' : ''}`}
           onClick={onToggleFilters}
           title="Bật/tắt dòng lọc theo cột (kiểu Excel)"
         >
@@ -1173,7 +1172,7 @@ export function TableToolbar({
           {activeColumnFilters > 0 && <span className="pill">{activeColumnFilters}</span>}
         </button>
         {activeColumnFilters > 0 && (
-          <button type="button" className="btn ghost sm" onClick={onClearColumnFilters}>Xóa lọc cột</button>
+          <button type="button" className="btn ghost sm toolbar-column-filter" onClick={onClearColumnFilters}>Xóa lọc cột</button>
         )}
         <button
           type="button"
@@ -1204,7 +1203,7 @@ export const DataTable = memo(function DataTable({
   selectable = true, selected, onToggleRow, onToggleAll,
   columnFilters = {}, onColumnFilter, filtersVisible = true, onFilterEnter,
   onFilterSuggest,
-  onRowDoubleClick, emptyText = 'Không có dữ liệu', emptyAction = null, loading,
+  onRowDoubleClick, rowDoubleClickCapture = false, emptyText = 'Không có dữ liệu', emptyAction = null, loading,
   trailing, // { label, render(row) }
   minWidth,
   cardKeys = null,
@@ -1249,14 +1248,15 @@ export const DataTable = memo(function DataTable({
     return out
   }, [columns, rows])
 
-  const extraCols = (showIndex ? 1 : 0) + (selectable ? 1 : 0) + (trailing ? 1 : 0)
-  const colSpan = columns.length + extraCols
   const scrollRef = useRef(null)
   const [narrow, setNarrow] = useState(() => (
     typeof window !== 'undefined' && window.matchMedia
       ? window.matchMedia('(max-width: 640px)').matches
       : false
   ))
+  const cards = narrow
+  const detailAction = false
+  const colSpan = columns.length + (showIndex ? 1 : 0) + (selectable ? 1 : 0) + (trailing ? 1 : 0) + (detailAction ? 1 : 0)
   const [scrollMargin, setScrollMargin] = useState(0)
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return undefined
@@ -1269,7 +1269,7 @@ export const DataTable = memo(function DataTable({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => (narrow ? 156 : 36),
+    estimateSize: () => (cards ? 156 : 36),
     overscan: 8,
     initialRect: { width: 800, height: 640 },
     scrollMargin,
@@ -1278,12 +1278,12 @@ export const DataTable = memo(function DataTable({
   virtualizerRef.current = virtualizer
   useLayoutEffect(() => {
     const thead = scrollRef.current?.querySelector('thead')
-    const height = !narrow && thead ? thead.offsetHeight || 0 : 0
+    const height = !cards && thead ? thead.offsetHeight || 0 : 0
     setScrollMargin((prev) => (prev === height ? prev : height))
-  }, [narrow, filtersVisible, columns.length, rows.length])
+  }, [cards, filtersVisible, columns.length, rows.length])
   useEffect(() => {
     virtualizerRef.current?.measure()
-  }, [narrow, scrollMargin])
+  }, [cards, scrollMargin])
   const virtualRows = rows.length ? virtualizer.getVirtualItems() : []
   // The default result page is 100 rows. Render it directly so variable-height
   // price rows cannot change a virtual scroll estimate; larger user-selected
@@ -1328,9 +1328,11 @@ export const DataTable = memo(function DataTable({
         data-index={i}
         ref={measure ? virtualizer.measureElement : undefined}
         className={[isSel ? 'selected' : '', typeof rowClassName === 'function' ? rowClassName(row) : ''].filter(Boolean).join(' ')}
-        onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(row) : undefined}
+        onDoubleClickCapture={rowDoubleClickCapture && onRowDoubleClick ? (event) => { if (!event.target.closest('button,input,summary')) { event.stopPropagation(); onRowDoubleClick(row) } } : undefined}
+        onDoubleClick={!rowDoubleClickCapture && onRowDoubleClick ? () => onRowDoubleClick(row) : undefined}
         title={onRowDoubleClick ? 'Nhấp đôi để xem chi tiết' : undefined}
       >
+        {detailAction && <td className="mobile-detail-action"><button type="button" className="btn ghost sm" onClick={() => onRowDoubleClick(row)}>Chi tiết</button></td>}
         {selectable && (
           <td className="sel" onClick={(e) => e.stopPropagation()}>
             <input type="checkbox" checked={!!isSel} onChange={() => onToggleRow?.(k, row)} aria-label="Chọn dòng" />
@@ -1354,11 +1356,17 @@ export const DataTable = memo(function DataTable({
   }
 
   return (
+    <div className="result-view">
+      {narrow && <div className="result-view-controls">
+        {selectable && <label><input type="checkbox" checked={allChecked} aria-label="Chọn tất cả trang này" onChange={e => onToggleAll?.(keys.map((k, i) => [k, rows[i]]), e.target.checked)}/>Chọn trang</label>}
+      </div>}
     <div className="table-wrap" ref={scrollRef}>
       {entityMenu&&<EntityContextMenu menu={entityMenu} onClose={closeEntityMenu}/>}
+      {!cards &&
       <table className={`data desktop-table${filtersVisible ? ' with-filters' : ''}`} style={minWidth ? { minWidth } : undefined}>
         <thead>
           <tr className="labels">
+            {detailAction && <th className="mobile-detail-action">Chi tiết</th>}
             {selectable && (
               <th className="sel">
                 <input
@@ -1381,6 +1389,7 @@ export const DataTable = memo(function DataTable({
           </tr>
           {filtersVisible && (
             <tr className="filters-row">
+              {detailAction && <th className="mobile-detail-action"/>}
               {selectable && <th className="sel" />}
               {showIndex && <th className="idx" />}
               {columns.map((c) => (
@@ -1391,10 +1400,6 @@ export const DataTable = memo(function DataTable({
                       onChange={(e) => {
                         const value = e.target.value
                         onColumnFilter?.(c.key, value)
-                        // A select is already a committed choice.  Send its
-                        // value with the refresh so consumers never read a
-                        // stale React state snapshot.
-                        onFilterEnter?.(c.key, value)
                       }}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent?.isComposing) onFilterEnter?.(c.key, e.currentTarget.value) }}
                       aria-label={`Lọc ${c.label}`}
@@ -1419,15 +1424,15 @@ export const DataTable = memo(function DataTable({
           )}
         </thead>
         <tbody>
-          {padTop > 0 && !narrow && (
+          {padTop > 0 && (
             <tr className="virt-spacer" aria-hidden="true">
               <td colSpan={colSpan} style={{ height: padTop, padding: 0, border: 0 }} />
             </tr>
           )}
-          {!narrow && (shouldVirtualize
+          {(shouldVirtualize
             ? virtualRows.map((vi) => renderRow(rows[vi.index], vi.index, true))
             : rows.map((row, index) => renderRow(row, index, false)))}
-          {padBottom > 0 && !narrow && (
+          {padBottom > 0 && (
             <tr className="virt-spacer" aria-hidden="true">
               <td colSpan={colSpan} style={{ height: padBottom, padding: 0, border: 0 }} />
             </tr>
@@ -1436,29 +1441,28 @@ export const DataTable = memo(function DataTable({
             <tr className="empty"><td colSpan={colSpan}>{emptyBlock}</td></tr>
           )}
         </tbody>
-      </table>
+      </table>}
 
+      {cards &&
       <div className="result-cards" aria-label="Kết quả dạng thẻ">
-        {narrow && padTop > 0 && <div aria-hidden="true" style={{ height: padTop }} />}
-        {narrow && (shouldVirtualize ? virtualRows : rows.map((_, index) => ({ index }))).map((vi) => {
+        {padTop > 0 && <div aria-hidden="true" style={{ height: padTop }} />}
+        {(shouldVirtualize ? virtualRows : rows.map((_, index) => ({ index }))).map((vi) => {
           const i = vi.index
           const row = rows[i]
           const k = keys[i]
           const titleCol = cardCols[0]
           let title = '—'
           if (titleCol) {
-            if (titleCol.text) title = titleCol.text(row)
-            else if (titleCol.render) title = titleCol.render(row[titleCol.key], row)
+            if (titleCol.render) title = titleCol.render(row[titleCol.key], row)
+            else if (titleCol.text) title = titleCol.text(row)
             else title = row[titleCol.key] ?? '—'
           }
           return (
-            <button
+            <article
               key={k}
-              type="button"
               data-index={i}
               ref={shouldVirtualize ? virtualizer.measureElement : undefined}
-              className={`result-card${selected?.has(k) ? ' selected' : ''}`}
-              onClick={() => onRowDoubleClick?.(row)}
+              className={['result-card', selected?.has(k) ? 'selected' : '', typeof rowClassName === 'function' ? rowClassName(row) : ''].filter(Boolean).join(' ')}
               onContextMenu={titleCol?e=>showEntityMenu(e,titleCol,row):undefined}
             >
               <div className="result-card-title">
@@ -1467,9 +1471,10 @@ export const DataTable = memo(function DataTable({
               <dl className="result-card-grid">
                 {cardCols.slice(1).map((c) => {
                   let val
-                  if (c.text) val = c.text(row)
-                  else if (c.render) val = c.render(row[c.key], row)
+                  if (c.render) val = c.render(row[c.key], row)
+                  else if (c.text) val = c.text(row)
                   else val = row[c.key]
+                  if (typeof val === 'number') val = val.toLocaleString('vi-VN')
                   return (
                     <div key={c.key} className="result-card-row">
                       <dt>{c.label}</dt>
@@ -1478,13 +1483,18 @@ export const DataTable = memo(function DataTable({
                   )
                 })}
               </dl>
-              <div className="result-card-hint muted">Chạm để xem chi tiết</div>
-            </button>
+              {(selectable || onRowDoubleClick || trailing) && <div className="result-card-actions">
+                {selectable && <label><input type="checkbox" checked={!!selected?.has(k)} onChange={() => onToggleRow?.(k, row)} aria-label={`Chọn dòng ${startIndex+i+1}`}/>Chọn</label>}
+                {onRowDoubleClick && <button type="button" className="btn ghost sm" onClick={() => onRowDoubleClick(row)} aria-label={`Xem chi tiết dòng ${startIndex+i+1}`}>Xem chi tiết</button>}
+                {trailing?.render(row)}
+              </div>}
+            </article>
           )
         })}
-        {narrow && padBottom > 0 && <div aria-hidden="true" style={{ height: padBottom }} />}
-        {narrow && !rows.length && !loading && emptyBlock}
-      </div>
+        {padBottom > 0 && <div aria-hidden="true" style={{ height: padBottom }} />}
+        {!rows.length && !loading && emptyBlock}
+      </div>}
+    </div>
     </div>
   )
 })
@@ -1508,6 +1518,7 @@ export async function exportSelectionOrAll({ columns, selected, fetchAll, filena
     columns,
     rows,
     getValue: (r, c) => {
+      if (c.exportValue) return c.exportValue(r)
       if (c.text) return c.text(r)
       const v = r[c.key]
       return typeof v === 'object' && v !== null ? JSON.stringify(v) : v
@@ -1525,6 +1536,7 @@ export async function fetchAllPages(fetchPage, {
   cap = PAGE_SIZE_FULL_CAP,
   onProgress,
   shouldCancel,
+  strict = false,
 } = {}) {
   const checkCancelled = () => {
     if (shouldCancel?.()) throw new DOMException('Đã hủy nạp dữ liệu', 'AbortError')
@@ -1541,24 +1553,33 @@ export async function fetchAllPages(fetchPage, {
       checkCancelled()
       const more = await fetchPage(page, size, cursor)
       checkCancelled()
-      if (!more.items?.length) break
+      if (!more.items?.length) {
+        if(strict)throw new Error('API chưa trả đủ trang dữ liệu; chưa xuất tệp. Vui lòng thử lại.')
+        break
+      }
+      if(strict && cursor && more.nextCursor === cursor && more.hasMore)throw new Error('Con trỏ phân trang bị lặp; chưa xuất tệp. Vui lòng thử lại.')
       items.push(...more.items)
       hasMore = more.hasMore === true
       cursor = more.nextCursor || null
       page += 1
       onProgress?.(Math.min(99, Math.round((items.length / cap) * 100)))
     }
+    if (strict && (hasMore || items.length > cap)) throw new Error(`Kết quả vượt ${cap.toLocaleString('vi-VN')} dòng. Hãy thu hẹp bộ lọc hoặc tải Snapshot đầy đủ trong mục Dữ liệu.`)
     onProgress?.(100)
     return items.slice(0, cap)
   }
   const total = Math.min(first.total || items.length, cap)
+  if (strict && first.total > cap) throw new Error(`Kết quả vượt ${cap.toLocaleString('vi-VN')} dòng. Hãy thu hẹp bộ lọc hoặc tải Snapshot đầy đủ trong mục Dữ liệu.`)
   onProgress?.(items.length && total ? Math.min(99, Math.round((items.length / total) * 100)) : 5)
   let page = 1
   while (items.length < total) {
     checkCancelled()
     const more = await fetchPage(page, size, cursor)
     checkCancelled()
-    if (!more.items?.length) break
+    if (!more.items?.length) {
+      if(strict)throw new Error('API chưa trả đủ trang dữ liệu; chưa xuất tệp. Vui lòng thử lại.')
+      break
+    }
     items.push(...more.items)
     cursor = more.nextCursor || null
     onProgress?.(Math.min(99, Math.round((items.length / Math.max(total, 1)) * 100)))
@@ -1566,6 +1587,7 @@ export async function fetchAllPages(fetchPage, {
     if (more.items.length < size) break
   }
   onProgress?.(100)
+  if(strict && items.length < total)throw new Error('API chưa trả đủ trang dữ liệu; chưa xuất tệp. Vui lòng thử lại.')
   return items.slice(0, cap)
 }
 

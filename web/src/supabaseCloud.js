@@ -6,11 +6,26 @@ import { getSupabase, supabaseConfigured } from './supabaseClient'
 import { mapTursoItems } from './tursoMap'
 import { buildDavRpcParams } from './services/davRpc'
 import { cachedQuery, stableKey } from './queryCache'
+import { authenticatedFetch } from './lib/supabase-auth'
 
 export { supabaseConfigured, getSupabase }
 
 /** Prefer Turso hybrid when auth is configured (API verifies JWT). */
 export const tursoHybridEnabled = supabaseConfigured
+
+export async function cloudRefreshTenders(onProgress) {
+  const response=await authenticatedFetch('/api/tender/refresh',{method:'POST',headers:{Accept:'application/x-ndjson'},signal:AbortSignal.timeout(150000)})
+  if(!response.ok){const data=await response.json();throw new Error(data.error||'Chưa cập nhật được gói thầu.')}
+  const reader=response.body.getReader(),decoder=new TextDecoder();let pending='',result
+  while(true){
+    const {value,done}=await reader.read();pending+=decoder.decode(value,{stream:!done})
+    const lines=pending.split('\n');pending=lines.pop()||''
+    for(const line of lines){if(!line.trim())continue;const event=JSON.parse(line);if(event.type==='progress')onProgress?.(event);else if(event.type==='error')throw new Error(event.error);else if(event.type==='complete')result=event.data}
+    if(done)break
+  }
+  if(!result)throw new Error('Lượt cập nhật bị gián đoạn. Các gói đã tải vẫn được giữ; thử lại sau.')
+  return result
+}
 
 function fold(text) {
   const s = String(text ?? '').toLowerCase().replace(/đ/g, 'd')
@@ -22,20 +37,9 @@ function foldParam(v) {
   return s || null
 }
 
-async function accessToken() {
-  const sb = getSupabase()
-  if (!sb) throw new Error('Chưa cấu hình Supabase Auth.')
-  const { data, error } = await sb.auth.getSession()
-  if (error) throw new Error(error.message)
-  const token = data.session?.access_token
-  if (!token) throw new Error('Unauthorized — vui lòng đăng nhập lại.')
-  return token
-}
-
 const abortByKey = new Map()
 
 async function rawTender(path, body, { method = 'POST', abortKey } = {}) {
-  const token = await accessToken()
   const controller = new AbortController()
   if (abortKey) {
     abortByKey.get(abortKey)?.abort()
@@ -43,12 +47,11 @@ async function rawTender(path, body, { method = 'POST', abortKey } = {}) {
   }
   const timeout = setTimeout(() => controller.abort(), 55_000)
   try {
-    const res = await fetch(path, {
+    const res = await authenticatedFetch(path, {
       method,
       signal: controller.signal,
       headers: {
         ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
-        Authorization: `Bearer ${token}`,
       },
       body: method === 'POST' ? JSON.stringify(body || {}) : undefined,
     })
@@ -183,11 +186,12 @@ export async function cloudVssSearch({ filters = {}, page = 0, size = 100, curso
       page,
       size,
       cursor,
-    }, { abortKey: 'search:vss' })
+    }, { abortKey: filters._export ? 'export:vss' : 'search:vss' })
     return normalizePage(payload, page, size)
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
     // Turso API missing / not deployed yet → legacy Supabase
+    if (filters._export) throw e
     return supabaseVss(filters, page, size)
   }
 }
@@ -204,11 +208,12 @@ export async function cloudDavSearch({ filters = {}, page = 0, size = 100, curso
       page,
       size,
       cursor,
-    }, { abortKey: 'search:dav' })
+    }, { abortKey: filters._export ? 'export:dav' : 'search:dav' })
     return normalizePage(payload, page, size)
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
     if (filters.tenderGroup?.length) throw new Error('Chưa tải được nhóm thầu từ nguồn chính. Nguồn DAV dự phòng chưa hỗ trợ bộ lọc nhóm; vui lòng thử lại.')
+    if (filters._export) throw e
     const sb = getSupabase()
     const { data, error } = await sb.rpc('search_dav_drugs', buildDavRpcParams(filters, page, size))
     if (error) throw new Error(error.message || String(error))
@@ -223,23 +228,25 @@ export async function cloudDavSearch({ filters = {}, page = 0, size = 100, curso
 }
 
 /**
- * @param {{ kind?: string, filters?: object, page?: number, size?: number, cursor?: Record<string, string> | null }} [opts]
+ * @param {{ kind?: string, filters?: object, page?: number, size?: number, cursor?: Record<string, string> | null, view?: string }} [opts]
  */
-export async function cloudMscSearch({ kind = 'prices', filters = {}, page = 0, size = 100, cursor = null } = {}) {
+export async function cloudMscSearch({ kind = 'prices', filters = {}, page = 0, size = 100, cursor = null, view = '' } = {}) {
   if (!supabaseConfigured) throw new Error('Chưa cấu hình Supabase (VITE_SUPABASE_URL / ANON_KEY).')
   try {
     const payload = await tenderFetch('/api/tender/search', {
-      kind: kind === 'tenders' ? 'msc_tenders' : 'msc_prices',
+      kind: kind === 'ycbg' ? 'msc_ycbg' : kind === 'tenders' ? 'msc_tenders' : 'msc_prices',
       filters,
       page,
       size,
       cursor,
-    }, { abortKey: `search:msc:${kind}:${stableKey('f', { filters, cursor, size })}` })
+      ...(view?{view}:{}),
+    }, { abortKey: `search:msc:${kind}:${stableKey('f', { filters, cursor, size, view })}` })
     return normalizePage(payload, page, size)
   } catch (e) {
     if (e.status === 401 || e.status === 403) throw e
     const sb = getSupabase()
     const f = filters || {}
+    if (filters._export || kind === 'ycbg') throw e
     const { data, error } = await sb.rpc('search_msc', {
       p_kind: kind === 'tenders' ? 'tenders' : 'prices',
       p_q: foldParam(f.q),
@@ -279,8 +286,8 @@ export function cloudDataRegistry() {
 }
 
 /** Resolve an authenticated direct R2 CSV URL; no file bytes pass through Vercel. */
-export function cloudDatasetDownload(code) {
-  return tenderFetch(`/api/admin/datasets/download/${encodeURIComponent(code)}`, null, {
+export function cloudDatasetDownload(code, format = 'csv') {
+  return tenderFetch(`/api/admin/datasets/download/${encodeURIComponent(code)}?format=${encodeURIComponent(format)}`, null, {
     method: 'GET', freshMs: 0, staleMs: 0,
   })
 }

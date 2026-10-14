@@ -15,8 +15,8 @@ export async function companyProfiles(q,refresh=false,legalName){
  if(q.mode!=='company'||!q.entity)return {profiles:[],reason:'Nhập tên doanh nghiệp để xem hồ sơ.'}
  const phrase=fold(q.entity).replace(/[!%_]/g,c=>'!'+c)
  let profiles=[]
- try{profiles=(await query("SELECT profile_json FROM company_profiles WHERE name_key LIKE ? ESCAPE '!' ORDER BY legal_name LIMIT 20",[`%${phrase}%`])).rows.map(r=>typeof r.profile_json==='string'?JSON.parse(r.profile_json):r.profile_json)}catch{return {profiles:[],reason:'Chưa có bảng hồ sơ doanh nghiệp trên production.'}}
- if(!refresh)return {profiles}
+ try{profiles=(await query("SELECT profile_json FROM company_profiles WHERE name_key LIKE ? ESCAPE '!' ORDER BY legal_name LIMIT 20",[`%${phrase}%`])).rows.map(r=>typeof r.profile_json==='string'?JSON.parse(r.profile_json):r.profile_json)}catch{/* Web lookup remains available if the profile store is unavailable. */}
+ if(!refresh&&profiles.some(p=>p.status==='web_verified'&&p.sourceUrls?.length&&Date.now()-Date.parse(p.checkedAt)<30*86400000))return {profiles}
  if(legalName&&!companyNameMatches(legalName,q.entity))throw Object.assign(new Error('Tên pháp nhân không thuộc phạm vi tìm kiếm.'),{status:400})
  const found=await crawlCompany(legalName||q.entity)
  if(found.status!=='verified')return {profiles,reason:found.reason||'Chưa xác minh được hồ sơ từ nguồn web.'}
@@ -24,6 +24,6 @@ export async function companyProfiles(q,refresh=false,legalName){
  const profile={...previous,...found,status:'web_verified',officeAddress:found.address||previous.officeAddress,officeProvince:addressProvince(found.address)||previous.officeProvince}
  for(const field of ['taxId','phone','email','website','imageUrl','introduction'])if(!profile[field]&&previous[field])profile[field]=previous[field]
  profile.sourceUrls=[...new Set([...(found.sourceUrls||[]),...(previous.sourceUrls||[])])].slice(0,10)
- await query('INSERT INTO company_profiles(name_key,legal_name,office_province,factory_province,profile_json,checked_at) VALUES (?,?,?,?,?,NOW()) ON DUPLICATE KEY UPDATE legal_name=VALUES(legal_name),office_province=VALUES(office_province),factory_province=VALUES(factory_province),profile_json=VALUES(profile_json),checked_at=VALUES(checked_at)',[fold(profile.legalName),profile.legalName,profile.officeProvince||null,profile.factoryProvince||null,JSON.stringify(profile)])
+ try{await query('INSERT INTO company_profiles(name_key,legal_name,office_province,factory_province,profile_json,checked_at) VALUES (?,?,?,?,?,NOW()) ON DUPLICATE KEY UPDATE legal_name=VALUES(legal_name),office_province=VALUES(office_province),factory_province=VALUES(factory_province),profile_json=VALUES(profile_json),checked_at=VALUES(checked_at)',[fold(profile.legalName),profile.legalName,profile.officeProvince||null,profile.factoryProvince||null,JSON.stringify(profile)])}catch{return {profiles:[profile,...profiles.filter(p=>fold(p.legalName)!==fold(profile.legalName))],reason:'Đã tra cứu web; chưa lưu được vào kho hồ sơ.'}}
  return {profiles:[profile,...profiles.filter(p=>fold(p.legalName)!==fold(profile.legalName))]}
 }

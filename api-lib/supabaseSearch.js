@@ -191,8 +191,12 @@ export async function searchSupabase(accessToken, kind, filters, page, size, cur
     query = applyLike(query, 'ten_tinh', f.ten_tinh)
     query = applyLike(query, 'nuocsx', f.nuocsx)
     query = applyEq(query, 'nam', f.nam, true)
-    if (f.tuNgay) query = query.or(`tungay_hd.is.null,tungay_hd.gte.${String(f.tuNgay).slice(0, 10)}`)
-    if (f.denNgay) query = query.or(`tungay_hd.is.null,tungay_hd.lte.${String(f.denNgay).slice(0, 10)}`)
+    if (f.tuNgay) query = query.gte('tungay_hd', String(f.tuNgay).slice(0, 10))
+    if (f.denNgay) {
+      const nextDay=new Date(`${String(f.denNgay).slice(0,10)}T00:00:00Z`)
+      nextDay.setUTCDate(nextDay.getUTCDate()+1)
+      query=query.neq('tungay_hd','').lt('tungay_hd',nextDay.toISOString().slice(0,10))
+    }
     return query
   }, page, size, [['tungay_hd', false], ['fingerprint', true]], cursor, countOnly)
 }

@@ -6,16 +6,17 @@ from datetime import datetime
 
 from .baoan_match import public_lines, sdk_density
 from .metric_slice import _in_span, _msc_keep, _msc_rows, _parse_dt, _window
-from .msc_scope import attach, matches_scope
+from .msc_scope import attach, matches_scope, notify_id
 
 
 def _price(value):
     if isinstance(value, bool) or value is None or value == "":
         return None
-    if isinstance(value, (int, float)):
+    try:
         number = float(value)
-        return int(number) if number.is_integer() else number
-    return None
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return (int(number) if number.is_integer() else number) if number == number and abs(number) != float("inf") else None
 
 
 def _link(url) -> str:
@@ -74,9 +75,10 @@ def build_rows(items, level: str, density) -> list[dict]:
     """One row per matched tender line and Bảo An product."""
     level = level if level in ("exact", "near", "all") else "all"
     rows = []
-    for item in items or []:
+    for item_index, item in enumerate(items or []):
         package = item.get("baoan_match")
-        for line in public_lines(item.get("scope_lots") or []):
+        source_key = notify_id(item) or item.get("source_id") or item.get("tender_no") or item_index
+        for line_index, line in enumerate(public_lines(item.get("scope_lots") or [])):
             hit_level = line.get("match") or ""
             if level == "exact" and hit_level != "exact":
                 continue
@@ -85,6 +87,7 @@ def build_rows(items, level: str, density) -> list[dict]:
             if level == "all" and hit_level not in ("exact", "near"):
                 continue
             hits = line.get("hits") or [{}]
+            quantity, price = _price(line.get("qty")), _price(line.get("price"))
             for hit in hits:
                 inn = hit.get("inn") or ""
                 rows.append({
@@ -97,7 +100,10 @@ def build_rows(items, level: str, density) -> list[dict]:
                     "formMt": line.get("form") or "",
                     "routeMt": line.get("route") or "",
                     "unit": line.get("unit") or "",
-                    "price": _price(line.get("price")),
+                    "price": price,
+                    "quantity": quantity,
+                    "totalValue": price * quantity if price is not None and quantity is not None else None,
+                    "scopeLineKey": f"{source_key}:{line_index}",
                     "inn": inn,
                     "brand": hit.get("brand") or "",
                     "strength": hit.get("strength") or "",

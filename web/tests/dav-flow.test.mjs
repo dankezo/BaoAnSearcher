@@ -21,6 +21,7 @@ const bundle = await build({
   jsx: 'automatic',
   external: ['react', 'react-dom'],
   define: { 'import.meta.env': '{}' },
+  loader: { '.css':'empty' },
   plugins: [
     {
       name: 'auth-fixture',
@@ -120,6 +121,16 @@ test('DAV flow: load, metrics, draft filters, pagination, selection, columns, re
     )
     for (const title of ['Mật độ SĐK', 'Tag hồ sơ', 'Dạng bào chế', 'SĐK mới cấp'])
       assert.ok(metrics.includes(title))
+    const savedSnapshot = await controller.getSnapshot()
+    assert.equal(savedSnapshot.rows.length, 125, 'save collects every page, not only the displayed page')
+    assert.ok(savedSnapshot.rows.every(row => typeof row.tagId === 'string' && row.tagId.length > 0), 'saved status matches the enriched lookup rows')
+    const beforeColumns = calls.length, visibleBefore = controller.rows.length
+    await act(async () => controller.setCF('tenThuoc', 'Không tồn tại'))
+    assert.equal(calls.length, beforeColumns, 'column typing must not query')
+    assert.equal(controller.rows.length, visibleBefore, 'column typing must not filter the current page')
+    await act(async () => { controller.runSearch(); await flush() })
+    assert.equal(controller.rows.length, 0, 'explicit search applies column drafts')
+    await act(async () => { controller.clearColumnFilters(); await flush() })
     const before = calls.length
     await act(async () => controller.setF('q', 'Thuốc 1'))
     assert.equal(calls.length, before, 'draft input must not auto-apply')

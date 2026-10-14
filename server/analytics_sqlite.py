@@ -147,6 +147,8 @@ def open_db(source):
     connection.create_function('DMUL', 2, lambda a,b: str(decimal(a)*decimal(b)) if decimal(a) is not None and decimal(b) is not None else None, deterministic=True)
     connection.create_function('CMUL', 2, lambda a,b: str(Decimal(a)*Decimal(b)) if a is not None and b is not None else None, deterministic=True)
     connection.create_function('FOLD', 1, lambda x: re.sub(r'\s+', ' ', fold(x)).strip(), deterministic=True)
+    connection.create_function('REGEXP', 2, lambda pattern, value: bool(re.search(pattern, str(value or ''))), deterministic=True)
+    connection.create_function('REGEXP_REPLACE', 3, lambda value, pattern, replacement: re.sub(pattern, replacement, str(value or '')), deterministic=True)
     connection.create_function('AGROUP', 1, lru_cache(maxsize=256)(lambda x: (re.search(r'[1-5]', str(x or '')) or [''])[0]), deterministic=True)
     try:
         profile_path=Path(os.environ['ANALYTICS_COMPANY_PROFILES_PATH']) if os.environ.get('ANALYTICS_COMPANY_PROFILES_PATH') else Path(os.environ['ANALYTICS_DB_DIR'])/'company_profiles.json' if os.environ.get('ANALYTICS_DB_DIR') else ROOT/'data'/'company_profiles.json'

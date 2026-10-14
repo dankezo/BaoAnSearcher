@@ -11,6 +11,38 @@ from server.msc_filters import matches_quick
 
 
 class TenderFiltersTest(unittest.TestCase):
+    def test_lots_finder_prefers_full_medicine_details_over_notice_names(self):
+        thin = [{"lotName": "A", "lotNo": "PP1"}]
+        full = [{"lotName": "A", "groupMedicine": "Nhóm 4", "dangBaoChe": "Viên nén", "nongDo": "500mg"}]
+        payload = {"lotDTOList": thin, "webform": {"lotDTOList": full}}
+        self.assertEqual(msc_scope._lots_in(payload), full)
+        self.assertTrue(msc_scope._scope_complete(full))
+        self.assertFalse(msc_scope._scope_complete(thin))
+        self.assertTrue(msc_scope._scope_complete([{"lotName": "A", "medicines": "1", "dangBaoChe": "Viên nén"}]))
+
+    def test_buyer_search_matches_each_word_with_accents_and_extra_spaces(self):
+        clauses, args = msc.search_where('tenders', {'buyer': ['benh vien da khoa son tay']})
+        con = sqlite3.connect(':memory:')
+        con.create_function('fold', 1, msc.fold)
+        con.execute('CREATE TABLE records(kind TEXT, normalized TEXT)')
+        con.execute('INSERT INTO records VALUES (?,?)', ('tenders', json.dumps({'buyer': 'Bệnh viện Đa khoa  Sơn Tây'}, ensure_ascii=False)))
+        self.assertEqual(con.execute('SELECT count(*) FROM records WHERE ' + ' AND '.join(clauses), args).fetchone()[0], 1)
+        con.close()
+
+    def test_scope_refresh_keeps_rich_cache_but_accepts_a_complete_smaller_revision(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(msc_scope, 'MSC_DB', Path(folder) / 'msc.db'), patch.object(msc_scope, 'DATA_DIR', Path(folder)):
+            con = msc_scope._connect()
+            full = [{"lotName": "A", "groupMedicine": "4", "dangBaoChe": "Viên nén"}, {"lotName": "B", "groupMedicine": "4", "dangBaoChe": "Viên nén"}]
+            con.execute('INSERT INTO scope_lots VALUES (?,?,?)', ('n1', json.dumps(full), '2026-10-01'))
+            con.commit()
+            with self.assertRaises(ValueError):
+                msc_scope._save_scope(con, 'n1', 'IB1', fetch=lambda *_: [{"lotName": "A"}])
+            self.assertEqual(json.loads(con.execute('SELECT lots FROM scope_lots').fetchone()[0]), full)
+            with patch.object(msc_scope, 'match_lots', return_value='none'):
+                msc_scope._save_scope(con, 'n1', 'IB1', fetch=lambda *_: full[:1])
+            self.assertEqual(json.loads(con.execute('SELECT lots FROM scope_lots').fetchone()[0]), full[:1])
+            con.close()
+
     def test_new_and_closing_are_overlapping(self):
         now = datetime(2026, 9, 29, 12)
         row = {'published': (now - timedelta(hours=12)).isoformat(),
@@ -79,12 +111,13 @@ class TenderFiltersTest(unittest.TestCase):
             'stems': ['paracetamol'],
             'form': 'vien nen',
             'route': 'uong',
+            'group': '4',
             'strength': {(500.0, 'mg')},
             'card': {'brand': 'ParaBA', 'inn': 'Paracetamol', 'strength': '500mg', 'form': 'Viên nén', 'reg': 'VD-1'},
         },)
         with patch.object(baoan_match, 'catalog', return_value=fake):
             rows = baoan_match.public_lines([
-                {'medicineCode': 'G1', 'lotName': 'Paracetamol', 'nongDo': '500mg', 'dangBaoChe': 'Viên nén', 'duongDung': 'Uống', 'quantity': 10},
+                {'medicineCode': 'G1', 'lotName': 'Paracetamol', 'nongDo': '500mg', 'dangBaoChe': 'Viên nén', 'duongDung': 'Uống', 'groupMedicine':'4', 'quantity': 10},
                 {'lotName': 'Ceftriaxon', 'dangBaoChe': 'Bột pha tiêm'},
             ])
             shown = msc_scope.present([{'baoan_match': 'exact', 'scope_lots': [{'lotName': 'Paracetamol', 'nongDo': '500mg', 'dangBaoChe': 'Viên nén', 'duongDung': 'Uống'}]}])
@@ -102,6 +135,7 @@ class TenderFiltersTest(unittest.TestCase):
             'stems': ['vitamin b1', 'vitamin b12', 'vitamin b6'],
             'form': 'vien nang',
             'route': 'uong',
+            'group': '4',
             'strength': {(110.0, 'mg'), (200.0, 'mg'), (0.5, 'mg')},
             'card': {
                 'brand': 'B1B6B12 Ansba',
@@ -113,6 +147,7 @@ class TenderFiltersTest(unittest.TestCase):
         },)
         lot = {
             'medicineCode': '2628KD441',
+            'groupMedicine': '4',
             'lotName': 'Vitamin B1 + B6 + B12',
             'nongDo': '110mg + 200mg + 500mcg',
             'dangBaoChe': 'Viên nang',

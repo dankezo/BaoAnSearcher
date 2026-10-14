@@ -105,6 +105,7 @@ def present(items: list[dict]) -> list[dict]:
     for item in items:
         if item.get("scope_lots"):
             item["scope_lines"] = public_lines(item.get("scope_lots") or [])
+            item['baoan_match'] = 'exact' if any(line['match']=='exact' for line in item['scope_lines']) else 'near' if any(line['match']=='near' for line in item['scope_lines']) else ''
         item.pop("scope_lots", None)
     return items
 
@@ -141,19 +142,31 @@ def _lots_in(data, depth: int = 0) -> list[dict]:
     if depth > 8:
         return []
     if isinstance(data, dict):
+        candidates = []
         for key in ("lotDTOList", "lotList", "listLot"):
             value = data.get(key)
             if isinstance(value, list) and value and isinstance(value[0], dict):
-                return value
+                candidates.append(value)
         for value in data.values():
             found = _lots_in(value, depth + 1)
             if found:
-                return found
+                candidates.append(found)
+        return max(candidates, key=_scope_quality, default=[])
     elif isinstance(data, list) and data and isinstance(data[0], dict):
         sample = data[0]
         if any(key in sample for key in ("lotNo", "medicineCode", "dangBaoChe", "tenHoatChat")):
             return data
     return []
+
+
+def _scope_quality(lots):
+    return sum(bool(lot.get(key)) for lot in lots if isinstance(lot, dict)
+               for key in ("groupMedicine", "group", "nongDo", "dangBaoChe", "duongDung", "medicineCode"))
+
+
+def _scope_complete(lots):
+    return bool(lots) and all(isinstance(lot, dict) and (lot.get("groupMedicine") or lot.get("group") or str(lot.get("medicines")) == "1")
+                             and lot.get("dangBaoChe") for lot in lots)
 
 
 def _fetch_lots(nid: str) -> list[dict]:
@@ -256,12 +269,12 @@ def fetch_lots_on_page(page, nid: str, source_url: str = "") -> list[dict]:
         nid,
     )
     lots = _lots_in(data)
-    if lots or not str(source_url).startswith("https://muasamcong.mpi.gov.vn/"):
+    if _scope_complete(lots) or not str(source_url).startswith("https://muasamcong.mpi.gov.vn/"):
         return lots
     found: list[dict] = []
 
     def grab(response):
-        if found or response.status != 200:
+        if _scope_complete(found) or response.status != 200:
             return
         if "json" not in (response.headers.get("content-type") or "").lower():
             return
@@ -270,25 +283,30 @@ def fetch_lots_on_page(page, nid: str, source_url: str = "") -> list[dict]:
         except Exception:
             return
         rows = _lots_in(payload)
-        if rows:
-            found.extend(rows)
+        if rows and _scope_quality(rows) > _scope_quality(found):
+            found[:] = rows
 
     page.on("response", grab)
     try:
         page.goto(source_url, wait_until="domcontentloaded", timeout=60000)
         for _ in range(24):
-            if found:
+            if _scope_complete(found):
                 break
             page.wait_for_timeout(500)
     finally:
         page.remove_listener("response", grab)
-    return found
+    return found if _scope_quality(found) > _scope_quality(lots) else lots
 
 
 def _save_scope(con, nid, tender_no, fetch=None, source_url: str = ""):
     lots = fetch(nid, source_url) if fetch else _fetch_lots(nid)
     if not lots:
         raise ValueError("Chưa lấy được danh mục thuốc; cần kiểm tra hồ sơ trên trang nguồn")
+    previous = con.execute("SELECT lots FROM scope_lots WHERE notify_id=?", (nid,)).fetchone()
+    if previous and not _scope_complete(lots):
+        cached = json.loads(previous[0])
+        if _scope_quality(cached) > _scope_quality(lots):
+            raise ValueError("Nguồn chỉ trả bảng rút gọn; đã giữ hồ sơ chi tiết cũ. Cần tải lại bảng đầy đủ trong phiên MSC.")
     level = match_lots(lots)
     stamp = now_iso()
     raw = json.dumps(lots, ensure_ascii=False)
@@ -299,6 +317,8 @@ def _save_scope(con, nid, tender_no, fetch=None, source_url: str = ""):
     con.execute("INSERT OR REPLACE INTO scope_lots VALUES (?,?,?)", (nid, raw, stamp))
     con.execute("INSERT OR REPLACE INTO scope_match VALUES (?,?,?,?)", (nid, tender_no, level, stamp))
     con.commit()
+    if not _scope_complete(lots):
+        raise ValueError("Danh mục mới có tên thuốc, còn thiếu nhóm hoặc dạng bào chế; cần tải bảng chi tiết trong phiên MSC.")
     return level
 
 
@@ -333,7 +353,7 @@ def refresh(limit: int | None = 40, force: bool = False, report=None, fetch=None
     now = datetime.now()
     con = _connect()
     try:
-        known = {row[0]: row[1] for row in con.execute("SELECT notify_id,fetched_at FROM scope_lots")}
+        known = {row[0]: row[1] for row in con.execute("SELECT notify_id,fetched_at,lots FROM scope_lots") if _scope_complete(json.loads(row[2]))}
         pending = []
         seen = set()
         sources = {}
