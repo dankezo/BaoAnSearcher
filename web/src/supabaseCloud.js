@@ -124,6 +124,7 @@ function normalizePage(payload, page, size) {
     hasMore: payload?.hasMore === true,
     nextCursor: payload?.nextCursor || null,
     items: mapTursoItems(payload?.items || []),
+    ...(payload?.meta?{meta:payload.meta}:{}),
   }
 }
 

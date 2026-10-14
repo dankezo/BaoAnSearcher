@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from server import ycbg
+from server.ycbg import completed_today
 
 
 def cache_readers(folder):
@@ -48,13 +49,15 @@ def restore(conn):
         complete=cur.fetchone()
         cur.execute("SELECT last_synced_at FROM data_registry_meta WHERE dataset_code='MSC_YCBG'")
         synced=cur.fetchone()
+        cur.execute("SELECT total_records FROM app_metadata WHERE key_name='msc_ycbg_completed_at'")
+        checkpoint=cur.fetchone()
     with closing(ycbg.connect()) as local:
         local.executemany("INSERT INTO quotes(id,normalized,detail,fetched_at,error) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET normalized=excluded.normalized,detail=excluded.detail,fetched_at=excluded.fetched_at,error=excluded.error WHERE coalesce(quotes.fetched_at,'') < coalesce(excluded.fetched_at,'')",rows)
         if complete and complete[0]:
             local.execute("INSERT OR REPLACE INTO crawl_meta VALUES ('full_scan_complete','1')")
-        if synced and synced[0]:
+        if checkpoint and checkpoint[0] or synced and synced[0]:
             from datetime import timezone
-            stamp=synced[0].replace(tzinfo=timezone.utc).astimezone(ycbg.VN).isoformat()
+            stamp=(ycbg.datetime.fromtimestamp(int(checkpoint[0]),ycbg.VN) if checkpoint and checkpoint[0] else synced[0].replace(tzinfo=timezone.utc).astimezone(ycbg.VN)).isoformat()
             previous=local.execute("SELECT value FROM crawl_meta WHERE key='completed_at'").fetchone()
             if not previous or stamp > previous[0]:
                 local.execute("INSERT OR REPLACE INTO crawl_meta VALUES ('completed_at',?)",(stamp,))
@@ -80,6 +83,8 @@ def publish(conn, completed_run=True):
         cur.execute("UPDATE data_registry_meta SET total_records=%s,last_synced_at=IF(%s,UTC_TIMESTAMP(),last_synced_at),status=%s WHERE dataset_code='MSC_YCBG'",(count,bool(completed_run and complete),'warning' if errors or not complete or not completed_run else 'healthy'))
         cur.execute("INSERT INTO app_metadata(key_name,total_records) VALUES ('msc_ycbg_full_scan_complete',%s) ON DUPLICATE KEY UPDATE total_records=VALUES(total_records),updated_at=CURRENT_TIMESTAMP",(int(complete),))
         cur.execute("INSERT INTO app_metadata(key_name,total_records) VALUES ('msc_ycbg_source_total',%s) ON DUPLICATE KEY UPDATE total_records=VALUES(total_records),updated_at=CURRENT_TIMESTAMP",(ycbg.meta_info()['sourceTotal'],))
+        stamp=ycbg.meta_info()['updated']
+        cur.execute("INSERT INTO app_metadata(key_name,total_records) VALUES ('msc_ycbg_completed_at',%s) ON DUPLICATE KEY UPDATE total_records=VALUES(total_records),updated_at=CURRENT_TIMESTAMP",(int(ycbg.datetime.fromisoformat(stamp).timestamp()) if stamp else 0,))
     conn.commit()
     return count
 
@@ -93,9 +98,15 @@ def main():
     parser.add_argument('--publish',action='store_true')
     parser.add_argument('--publish-only',action='store_true')
     parser.add_argument('--cloud-cache',type=Path)
+    parser.add_argument('--daily',action='store_true')
     args=parser.parse_args()
     readers=cache_readers(args.cloud_cache) if args.cloud_cache else {}
     def run():
+        previous=ycbg.meta_info()
+        if args.daily and not args.full and completed_today(previous):
+            ycbg.update_status('msc_ycbg',state='idle',progress=100,count=previous['count'],meta=previous,updated=previous['updated'],message='YCBG đã có lượt đầy đủ hôm nay')
+            print('YCBG đã có lượt đầy đủ hôm nay; giữ dữ liệu, không gọi lại nguồn.',flush=True)
+            return previous
         ycbg.update_status('msc_ycbg',state='running',progress=0,message='Đang cập nhật YCBG',updated=ycbg.now_iso())
         try:
             result=ycbg.crawl(full=args.full,report=lambda msg:print(msg,flush=True),**readers)

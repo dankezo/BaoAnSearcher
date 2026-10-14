@@ -66,7 +66,7 @@ jobs:
         if: (matrix.source == 'tenders' || matrix.source == 'ycbg') && contains(env.CRAWL_ONLY, matrix.source)
       - run: python -m playwright install --with-deps chromium
         if: (matrix.source == 'tenders' || matrix.source == 'ycbg') && contains(env.CRAWL_ONLY, matrix.source) && (matrix.source == 'ycbg' || env.CLOUDFLARE_CRAWL_WORKER_URL == '')
-      - run: python scripts/crawl_ycbg.py --publish
+      - run: python scripts/crawl_ycbg.py --publish --daily
         if: matrix.source == 'ycbg' && contains(env.CRAWL_ONLY, matrix.source)
       - run: python scripts/cloud_daily.py --yes-remote --only "$CRAWL_SOURCE" --days "$CRAWL_DAYS"
         if: matrix.source != 'ycbg' && contains(env.CRAWL_ONLY, matrix.source)

@@ -96,10 +96,12 @@ def _run_vss() -> None:
 
 
 def _run_ycbg() -> None:
-    from .ycbg import crawl
+    from .ycbg import crawl,meta_info,completed_today
     from .common import update_status
     try:
-        result = crawl()
+        result = meta_info()
+        if not completed_today(result):
+            result = crawl()
         if result['errors']:
             raise RuntimeError(f"YCBG còn {result['errors']} hồ sơ lỗi; sẽ thử lại.")
     except Exception as exc:

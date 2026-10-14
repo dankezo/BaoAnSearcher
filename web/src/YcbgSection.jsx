@@ -16,7 +16,7 @@ const COLS = [
   { key: 'status_label', label: 'Trạng thái', width: 180 },
   { key: 'baoan_match', label: 'Khớp Bảo An', text: r => r.baoan_match === 'exact' ? 'Khớp' : r.baoan_match === 'near' ? 'Cần rà soát' : 'Chưa có dòng khớp' },
   { key: 'document_status', label: 'Hồ sơ', width: 190 },
-]
+].map(column=>column.text?{...column,render:(_value,row)=>column.text(row)}:column)
 const DETAIL = [
   { key: 'tender_no', label: 'Mã YCBG' }, { key: 'version', label: 'Phiên bản' },
   { key: 'name', label: 'Tên yêu cầu báo giá' }, { key: 'bid_name', label: 'Tên gói dự kiến' },

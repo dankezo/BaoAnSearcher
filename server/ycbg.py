@@ -123,6 +123,10 @@ def meta_info():
     return {'count': count, 'details': details, 'errors': errors, 'updated': meta.get('completed_at'), 'fullScanComplete': meta.get('full_scan_complete') == '1', 'sourceTotal': int(meta.get('source_total') or 0)}
 
 
+def completed_today(meta):
+    return bool(meta['count'] and meta['fullScanComplete'] and meta['details']==meta['count'] and not meta['errors'] and str(meta.get('updated') or '')[:10]==datetime.now(VN).date().isoformat())
+
+
 def search(filters=None, page=0, size=100):
     filters = filters or {}
     page, size = max(0, int(page)), min(5000, max(1, int(size)))

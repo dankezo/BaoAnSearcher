@@ -5,10 +5,17 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock,patch
-from scripts.crawl_ycbg import restore,publish
+from scripts.crawl_ycbg import restore,publish,completed_today
 from server import ycbg
 
 class YcbgPublishTest(unittest.TestCase):
+    def test_daily_skip_requires_complete_error_free_data_from_today(self):
+        meta={'count':3,'details':3,'errors':0,'fullScanComplete':True,'updated':ycbg.now_iso()}
+        self.assertTrue(completed_today(meta))
+        self.assertFalse(completed_today({**meta,'details':2}))
+        self.assertFalse(completed_today({**meta,'errors':1}))
+        self.assertFalse(completed_today({**meta,'fullScanComplete':False}))
+        self.assertFalse(completed_today({**meta,'updated':'2020-01-01T12:00:00+07:00'}))
     def test_cold_restore_never_overwrites_newer_local_detail_or_checkpoint(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(ycbg,'DB',Path(folder)/'ycbg.sqlite3'):
             norm=json.dumps({'id':'a','name':'new'})
@@ -16,7 +23,7 @@ class YcbgPublishTest(unittest.TestCase):
                 local.execute('INSERT INTO quotes VALUES (?,?,?,?,?)',('a',norm,'{"new":true}','2026-10-14T12:00:00+07:00',None))
                 local.execute("INSERT INTO crawl_meta VALUES ('completed_at','2026-10-14T12:00:00+07:00')");local.commit()
             conn=MagicMock();cur=conn.cursor.return_value.__enter__.return_value
-            cur.fetchone.side_effect=[('msc_ycbg',),(1,),(datetime(2026,10,10,1),)]
+            cur.fetchone.side_effect=[('msc_ycbg',),(1,),(datetime(2026,10,10,1),),None]
             cur.fetchall.return_value=[('a','{"id":"a","name":"old"}','{"old":true}','2026-10-10T12:00:00+07:00',None)]
             restore(conn)
             with closing(ycbg.connect()) as local:
