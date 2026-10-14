@@ -57,7 +57,7 @@ const TENDER_COLS = [
   { key: 'published', label: 'Ngày đăng', nowrap: true, text: (r) => fmtDateTime(r.published), render: (v) => fmtDateTime(v) },
   { key: 'close_date', label: 'Đóng thầu', nowrap: true, text: (r) => fmtDateTime(r.close_date), render: (v) => fmtDateTime(v) },
   { key: 'status_label', label: 'Trạng thái', filter: 'select', text: (r) => mscStatusDisplay(r), render: (_v, r) => <StatusBadge row={r} /> },
-  { key: 'bid_price', label: 'Giá gói', align: 'right', mono: true, text: (r) => money(r.bid_price) },
+  { key: 'bid_price', label: 'Giá gói', align: 'right', mono: true, sum: true, exportValue:r=>numberValue(r.bid_price), text: (r) => money(r.bid_price), render:v=>money(v) },
   { key: 'bid_form', label: 'Hình thức', filter: 'select' },
 ]
 
@@ -79,7 +79,7 @@ const TENDER_DETAIL = [
   { key: 'published', label: 'Ngày đăng', text: (r) => fmtDateTime(r.published) },
   { key: 'close_date', label: 'Thời điểm đóng thầu', text: (r) => fmtDateTime(r.close_date) },
   { key: 'status_label', label: 'Trạng thái' }, { key: 'status_code', label: 'Mã trạng thái' },
-  { key: 'bid_price', label: 'Giá gói thầu' }, { key: 'bid_form', label: 'Hình thức LCNT' },
+  { key: 'bid_price', label: 'Giá gói thầu', text:r=>money(r.bid_price) }, { key: 'bid_form', label: 'Hình thức LCNT' },
   { key: 'source_url', label: 'Trang nguồn' },
 ]
 
