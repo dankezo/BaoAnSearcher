@@ -11,11 +11,11 @@ import time
 import uuid
 from datetime import date,timedelta
 from pathlib import Path
-from core import ROOT, BASE, TENDER_API, PRICE_API, connect, save_records, now, search, tender_key
+from core import ROOT, BASE, TENDER_API, PRICE_BASE, PRICE_API, connect, save_records, now, search, tender_key
 
 sys.path.insert(0,str(ROOT/'vendor'))
 URL=BASE+'/web/guest/contractor-selection?p_p_id=egpportalcontractorselectionv2_WAR_egpportalcontractorselectionv2&p_p_lifecycle=0&p_p_state=normal&p_p_mode=view&_egpportalcontractorselectionv2_WAR_egpportalcontractorselectionv2_render=index&indexSelect=-1'
-PRICE_URL=BASE+'/web/guest/winning-bid-data'
+PRICE_URL=PRICE_BASE+'/web/guest/winning-bid-data'
 COMPONENT="Array.from(document.querySelectorAll('[id]')).map(e=>e.__vue__).find(v=>v && typeof v.axiosSearch==='function')"
 
 class Stopped(Exception):pass

@@ -17,7 +17,9 @@ from xml.sax.saxutils import escape
 ROOT = Path(__file__).resolve().parent
 DB = ROOT / 'data' / 'procurement.sqlite3'
 BASE = 'https://muasamcong.mpi.gov.vn'
-PRICE_API = BASE + '/o/egp-portal-winning-bid-data/services/smart/search_prc'
+# The legacy MPI host redirects POST as GET; call the Ministry of Finance host directly.
+PRICE_BASE = 'https://muasamcong.mof.gov.vn'
+PRICE_API = PRICE_BASE + '/o/egp-portal-winning-bid-data/services/smart/search_prc'
 TENDER_API = BASE + '/o/egp-portal-contractor-selection-v2/services/smart/search'
 VN = timezone(timedelta(hours=7))
 PRICE_FIELDS = {
@@ -113,7 +115,7 @@ def normalize_price(raw):
         'district':district_name(raw.get('diaDiem')),
         'tender_no':tender_key(raw.get('maTbmt')), 'published':flat(raw.get('ngayDangTaiKqlcnt')),
         'decision':flat(raw.get('soQuyetDinh')), 'decision_date':flat(raw.get('ngayBanHanhQuyetDinh')),
-        'source_url':BASE+'/web/guest/winning-bid-data',
+        'source_url':PRICE_BASE+'/web/guest/winning-bid-data',
         'source_label':'Excel Mua sắm công' if raw.get('_excel') else 'API Mua sắm công',
         'import_note':raw.get('_excel',{}).get('note',''),
     }
@@ -293,7 +295,7 @@ def import_file(path,db=None):
         for entry in obj['log'].get('entries',[]):
             url=entry.get('request',{}).get('url','')
             parsed=urlparse(url)
-            if parsed.hostname!='muasamcong.mpi.gov.vn': continue
+            if parsed.hostname not in ('muasamcong.mpi.gov.vn', 'muasamcong.mof.gov.vn'): continue
             if parsed.path==urlparse(TENDER_API).path: kind='tenders'
             elif parsed.path in (urlparse(PRICE_API).path,urlparse(PRICE_API).path+'/export'): kind='prices'
             else: continue

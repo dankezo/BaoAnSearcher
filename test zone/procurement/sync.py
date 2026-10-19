@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
-from core import BASE, PRICE_API, DB, connect, save_records, now, date_input
+from core import PRICE_BASE, PRICE_API, DB, connect, save_records, now, date_input
 
 CAP=10000
 EXPORT_API=PRICE_API + '/export'
@@ -46,7 +46,7 @@ class Api:
             try:
                 req=urllib.request.Request(PRICE_API,data=json.dumps(payload(start,end,medicine,page,size)).encode(),
                     headers={'Content-Type':'application/json','User-Agent':'Mozilla/5.0',
-                        'Origin':BASE,'Referer':BASE+'/web/guest/winning-bid-data'})
+                        'Origin':PRICE_BASE,'Referer':PRICE_BASE+'/web/guest/winning-bid-data'})
                 with self.session.open(req,timeout=60) as r: result=json.load(r)
                 part=result.get('page') if isinstance(result,dict) else None
                 if not isinstance(part,dict) or not isinstance(part.get('content'),list) or not isinstance(part.get('totalElements'),int):
@@ -78,7 +78,7 @@ class Api:
             try:
                 req=urllib.request.Request(EXPORT_API,data=json.dumps(payload(start,end,medicine,0,CAP)).encode(),
                     headers={'Content-Type':'application/json','User-Agent':'Mozilla/5.0',
-                        'Origin':BASE,'Referer':BASE+'/web/guest/winning-bid-data'})
+                        'Origin':PRICE_BASE,'Referer':PRICE_BASE+'/web/guest/winning-bid-data'})
                 with self.session.open(req,timeout=90) as r: result=json.load(r)
                 rows=result.get('resultList') if isinstance(result,dict) else None
                 if not isinstance(rows,list):

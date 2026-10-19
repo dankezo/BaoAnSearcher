@@ -1,4 +1,5 @@
 import json
+import io
 import tempfile
 import unittest
 from contextlib import closing
@@ -12,10 +13,27 @@ from scripts.cloud_browser import open_browser, cloud_search_page, cloud_worker_
 from scripts.tidb import pull_to_local
 from scripts.tidb.rows import build_msc_price_row
 from server import cloud_jobs, vss
-from core import connect
+from core import connect, PRICE_BASE, PRICE_API
+from sync import Api
 
 
 class CloudCrawlTest(unittest.TestCase):
+    def test_prices_post_directly_to_mof_without_losing_body_on_legacy_redirect(self):
+        api = Api()
+        page = {'content': [], 'totalElements': 0}
+        for export, response in ((False, {'page': page}), (True, {'resultList': []})):
+            with self.subTest(export=export), patch.object(api.session, 'open', return_value=io.BytesIO(json.dumps(response).encode())) as opened:
+                if export:
+                    api.fetch_export('2026-10-18', '2026-10-19', '0')
+                else:
+                    self.assertEqual(api.fetch('2026-10-18', '2026-10-19', '0', 0), page)
+                request = opened.call_args.args[0]
+                self.assertEqual(request.full_url, PRICE_API + ('/export' if export else ''))
+                self.assertEqual(request.get_method(), 'POST')
+                self.assertEqual(request.get_header('Origin'), PRICE_BASE)
+                self.assertTrue(request.get_header('Referer').startswith(PRICE_BASE + '/'))
+                self.assertEqual(json.loads(request.data)[0]['query'][0]['index'], 'es-smart-pricing')
+
     def test_ycbg_worker_uses_dedicated_key_while_msc_keeps_existing_key(self):
         with patch.dict('os.environ', {'CLOUDFLARE_CRAWL_WORKER_URL': 'https://crawl.baoanpharma.com', 'CLOUDFLARE_CRAWL_WORKER_KEY': 'msc-secret', 'CLOUDFLARE_YCBG_KEY': 'ycbg-secret'}, clear=True), patch('scripts.cloud_browser.requests.post') as post:
             post.return_value.status_code = 200
