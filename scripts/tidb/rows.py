@@ -480,6 +480,9 @@ def upsert_sql(table: str, columns: tuple[str, ...], nrows: int) -> str:
     # row pruning.  Do this in SQL so an unchanged source row is still marked
     # as seen by this ingestion run.
     if table == "msc_prices":
+        # Daily price exports carry only a generic lookup URL. Keep a resolved
+        # official profile when refreshing that same business record.
+        updates = updates.replace("source_url=VALUES(source_url)", "source_url=IF((source_url LIKE 'https://muasamcong.mof.gov.vn/web/guest/contractor-selection?%' OR source_url LIKE 'https://muasamcong.mpi.gov.vn/web/guest/contractor-selection?%') AND COALESCE(VALUES(source_url),'') NOT LIKE '%/contractor-selection?%',source_url,VALUES(source_url))")
         updates += ", updated_at=CURRENT_TIMESTAMP"
     return (
         f"INSERT INTO {table} ({col_sql}) VALUES {values} "

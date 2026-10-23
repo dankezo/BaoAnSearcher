@@ -1,9 +1,34 @@
 import unittest
+import re
+import sqlite3
 
-from scripts.tidb.rows import build_msc_price_row, build_msc_tender_row
+from scripts.tidb.rows import build_msc_price_row, build_msc_tender_row, upsert_sql
 
 
 class TidbRowsTest(unittest.TestCase):
+    def test_price_refresh_keeps_resolved_profile_but_accepts_new_source_and_price(self):
+        # Execute the generated update expressions with SQLite's equivalent
+        # conflict syntax, including the MySQL IF scalar used by the adapter.
+        db = sqlite3.connect(':memory:')
+        self.addCleanup(db.close)
+        db.create_function('IF', 3, lambda condition, yes, no: yes if condition else no)
+        db.execute('CREATE TABLE msc_prices(source_id TEXT PRIMARY KEY,source_url TEXT,unit_price INTEGER,updated_at TEXT)')
+        sql = upsert_sql('msc_prices', ('source_id','source_url','unit_price'), 1)
+        sql = sql.replace('%s','?').replace('ON DUPLICATE KEY UPDATE','ON CONFLICT(source_id) DO UPDATE SET')
+        sql = re.sub(r'VALUES\((\w+)\)', r'excluded.\1', sql)
+        generic = 'https://muasamcong.mof.gov.vn/web/guest/winning-bid-data'
+        resolved = 'https://muasamcong.mof.gov.vn/web/guest/contractor-selection?id=actual-profile&notifyNo=IB2300015012'
+        db.execute(sql, ('p',resolved,100))
+        db.execute(sql, ('p',generic,125))
+        self.assertEqual(db.execute('SELECT source_url,unit_price FROM msc_prices').fetchone(), (resolved,125))
+        db.execute(sql, ('p',None,150))
+        self.assertEqual(db.execute('SELECT source_url,unit_price FROM msc_prices').fetchone(), (resolved,150))
+        newer = resolved + '&inputResultId=result'
+        db.execute(sql, ('p',newer,150))
+        self.assertEqual(db.execute('SELECT source_url FROM msc_prices').fetchone()[0], newer)
+        db.execute(sql, ('unresolved',generic,200))
+        self.assertEqual(db.execute('SELECT source_url FROM msc_prices WHERE source_id="unresolved"').fetchone()[0], generic)
+
     def test_opening_date_stays_distinct_from_publication_and_closing(self):
         row = build_msc_tender_row({'published': '2026-08-01', 'open_date': '2026-09-01T08:00:00', 'close_date': '2026-09-02'}, 'source', None, None)
         self.assertEqual(row['open_date'], '2026-09-01')
