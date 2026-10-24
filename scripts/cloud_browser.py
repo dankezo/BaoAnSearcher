@@ -4,6 +4,7 @@ import re
 import html
 import json
 import requests
+import time
 
 WORKER_URLS = ('https://crawl.baoanpharma.com', 'https://baoan-public-crawl.dannyphan190.workers.dev')
 
@@ -17,11 +18,28 @@ def cloud_worker_post(path, body, timeout=(10, 110)):
     key = (os.environ.get(key_name) or (os.environ.get('CLOUDFLARE_CRAWL_WORKER_KEY') if ycbg_route else '') or '').strip()
     if worker not in WORKER_URLS or not key:
         raise ValueError(f'Configure the BaoAn crawl Worker URL and {key_name}.')
-    response = requests.post(worker + path, headers={'Authorization': f'Bearer {key}'},
-                             json=body, timeout=timeout)
+    attempts = 3 if path.startswith('/ycbg/') else 1
+    for attempt in range(attempts):
+        try:
+            response = requests.post(worker + path, headers={'Authorization': f'Bearer {key}'},
+                                     json=body, timeout=timeout)
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt == attempts - 1:
+                raise RuntimeError('Crawl Worker connection unavailable after bounded retries.') from None
+        else:
+            if response.status_code not in (502, 503, 504) or attempt == attempts - 1:
+                break
+            response.close()
+        time.sleep(2 * (attempt + 1))
     status = getattr(response, 'status_code', 200)
     if isinstance(status, int) and status >= 400:
         message = 'daily MSC browser budget reached; retry next window.' if status == 429 else 'public source unavailable; check Worker logs.'
+        try:
+            code = response.json().get('error', '')
+            if isinstance(code, str) and re.fullmatch(r'[a-z][a-z0-9_]{0,79}', code):
+                message = code
+        except (ValueError, AttributeError):
+            pass
         raise RuntimeError(f'Crawl Worker HTTP {status}: {message}')
     data = response.json()
     if not isinstance(data, dict):

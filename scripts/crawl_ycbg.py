@@ -81,10 +81,11 @@ def publish(conn, completed_run=True):
         errors=sum(bool(row[4]) for row in rows)
         complete=ycbg.meta_info()['fullScanComplete']
         cur.execute("UPDATE data_registry_meta SET total_records=%s,last_synced_at=IF(%s,UTC_TIMESTAMP(),last_synced_at),status=%s WHERE dataset_code='MSC_YCBG'",(count,bool(completed_run and complete),'warning' if errors or not complete or not completed_run else 'healthy'))
-        cur.execute("INSERT INTO app_metadata(key_name,total_records) VALUES ('msc_ycbg_full_scan_complete',%s) ON DUPLICATE KEY UPDATE total_records=VALUES(total_records),updated_at=CURRENT_TIMESTAMP",(int(complete),))
-        cur.execute("INSERT INTO app_metadata(key_name,total_records) VALUES ('msc_ycbg_source_total',%s) ON DUPLICATE KEY UPDATE total_records=VALUES(total_records),updated_at=CURRENT_TIMESTAMP",(ycbg.meta_info()['sourceTotal'],))
-        stamp=ycbg.meta_info()['updated']
-        cur.execute("INSERT INTO app_metadata(key_name,total_records) VALUES ('msc_ycbg_completed_at',%s) ON DUPLICATE KEY UPDATE total_records=VALUES(total_records),updated_at=CURRENT_TIMESTAMP",(int(ycbg.datetime.fromisoformat(stamp).timestamp()) if stamp else 0,))
+        if completed_run:
+            cur.execute("INSERT INTO app_metadata(key_name,total_records) VALUES ('msc_ycbg_full_scan_complete',%s) ON DUPLICATE KEY UPDATE total_records=VALUES(total_records),updated_at=CURRENT_TIMESTAMP",(int(complete),))
+            cur.execute("INSERT INTO app_metadata(key_name,total_records) VALUES ('msc_ycbg_source_total',%s) ON DUPLICATE KEY UPDATE total_records=VALUES(total_records),updated_at=CURRENT_TIMESTAMP",(ycbg.meta_info()['sourceTotal'],))
+            stamp=ycbg.meta_info()['updated']
+            cur.execute("INSERT INTO app_metadata(key_name,total_records) VALUES ('msc_ycbg_completed_at',%s) ON DUPLICATE KEY UPDATE total_records=VALUES(total_records),updated_at=CURRENT_TIMESTAMP",(int(ycbg.datetime.fromisoformat(stamp).timestamp()) if stamp else 0,))
     conn.commit()
     return count
 

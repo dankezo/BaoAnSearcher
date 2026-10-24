@@ -39,5 +39,6 @@ class YcbgPublishTest(unittest.TestCase):
             sql,args=next(call.args for call in cur.execute.call_args_list if call.args[0].startswith('UPDATE data_registry_meta'))
             self.assertIn('IF(%s,UTC_TIMESTAMP(),last_synced_at)',sql)
             self.assertEqual(args,(1,False,'warning'))
+            self.assertFalse(any(call.args[0].startswith('INSERT INTO app_metadata') for call in cur.execute.call_args_list))
 
 if __name__=='__main__':unittest.main()
