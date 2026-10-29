@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd web && npm ci && npm run build",
+  "buildCommand": "node --test tests/catalog-group-integrity.test.mjs && cd web && npm ci && npm run build",
   "outputDirectory": "web/dist",
   "installCommand": "npm install && cd web && npm ci",
   "framework": null,
