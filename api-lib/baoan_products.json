@@ -88,7 +88,15 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận từ báo giá Bảo An",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_quote",
+      "file": "Báo giá thuốc  a Quý 17-7.xlsx",
+      "sheet": "6sp",
+      "row": 15,
+      "confirmed_at": "2026-10-15"
+    }
   },
   {
     "id": 2,
@@ -188,7 +196,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 3,
@@ -352,7 +366,13 @@
     "old_registrations": [
       "VD-33987-20"
     ],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 4,
@@ -444,7 +464,13 @@
     "old_registrations": [
       "VD-33352-19"
     ],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 5,
@@ -499,7 +525,13 @@
     "old_registrations": [
       "VD-33353-19"
     ],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 6,
@@ -524,7 +556,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 7,
@@ -549,7 +587,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 8,
@@ -574,7 +618,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 9,
@@ -751,7 +801,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 10,
@@ -776,7 +832,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 11,
@@ -916,7 +978,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 12,
@@ -1125,7 +1193,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 13,
@@ -1178,7 +1252,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 14,
@@ -1203,7 +1283,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 15,
@@ -1450,7 +1536,15 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận từ báo giá Bảo An",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_quote",
+      "file": "Báo giá thuốc  a Quý 17-7.xlsx",
+      "sheet": "6sp",
+      "row": 12,
+      "confirmed_at": "2026-10-15"
+    }
   },
   {
     "id": 16,
@@ -1475,7 +1569,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 17,
@@ -1729,7 +1829,13 @@
     "old_registrations": [
       "VD-33988-20"
     ],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 18,
@@ -1869,7 +1975,13 @@
     "old_registrations": [
       "VD-33355-19"
     ],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 19,
@@ -1894,7 +2006,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 20,
@@ -2022,7 +2140,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 21,
@@ -2139,7 +2263,15 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận từ báo giá Bảo An",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_quote",
+      "file": "Báo giá thuốc  a Quý 17-7.xlsx",
+      "sheet": "6sp",
+      "row": 14,
+      "confirmed_at": "2026-10-15"
+    }
   },
   {
     "id": 22,
@@ -2164,7 +2296,15 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận từ báo giá Bảo An",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_quote",
+      "file": "Báo giá thuốc  a Quý 17-7.xlsx",
+      "sheet": "6sp",
+      "row": 17,
+      "confirmed_at": "2026-10-15"
+    }
   },
   {
     "id": 23,
@@ -2189,7 +2329,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 24,
@@ -2214,7 +2360,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 25,
@@ -2239,7 +2391,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 26,
@@ -2370,7 +2528,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 27,
@@ -2395,7 +2559,15 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận từ báo giá Bảo An",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_quote",
+      "file": "Báo giá thuốc  a Quý 17-7.xlsx",
+      "sheet": "6sp",
+      "row": 19,
+      "confirmed_at": "2026-10-15"
+    }
   },
   {
     "id": 28,
@@ -2421,7 +2593,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 29,
@@ -2526,7 +2704,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 30,
@@ -2551,7 +2735,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 31,
@@ -2576,7 +2766,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 32,
@@ -2602,7 +2798,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 33,
@@ -2681,7 +2883,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 34,
@@ -2706,7 +2914,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 35,
@@ -2732,7 +2946,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 36,
@@ -2795,7 +3015,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 37,
@@ -2820,7 +3046,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 38,
@@ -2873,7 +3105,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 39,
@@ -2964,7 +3202,15 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận từ báo giá Bảo An",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_quote",
+      "file": "Báo giá thuốc  a Quý 17-7.xlsx",
+      "sheet": "6sp",
+      "row": 16,
+      "confirmed_at": "2026-10-15"
+    }
   },
   {
     "id": 40,
@@ -2990,7 +3236,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 41,
@@ -3015,7 +3267,13 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 42,
@@ -3142,7 +3400,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 43,
@@ -3222,7 +3486,13 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   },
   {
     "id": 44,
@@ -3359,7 +3629,15 @@
       }
     ],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận từ báo giá Bảo An",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_quote",
+      "file": "Báo giá thuốc  a Quý 17-7.xlsx",
+      "sheet": "6sp",
+      "row": 13,
+      "confirmed_at": "2026-10-15"
+    }
   },
   {
     "id": 45,
@@ -3385,6 +3663,12 @@
     "group_evidence": [],
     "observed_tender_groups": [],
     "old_registrations": [],
-    "tender_group_status": "Cần rà soát"
+    "tender_group_status": "Xác nhận nội bộ",
+    "tender_group": "4",
+    "tender_group_source": {
+      "kind": "user_confirmation",
+      "confirmed_at": "2026-10-15",
+      "note": "Người dùng xác nhận thuốc chưa rõ nhóm mặc định nhóm 4."
+    }
   }
 ]
