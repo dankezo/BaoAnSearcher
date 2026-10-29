@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -157,15 +158,23 @@ def crawl_scopes(conn, candidates, browser_page):
     failed = 0
     for nid, item in pending[:80]:
         try:
-            lots = _fetch_lots(nid) if browser_page is None else fetch_lots_on_page(browser_page, nid, item.get('source_url') or '')
+            for attempt in range(3):
+                try:
+                    lots = _fetch_lots(nid) if browser_page is None else fetch_lots_on_page(browser_page, nid, item.get('source_url') or '')
+                    break
+                except (urllib.error.URLError, TimeoutError) as exc:
+                    if attempt == 2 or (isinstance(exc, urllib.error.HTTPError) and exc.code not in (502, 503, 504)):
+                        raise
+                    time.sleep(2 * (attempt + 1))
             if not lots: raise ValueError('No public medicine webform.')
             with conn.cursor() as cur:
                 cur.execute('INSERT INTO msc_scope_lots (notify_id,tender_no,lots,fetched_at) VALUES (%s,%s,%s,UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE tender_no=VALUES(tender_no),lots=VALUES(lots),fetched_at=VALUES(fetched_at)',
                             (nid, item.get('tender_no'), json.dumps(lots, ensure_ascii=False)))
             conn.commit()
-        except Exception:
+        except Exception as exc:
             conn.rollback()
             failed += 1
+            print(f'MSC webform {item.get("tender_no")}: unavailable ({type(exc).__name__}); retained for retry', flush=True)
         time.sleep(0.5)
     print(f'MSC webforms: {min(len(pending), 80) - failed} loaded; {failed} unavailable; {max(0, len(pending) - 80)} deferred', flush=True)
     if failed or len(pending) > 80:

@@ -18,7 +18,7 @@ def cloud_worker_post(path, body, timeout=(10, 110)):
     key = (os.environ.get(key_name) or (os.environ.get('CLOUDFLARE_CRAWL_WORKER_KEY') if ycbg_route else '') or '').strip()
     if worker not in WORKER_URLS or not key:
         raise ValueError(f'Configure the BaoAn crawl Worker URL and {key_name}.')
-    attempts = 3 if path.startswith('/ycbg/') else 1
+    attempts = 3 if path.startswith('/ycbg/') or path == '/msc/search' else 1
     for attempt in range(attempts):
         try:
             response = requests.post(worker + path, headers={'Authorization': f'Bearer {key}'},
