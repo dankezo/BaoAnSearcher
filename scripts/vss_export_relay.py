@@ -3,6 +3,7 @@ import hmac
 import json
 import os
 import time
+import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -23,7 +24,7 @@ def export_bytes(day, loai):
                                'Referer': 'https://quanlythuocv1.vss.gov.vn/kqdt/chiTiet'},
                       timeout=(5, 25), stream=True, allow_redirects=False, verify=True) as response:
         if response.status_code != 200:
-            raise RuntimeError('Source returned no successful export.')
+            raise RuntimeError(f'Source export returned HTTP {response.status_code}.')
         if int(response.headers.get('Content-Length') or 0) > MAX_BYTES:
             raise RuntimeError('Source export exceeds 10 MB.')
         data = bytearray()
@@ -33,6 +34,11 @@ def export_bytes(day, loai):
             data.extend(chunk)
         if b'Workbook' not in data[:4096] or b'<html' in data[:512].lower():
             raise RuntimeError('Source returned no Workbook.')
+        try:
+            if ET.fromstring(data).tag != '{urn:schemas-microsoft-com:office:spreadsheet}Workbook':
+                raise ET.ParseError()
+        except ET.ParseError:
+            raise RuntimeError('Source returned invalid SpreadsheetML.') from None
         return bytes(data)
 
 

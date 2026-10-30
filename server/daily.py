@@ -89,7 +89,12 @@ def _run_msc() -> None:
 
 
 def _run_vss() -> None:
-    vss.crawl_vss(days=2, loai=1, catchup=False)
+    try:
+        last = datetime.fromisoformat(str(vss.meta_info().get('updated') or '')).date()
+        days = max(2, min(30, (datetime.now(VN).date() - last).days + 2))
+    except ValueError:
+        days = 30
+    vss.crawl_vss(days=days, loai=1, catchup=days > 14)
     _require_idle("vss", _wait(getattr(vss, "_crawl_thread", None), 1800))
     from .metric_slice import rebuild_heat
     rebuild_heat()

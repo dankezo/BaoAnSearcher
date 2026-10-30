@@ -1,0 +1,38 @@
+name: VSS daily recovery
+on:
+  schedule:
+    - cron: '41 22 * * *' # 05:41 Vietnam; preserve the existing Sunday pause
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: daily-public-data
+  cancel-in-progress: false
+jobs:
+  vss:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TIDB_DATABASE_URL: ${{ secrets.TIDB_DATABASE_URL }}
+      TIDB_HOST: ${{ secrets.TIDB_HOST }}
+      TIDB_PORT: ${{ secrets.TIDB_PORT }}
+      TIDB_USER: ${{ secrets.TIDB_USER }}
+      TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
+      TIDB_DATABASE: ${{ secrets.TIDB_DATABASE }}
+      VSS_EXPORT_RELAY_URL: ${{ secrets.VSS_EXPORT_RELAY_URL }}
+      VSS_EXPORT_RELAY_KEY: ${{ secrets.VSS_EXPORT_RELAY_KEY }}
+      PYTHONUNBUFFERED: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r server/requirements.txt
+      - name: Catch up VSS independently of MSC and YCBG
+        run: |
+          if [ "${{ github.event_name }}" = schedule ] && [ "$(TZ=Asia/Bangkok date +%u)" = 7 ]; then
+            echo 'Sunday pause; VSS data and success timestamp retained.'
+            exit 0
+          fi
+          python scripts/cloud_daily.py --yes-remote --only vss --days 3

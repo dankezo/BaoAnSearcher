@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import requests
 import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -28,6 +29,7 @@ from connect import connect, require_config
 from rows import (MSC_PRICE_COLUMNS, MSC_TENDER_COLUMNS, VSS_COLUMNS,
                   build_msc_price_row, build_msc_tender_row, build_vss_row)
 from sync_to_tidb import _flush, _write_meta, refresh_msc_price_metric_rollup
+from scripts.vss_export_relay import export_bytes
 
 
 def crawl_prices(conn, start, end):
@@ -57,16 +59,23 @@ def crawl_vss(conn, start, end):
     day = start.date()
     while day <= end.date():
         label = day.strftime('%d/%m/%Y')
-        if os.environ.get('VSS_EXPORT_RELAY_URL'):
+        try:
+            blob = export_bytes(day.isoformat(), 1)
+        except (requests.RequestException, RuntimeError) as direct_error:
+            direct_reason = str(direct_error) if isinstance(direct_error, RuntimeError) else type(direct_error).__name__
+            if not os.environ.get('VSS_EXPORT_RELAY_URL'):
+                raise RuntimeError(f'VSS direct export failed ({direct_reason}); no relay configured.') from None
+            print(f'VSS direct export failed ({direct_reason}); trying configured relay.', flush=True)
             from scripts.vss_relay_client import download_export
-            blob = download_export(day.isoformat())
-        else:
-            blob = vss.download_kqdt_export(label, cookie='')
+            try:
+                blob = download_export(day.isoformat())
+            except (requests.RequestException, RuntimeError, ValueError) as relay_error:
+                raise RuntimeError(f'VSS direct {direct_reason}; relay: {relay_error}') from None
         records = vss.rows_from_export_bytes(blob)
         for item in records:
             item.setdefault('congbo', label)
             if not item.get('congbo'): item['congbo'] = label
-            if not item.get('loai'): item['loai'] = 'TÃ¢n dÆ°á»£c'
+            if not item.get('loai'): item['loai'] = 'Tân dược'
             item['nam'] = vss.derive_nam(item)
         rows = [build_vss_row({'fingerprint': vss.row_fingerprint(item), 'raw': item}) for item in records if not vss.is_garbled_bid(item)]
         for index in range(0, len(rows), 500):

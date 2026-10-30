@@ -1,0 +1,11 @@
+# VSS automatic recovery — 30 October 2026
+
+The existing daily cloud schedule selects MSC prices, tenders and YCBG; VSS was not enabled. When manually selected, VSS always used the configured relay, so a failing relay prevented an attempt from the runner's own network. Local daily updates replayed only two days, leaving gaps after a longer interruption. The default medicine type also contained mojibake instead of `Tân dược`.
+
+Source probes on 30 October establish that DNS resolves, TCP/TLS complete and `/login` returns HTTP 200. Both `/kqdt/chiTiet` and `/kqdt/export` time out, including a previously populated date and a fresh anonymous session. This isolates the observed failure to the KQDT requests; it does not establish the internal database or application failure at VSS. Production remains 745,660 rows, latest announcement 17 October, last successful import 22 October.
+
+The VSS-only workflow retries at 05:41 Vietnam time, preserving the existing Sunday pause. It has no dependency relationship with the MSC/YCBG workflow, and shares the existing concurrency group to avoid overlapping public-data writers. The existing cloud job replays the last successful import with overlap, up to 30 days. Direct export uses verified TLS, a fixed source, bounded time/size and SpreadsheetML validation; the existing authenticated relay is a fallback. Errors identify the direct failure class and relay HTTP status without logging secrets. A failed request retains data and the previous success timestamp and records warning status. Local daily updates now replay the missed interval rather than just two days.
+
+This intentionally enables bounded recovery attempts while the upstream is unavailable, as requested on 30 October. It does not claim the old cloud activation probe succeeded or that new source data was obtained. No application/UI deployment, new dependency or access change is needed. The source's health remains a prerequisite for a successful catch-up; outages over 30 days require a separately verified historical import.
+
+Validation: 25 tests cover direct success without the relay, timeout fallback, both routes failing without a success marker, HTTP diagnostics, malformed workbooks, local replay of an eight-day gap, row quantity/price handling and the canonical medicine type. Existing Sunday pause and MSC/YCBG scheduling remain unchanged.

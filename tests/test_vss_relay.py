@@ -69,9 +69,44 @@ class RelayTest(unittest.TestCase):
 
     def test_failed_day_does_not_write_success_metadata(self):
         start=datetime(2026,10,2)
-        with patch.dict(os.environ,ENV),patch('scripts.vss_relay_client.download_export',side_effect=RuntimeError('unavailable')),patch.object(cloud_daily,'_write_meta') as meta,patch.object(cloud_daily,'_flush') as upload:
+        with patch.dict(os.environ,ENV),patch.object(cloud_daily,'export_bytes',side_effect=requests.ReadTimeout()),patch('scripts.vss_relay_client.download_export',side_effect=RuntimeError('unavailable')),patch.object(cloud_daily,'_write_meta') as meta,patch.object(cloud_daily,'_flush') as upload:
             with self.assertRaises(RuntimeError):cloud_daily.crawl_vss(None,start,start)
             meta.assert_not_called();upload.assert_not_called()
+
+    def test_direct_source_success_does_not_depend_on_relay(self):
+        start=datetime(2026,10,2)
+        with patch.dict(os.environ,ENV),patch.object(cloud_daily,'export_bytes',return_value=XML) as direct,patch('scripts.vss_relay_client.download_export') as fallback,patch.object(cloud_daily,'_write_meta') as meta,patch.object(cloud_daily,'_flush',return_value=1) as upload,patch.object(cloud_daily.time,'sleep'),patch.object(cloud_daily.vss,'rows_from_export_bytes',return_value=[{'ten':'Medicine','soluong':'2','gia':'10'}]):
+            self.assertEqual(cloud_daily.crawl_vss(None,start,start),1)
+            direct.assert_called_once_with('2026-10-02',1);fallback.assert_not_called()
+            self.assertEqual(len(upload.call_args.args[3]),1)
+            self.assertEqual(upload.call_args.args[3][0]['loai'],'Tân dược')
+            meta.assert_called_once_with(None,'vss_total','vss_bids')
+
+    def test_direct_timeout_uses_relay_before_marking_complete(self):
+        start=datetime(2026,10,2)
+        with patch.dict(os.environ,ENV),patch.object(cloud_daily,'export_bytes',side_effect=requests.ReadTimeout()),patch('scripts.vss_relay_client.download_export',return_value=XML) as fallback,patch.object(cloud_daily,'_write_meta') as meta,patch.object(cloud_daily.time,'sleep'):
+            self.assertEqual(cloud_daily.crawl_vss(None,start,start),0)
+            fallback.assert_called_once_with('2026-10-02')
+            meta.assert_called_once()
+
+    def test_relay_failure_reports_status_without_echoing_response(self):
+        with patch.dict(os.environ,ENV),patch.object(client.time,'sleep'),patch.object(client.requests,'get',return_value=response(health=True)),patch.object(client.requests,'post',return_value=response(502)):
+            with self.assertRaisesRegex(RuntimeError,'HTTP 502') as raised:client.download_export('2026-10-02')
+            self.assertNotIn('test-secret',str(raised.exception))
+
+    def test_invalid_source_workbook_never_passes_as_empty_day(self):
+        day=datetime.now(timezone(timedelta(hours=7))).date().isoformat()
+        for body in [b'<Workbook broken',b'<Workbook/>']:
+            with patch.object(relay.requests,'get',return_value=response(data=body)):
+                with self.assertRaisesRegex(RuntimeError,'SpreadsheetML'):relay.export_bytes(day,1)
+
+    def test_local_daily_replays_the_gap_since_last_update(self):
+        from server import daily
+        from server.common import VN
+        old=(datetime.now(VN)-timedelta(days=8)).isoformat()
+        with patch.object(daily.vss,'meta_info',return_value={'updated':old}),patch.object(daily.vss,'crawl_vss') as crawl,patch.object(daily,'_wait',return_value=True),patch.object(daily,'_require_idle'),patch('server.metric_slice.rebuild_heat'):
+            daily._run_vss()
+            self.assertEqual(crawl.call_args.kwargs['days'],10)
 
 
 if __name__=='__main__':unittest.main()
