@@ -29,6 +29,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r server/requirements.txt
+      - name: Verify VSS recovery before writing data
+        run: python -m unittest tests.test_vss_relay tests.test_cloud_crawl tests.test_regulatory_daily -q
       - name: Catch up VSS independently of MSC and YCBG
         run: |
           if [ "${{ github.event_name }}" = schedule ] && [ "$(TZ=Asia/Bangkok date +%u)" = 7 ]; then
