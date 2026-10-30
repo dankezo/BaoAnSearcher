@@ -32,10 +32,12 @@ def download_export(day, loai=1):
             raise RuntimeError('VSS relay did not wake within 90 seconds.')
         time.sleep(min(3, max(0, deadline-time.monotonic())))
     for attempt in range(2):
+        status = None
         try:
             with requests.post(url+'/vss/export', headers={'Authorization': 'Bearer '+key},
                                json={'date': day, 'loai': loai}, timeout=(5, 35),
                                stream=True, allow_redirects=False) as response:
+                status = response.status_code
                 if response.status_code in (400, 401, 403, 404):
                     raise ValueError(f'VSS relay configuration/request rejected (HTTP {response.status_code}).')
                 if response.status_code != 200:
@@ -54,7 +56,8 @@ def download_export(day, loai=1):
                 return bytes(data)
         except ValueError:
             raise
-        except (requests.RequestException, RuntimeError, ET.ParseError):
+        except (requests.RequestException, RuntimeError, ET.ParseError) as exc:
             if attempt:
-                raise RuntimeError('VSS relay export failed after two attempts; successful days are retained.') from None
+                reason = f'HTTP {status}' if status and status != 200 else type(exc).__name__
+                raise RuntimeError(f'VSS relay export failed after two attempts ({reason}); successful days are retained.') from None
             time.sleep(2)
