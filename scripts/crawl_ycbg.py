@@ -3,6 +3,9 @@ import argparse
 from contextlib import closing
 import json
 import gzip
+import os
+import re
+import requests
 import sys
 from pathlib import Path
 
@@ -10,6 +13,21 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from server import ycbg
 from server.ycbg import completed_today
+
+
+def crawl_with_fallback(**kwargs):
+    """Retry once on the runner's browser, independently of Worker quota."""
+    worker = bool(os.environ.get('CLOUDFLARE_YCBG_WORKER_URL') or os.environ.get('CLOUDFLARE_CRAWL_WORKER_URL'))
+    try:
+        result = ycbg.crawl(**kwargs)
+        if not worker or kwargs.get('fetch_page') is not None or not result.get('errors'):
+            return result
+    except (RuntimeError, requests.Timeout, requests.ConnectionError) as exc:
+        unavailable = isinstance(exc, (requests.Timeout, requests.ConnectionError)) or re.search(r'Crawl Worker (?:HTTP (?:429|502|503|504)\b|connection unavailable)|Nguồn lỗi ba hồ sơ liên tiếp', str(exc))
+        if not worker or kwargs.get('fetch_page') is not None or not unavailable:
+            raise
+    print('YCBG Worker unavailable/incomplete; retry once with the runner browser; saved records retained.', flush=True)
+    return ycbg.crawl(**kwargs, use_worker=False)
 
 
 def cache_readers(folder):
@@ -110,7 +128,7 @@ def main():
             return previous
         ycbg.update_status('msc_ycbg',state='running',progress=0,message='Đang cập nhật YCBG',updated=ycbg.now_iso())
         try:
-            result=ycbg.crawl(full=args.full,report=lambda msg:print(msg,flush=True),**readers)
+            result=crawl_with_fallback(full=args.full,report=lambda msg:print(msg,flush=True),**readers)
         except Exception as exc:
             ycbg.update_status('msc_ycbg',state='error',message='YCBG chưa hoàn tất: '+type(exc).__name__,updated=ycbg.now_iso())
             raise

@@ -20,7 +20,7 @@ from .baoan_match import public_lines, _tender_group
 
 DB = DATA_DIR / 'msc_ycbg.sqlite3'
 ARCHIVE = DATA_DIR / 'msc_ycbg'
-BASE = 'https://muasamcong.mpi.gov.vn'
+BASE = 'https://muasamcong.mof.gov.vn'
 SERVICES = BASE + '/o/egp-portal-contractor-selection-v2/services/'
 _thread = None
 _guard = threading.Lock()
@@ -180,7 +180,7 @@ def fetch_detail(ident):
     return data
 
 
-def crawl(full=False, report=None, fetch_page=None, fetch=fetch_detail):
+def crawl(full=False, report=None, fetch_page=None, fetch=fetch_detail, use_worker=True):
     """Full first pass; subsequent 7-day overlap plus active and failed details."""
     if not _guard.acquire(blocking=False):
         raise RuntimeError('YCBG đang chạy')
@@ -190,7 +190,7 @@ def crawl(full=False, report=None, fetch_page=None, fetch=fetch_detail):
     if fetch_page is None:
         from dotenv import load_dotenv
         load_dotenv(ROOT / '.env')
-    remote = fetch_page is None and bool(os.environ.get('CLOUDFLARE_YCBG_WORKER_URL') or os.environ.get('CLOUDFLARE_CRAWL_WORKER_URL'))
+    remote = use_worker and fetch_page is None and bool(os.environ.get('CLOUDFLARE_YCBG_WORKER_URL') or os.environ.get('CLOUDFLARE_CRAWL_WORKER_URL'))
     report = report or (lambda message: update_status('msc_ycbg',state='running',message=message,updated=now_iso()))
     try:
         con = connect()
@@ -223,7 +223,7 @@ def crawl(full=False, report=None, fetch_page=None, fetch=fetch_detail):
                 body = payload(number)
                 def matches(res):
                     try:
-                        return res.url.split('?')[0] == TENDER_API and same_search(res.request.post_data_json,body)
+                        return res.url.split('?')[0] == SERVICES+'smart/search' and same_search(res.request.post_data_json,body)
                     except Exception:
                         return False
                 with page.expect_response(matches,timeout=60000) as pending:
