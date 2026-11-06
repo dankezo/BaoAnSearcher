@@ -149,7 +149,8 @@ def crawl_tender_pages(conn, start, browser_page):
         published = [str(item.get('publicDate') or '')[:10] for item in rows]
         if published and all(value and value < start.date().isoformat() for value in published):
             break
-        time.sleep(0.5)
+        # Sequential slow walk: leave room between browser sessions even on cache hits.
+        time.sleep(15)
     else:
         raise RuntimeError('MSC tender scan reached the page budget; catch-up remains incomplete.')
     crawl_scopes(conn, candidates, browser_page)
