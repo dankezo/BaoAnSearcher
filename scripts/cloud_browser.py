@@ -5,6 +5,7 @@ import html
 import json
 import requests
 import time
+from email.utils import parsedate_to_datetime
 
 WORKER_URLS = ('https://crawl.baoanpharma.com', 'https://baoan-public-crawl.dannyphan190.workers.dev')
 
@@ -20,6 +21,7 @@ def cloud_worker_post(path, body, timeout=(10, 110)):
         raise ValueError(f'Configure the BaoAn crawl Worker URL and {key_name}.')
     attempts = 3 if path.startswith('/ycbg/') or path == '/msc/search' else 1
     for attempt in range(attempts):
+        delay = 2 * (attempt + 1)
         try:
             response = requests.post(worker + path, headers={'Authorization': f'Bearer {key}'},
                                      json=body, timeout=timeout)
@@ -27,10 +29,28 @@ def cloud_worker_post(path, body, timeout=(10, 110)):
             if attempt == attempts - 1:
                 raise RuntimeError('Crawl Worker connection unavailable after bounded retries.') from None
         else:
-            if response.status_code not in (502, 503, 504) or attempt == attempts - 1:
+            retryable = response.status_code in (502, 503, 504)
+            if path == '/msc/search' and response.status_code == 429:
+                try:
+                    retryable = response.json().get('error') == 'browser_rate_limited'
+                except (ValueError, AttributeError):
+                    retryable = False
+                if retryable:
+                    # Respect provider cooldowns; daily quota errors must stop immediately.
+                    header = str(response.headers.get('Retry-After', '')).strip()
+                    try:
+                        cooldown = int(header) if header.isdigit() else parsedate_to_datetime(header).timestamp() - time.time()
+                    except (ValueError, TypeError, OverflowError):
+                        cooldown = 0
+                    if cooldown > 60:
+                        break
+                    delay = max(15 * (2 ** attempt), cooldown)
+            if not retryable or attempt == attempts - 1:
                 break
             response.close()
-        time.sleep(2 * (attempt + 1))
+        if path == '/msc/search':
+            delay = max(delay, 15 * (2 ** attempt))
+        time.sleep(delay)
     status = getattr(response, 'status_code', 200)
     if isinstance(status, int) and status >= 400:
         message = 'daily MSC browser budget reached; retry next window.' if status == 429 else 'public source unavailable; check Worker logs.'
