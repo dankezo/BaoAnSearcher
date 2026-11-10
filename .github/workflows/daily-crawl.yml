@@ -1,12 +1,13 @@
 name: Daily public data crawl
 on:
   schedule:
-    - cron: '17 22 * * *' # 05:17 daily VN; Sunday runs YCBG only
+    - cron: '17 19 * * *' # 02:17 VN; allow for hosted scheduler delays
+    - cron: '17 22 * * *' # 05:17 VN recovery; completed sources are skipped
   workflow_dispatch:
     inputs:
       only:
-        description: Sources (prices,tenders,ycbg,vss)
-        default: tenders,prices,ycbg
+        description: Sources (prices,tenders,ycbg,dav,vss)
+        default: tenders,prices,ycbg,dav
         type: string
       days:
         description: Replay days (1–30)
@@ -17,14 +18,18 @@ on:
         default: ubuntu-latest
         type: choice
         options: [windows-latest, ubuntu-latest]
+      daily:
+        description: Skip sources already verified today
+        type: boolean
+        default: false
 permissions:
   contents: read
-concurrency:
-  group: daily-public-data
-  cancel-in-progress: false
 jobs:
   crawl:
-    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    concurrency:
+      group: daily-public-${{ matrix.source }}
+      cancel-in-progress: false
+    runs-on: ${{ matrix.source == 'dav' && 'windows-latest' || inputs.runner || 'ubuntu-latest' }}
     defaults:
       run:
         shell: bash
@@ -32,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        source: [prices, tenders, ycbg, vss]
+        source: [prices, tenders, ycbg, dav, vss]
     env:
       TIDB_DATABASE_URL: ${{ secrets.TIDB_DATABASE_URL }}
       TIDB_HOST: ${{ secrets.TIDB_HOST }}
@@ -45,17 +50,12 @@ jobs:
       CLOUDFLARE_YCBG_KEY: ${{ secrets.CLOUDFLARE_YCBG_KEY }}
       VSS_EXPORT_RELAY_URL: ${{ secrets.VSS_EXPORT_RELAY_URL }}
       VSS_EXPORT_RELAY_KEY: ${{ secrets.VSS_EXPORT_RELAY_KEY }}
-      CRAWL_ONLY: ${{ inputs.only || 'tenders,prices,ycbg' }}
+      CRAWL_ONLY: ${{ inputs.only || 'tenders,prices,ycbg,dav' }}
+      CRAWL_DAILY: ${{ github.event_name == 'schedule' || inputs.daily }}
       CRAWL_DAYS: ${{ inputs.days || '3' }}
       PYTHONUNBUFFERED: '1'
       PYTHONUTF8: '1'
     steps:
-      - name: Preserve Sunday pause for existing sources
-        if: github.event_name == 'schedule'
-        run: |
-          if [ "$(TZ=Asia/Bangkok date +%u)" = 7 ]; then
-            echo "CRAWL_ONLY=ycbg" >> "$GITHUB_ENV"
-          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -74,8 +74,20 @@ jobs:
         run: python -m unittest tests.test_msc_browser_retry -q
       - run: python scripts/crawl_ycbg.py --publish --daily
         if: matrix.source == 'ycbg' && contains(env.CRAWL_ONLY, matrix.source)
-      - run: python scripts/cloud_daily.py --yes-remote --only "$CRAWL_SOURCE" --days "$CRAWL_DAYS"
-        if: matrix.source != 'ycbg' && contains(env.CRAWL_ONLY, matrix.source)
+      - name: Verify DAV before updating data
+        if: matrix.source == 'dav' && contains(env.CRAWL_ONLY, matrix.source)
+        run: python -m unittest tests.test_dav_daily -q
+      - name: Update DAV
+        if: matrix.source == 'dav' && contains(env.CRAWL_ONLY, matrix.source)
+        run: |
+          daily=()
+          if [ "$CRAWL_DAILY" = true ]; then daily=(--daily); fi
+          python scripts/dav_daily.py --publish "${daily[@]}"
+      - run: |
+          daily=()
+          if [ "$CRAWL_DAILY" = true ]; then daily=(--daily); fi
+          python scripts/cloud_daily.py --yes-remote --only "$CRAWL_SOURCE" --days "$CRAWL_DAYS" "${daily[@]}"
+        if: matrix.source != 'ycbg' && matrix.source != 'dav' && contains(env.CRAWL_ONLY, matrix.source)
         env:
           CRAWL_SOURCE: ${{ matrix.source }}
   analytics-snapshots:

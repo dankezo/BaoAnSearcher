@@ -211,9 +211,6 @@ def main():
         print('Pass --publish to update the configured TiDB.')
         return 0
     now = datetime.now(VN)
-    if args.daily and now.weekday() == 6 and not args.force:
-        print('Sunday pause; data and successful timestamp retained.')
-        return 0
     conn = connect(require_config())
     try:
         with conn.cursor() as cur:

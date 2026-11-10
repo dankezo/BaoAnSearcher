@@ -10,7 +10,7 @@ import time
 import urllib.request
 import requests
 import urllib.error
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -196,6 +196,7 @@ def main():
     parser.add_argument('--only', default='prices,tenders,vss')
     parser.add_argument('--days', type=int, default=3)
     parser.add_argument('--yes-remote', action='store_true')
+    parser.add_argument('--daily', action='store_true', help='Skip sources already verified today in VN time.')
     args = parser.parse_args()
     actions = {'prices': ('MSC_PRICE', crawl_prices), 'tenders': ('MSC_BID', crawl_tenders), 'vss': ('VSS', crawl_vss)}
     selected = args.only.split(',')
@@ -213,8 +214,11 @@ def main():
             code, action = actions[name]
             # Replay the last successful day and catch outages up to 30 days.
             with conn.cursor() as cur:
-                cur.execute('SELECT last_synced_at FROM data_registry_meta WHERE dataset_code=%s', (code,))
+                cur.execute('SELECT last_synced_at,status FROM data_registry_meta WHERE dataset_code=%s', (code,))
                 result = cur.fetchone()
+            if args.daily and result and result[0] and result[1] == 'healthy' and result[0].replace(tzinfo=timezone.utc).astimezone(VN).date() == today.date():
+                print(f'{code}: already verified today; skipping.', flush=True)
+                continue
             days = args.days
             if result and result[0]:
                 days = max(days, min(30, (today.date() - result[0].date()).days + 2))
