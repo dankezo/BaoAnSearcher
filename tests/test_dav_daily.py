@@ -26,7 +26,9 @@ class DavDailyTest(unittest.TestCase):
         self.publish = patch.object(daily, 'sync_dav', return_value=55005).start()
 
     def test_complete_scan_is_published_then_count_is_verified(self):
+        self.tool.Downloader.return_value.run.side_effect = lambda **kwargs: self.assertTrue(self.conn.close.called)
         result = daily.run(publish=True)
+        self.assertEqual(daily.connect.call_count, 2, 'writer must reconnect after the long source scan')
         self.publish.assert_called_once_with(self.conn, {}, True)
         self.assertTrue(result['complete'])
         self.assertEqual(result['published_total'], 55005)
