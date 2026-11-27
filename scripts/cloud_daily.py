@@ -87,7 +87,7 @@ def crawl_vss(conn, start, end):
     return sent
 
 
-GUEST_TENDER_URL = 'https://muasamcong.mof.gov.vn/web/guest/contractor-selection'
+GUEST_TENDER_URL = 'https://muasamcong.mof.gov.vn/web/guest/contractor-selection?render=search'
 TENDER_SEARCH_HOSTS = {'muasamcong.mof.gov.vn', 'muasamcong.mpi.gov.vn'}
 TENDER_FALLBACK_ERRORS = {'', 'incomplete_cloud_search', 'msc_search_timeout',
                           'public_source_unavailable', 'worker_connection_unavailable'}
