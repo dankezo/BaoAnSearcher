@@ -148,18 +148,50 @@ class MscBrowserRetryTest(unittest.TestCase):
         from scripts import cloud_daily
 
         error = self.response(502, 'incomplete_cloud_search')
-        env, request = self.invoke([error, error, error])
-        with (env, request, patch.object(cloud_browser.time, 'sleep'),
+        env, request = self.invoke([error] * 6)
+        with (env, request, patch.object(cloud_browser.time, 'sleep') as sleep,
               patch('playwright.sync_api.sync_playwright') as playwright,
               patch.object(cloud_daily, '_write_meta') as metadata):
             browser = playwright.return_value.__enter__.return_value.chromium.launch.return_value
             page = browser.new_page.return_value
             page.url = cloud_daily.GUEST_TENDER_URL
             page.title.return_value = 'Error'
-            with self.assertRaisesRegex(RuntimeError, 'guest page is unavailable'):
+            with self.assertRaisesRegex(RuntimeError, 'incomplete_cloud_search'):
                 cloud_daily.crawl_tenders(None, datetime(2026, 11, 4), None)
+            self.assertEqual(sleep.call_args_list.count(call(cloud_daily.TENDER_RECOVERY_DELAY_SECONDS)), 1)
             metadata.assert_not_called()
             browser.close.assert_called_once_with()
+
+    def test_worker_recovery_waits_once_when_guest_source_is_unavailable(self):
+        from scripts import cloud_daily
+
+        error = cloud_browser.CrawlWorkerError(502, 'incomplete_cloud_search', 'Worker unavailable')
+        with (patch.dict('os.environ', {'CLOUDFLARE_CRAWL_WORKER_URL': 'https://crawl.baoanpharma.com'}),
+              patch.object(cloud_daily, 'crawl_tender_pages', side_effect=[error, 100]) as cloud,
+              patch.object(cloud_daily, 'crawl_tenders_as_guest', side_effect=cloud_daily.MscGuestUnavailable),
+              patch.object(cloud_daily.time, 'sleep') as sleep):
+            start = datetime(2026, 11, 4)
+            self.assertEqual(cloud_daily.crawl_tenders(None, start, None), 100)
+            self.assertEqual(cloud.call_args_list, [call(None, start, None), call(None, start, None)])
+            sleep.assert_called_once_with(cloud_daily.TENDER_RECOVERY_DELAY_SECONDS)
+
+    def test_guest_access_restriction_does_not_start_recovery(self):
+        from scripts import cloud_daily
+
+        error = self.response(502, 'incomplete_cloud_search')
+        env, request = self.invoke([error] * 3)
+        with (env, request as post, patch.object(cloud_browser.time, 'sleep') as sleep,
+              patch('playwright.sync_api.sync_playwright') as playwright,
+              patch.object(cloud_daily, '_write_meta') as metadata):
+            browser = playwright.return_value.__enter__.return_value.chromium.launch.return_value
+            page = browser.new_page.return_value
+            page.url = cloud_daily.GUEST_TENDER_URL
+            page.goto.return_value.status = 403
+            with self.assertRaisesRegex(RuntimeError, 'HTTP 403'):
+                cloud_daily.crawl_tenders(None, datetime(2026, 11, 4), None)
+            self.assertEqual(post.call_count, 3)
+            self.assertNotIn(call(cloud_daily.TENDER_RECOVERY_DELAY_SECONDS), sleep.call_args_list)
+            metadata.assert_not_called()
 
     def test_unexpected_empty_page_leaves_sync_incomplete(self):
         from scripts import cloud_daily

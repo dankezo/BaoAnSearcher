@@ -91,6 +91,11 @@ GUEST_TENDER_URL = 'https://muasamcong.mof.gov.vn/web/guest/contractor-selection
 TENDER_SEARCH_HOSTS = {'muasamcong.mof.gov.vn', 'muasamcong.mpi.gov.vn'}
 TENDER_FALLBACK_ERRORS = {'', 'incomplete_cloud_search', 'msc_search_timeout',
                           'public_source_unavailable', 'worker_connection_unavailable'}
+TENDER_RECOVERY_DELAY_SECONDS = 300
+
+
+class MscGuestUnavailable(RuntimeError):
+    pass
 
 
 def crawl_tenders(conn, start, end):
@@ -103,6 +108,13 @@ def crawl_tenders(conn, start, end):
                 raise
             print(f'MSC_BID: Worker unavailable ({error.code or error.status}); replaying the window in the official guest browser.',
                   flush=True)
+        try:
+            return crawl_tenders_as_guest(conn, start)
+        except MscGuestUnavailable:
+            print(f'MSC_BID: Guest search unavailable; retrying the Worker after {TENDER_RECOVERY_DELAY_SECONDS} seconds.',
+                  flush=True)
+            time.sleep(TENDER_RECOVERY_DELAY_SECONDS)
+            return crawl_tender_pages(conn, start, None)
     return crawl_tenders_as_guest(conn, start)
 
 
@@ -115,14 +127,17 @@ def crawl_tenders_as_guest(conn, start):
             page = browser.new_page(locale='vi-VN')
             response = page.goto(GUEST_TENDER_URL, wait_until='domcontentloaded', timeout=40000)
             destination = urlsplit(page.url)
-            if (response is None or not response.ok or destination.scheme != 'https'
-                    or destination.hostname not in TENDER_SEARCH_HOSTS
-                    or destination.path != urlsplit(GUEST_TENDER_URL).path or page.title().strip().lower() == 'error'):
-                raise RuntimeError('Official MSC guest page is unavailable; the scan remains incomplete.')
+            if (destination.scheme != 'https' or destination.hostname not in TENDER_SEARCH_HOSTS
+                    or destination.path != urlsplit(GUEST_TENDER_URL).path):
+                raise RuntimeError('Official MSC guest search redirected away from the public search page.')
+            if response is not None and response.status in (401, 403, 429):
+                raise RuntimeError(f'Official MSC guest page returned HTTP {response.status}.')
+            if response is None or not response.ok or page.title().strip().lower() == 'error':
+                raise MscGuestUnavailable('Official MSC guest page is unavailable; the scan remains incomplete.')
             page.wait_for_function('Boolean(' + COMPONENT + ')', timeout=25000)
             return crawl_tender_pages(conn, start, page)
         except BrowserError as error:
-            raise RuntimeError(f'Official MSC guest browser did not complete the scan ({type(error).__name__}).') from None
+            raise MscGuestUnavailable(f'Official MSC guest browser did not complete the scan ({type(error).__name__}).') from None
         finally:
             browser.close()
 
@@ -150,7 +165,7 @@ def crawl_tender_pages(conn, start, browser_page):
                 browser_page.evaluate('(p)=>{const v=' + COMPONENT + ';v.quickSearchPayload.pageSize=p.pageSize;v.currentPage=p.pageNumber;v.axiosSearch(p)}', body)
             response = pending.value
             if response.status != 200:
-                raise RuntimeError('MSC guest search is unavailable.')
+                raise RuntimeError(f'Official MSC guest search returned HTTP {response.status}.')
             data = response.json()
         page = data.get('page')
         if not isinstance(page, dict) or not isinstance(page.get('content'), list) or not isinstance(page.get('totalPages'), int):
