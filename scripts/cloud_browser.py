@@ -10,6 +10,13 @@ from email.utils import parsedate_to_datetime
 WORKER_URLS = ('https://crawl.baoanpharma.com', 'https://baoan-public-crawl.dannyphan190.workers.dev')
 
 
+class CrawlWorkerError(RuntimeError):
+    def __init__(self, status, code, message):
+        self.status = status
+        self.code = code
+        super().__init__(message)
+
+
 def cloud_worker_post(path, body, timeout=(10, 110)):
     """Invoke the allowlisted public crawl Worker without logging its key."""
     worker = (os.environ.get('CLOUDFLARE_YCBG_WORKER_URL') if path.startswith('/ycbg/') or path=='/quota' else None) or os.environ.get('CLOUDFLARE_CRAWL_WORKER_URL', '')
@@ -27,7 +34,8 @@ def cloud_worker_post(path, body, timeout=(10, 110)):
                                      json=body, timeout=timeout)
         except (requests.Timeout, requests.ConnectionError):
             if attempt == attempts - 1:
-                raise RuntimeError('Crawl Worker connection unavailable after bounded retries.') from None
+                raise CrawlWorkerError(503, 'worker_connection_unavailable',
+                                       'Crawl Worker connection unavailable after bounded retries.') from None
         else:
             retryable = response.status_code in (502, 503, 504)
             if path == '/msc/search' and response.status_code == 429:
@@ -54,13 +62,14 @@ def cloud_worker_post(path, body, timeout=(10, 110)):
     status = getattr(response, 'status_code', 200)
     if isinstance(status, int) and status >= 400:
         message = 'daily MSC browser budget reached; retry next window.' if status == 429 else 'public source unavailable; check Worker logs.'
+        code = ''
         try:
             code = response.json().get('error', '')
             if isinstance(code, str) and re.fullmatch(r'[a-z][a-z0-9_]{0,79}', code):
                 message = code
         except (ValueError, AttributeError):
             pass
-        raise RuntimeError(f'Crawl Worker HTTP {status}: {message}')
+        raise CrawlWorkerError(status, code if message == code else '', f'Crawl Worker HTTP {status}: {message}')
     data = response.json()
     if not isinstance(data, dict):
         raise ValueError('Crawl Worker returned an invalid response.')

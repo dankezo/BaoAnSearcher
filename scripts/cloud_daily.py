@@ -10,6 +10,7 @@ import time
 import urllib.request
 import requests
 import urllib.error
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -20,11 +21,11 @@ sys.path.insert(0, str(ROOT / 'scripts' / 'tidb'))
 
 from core import BASE, TENDER_API, connect as sqlite_connect, normalize_tender, save_records
 from sync import Api, Downloader
-from browser_update import payload as tender_payload, URL as TENDER_PAGE, COMPONENT, same_search
+from browser_update import payload as tender_payload, COMPONENT, same_search
 from server.common import VN
 from server import vss
 from server.msc_scope import _open, _fetch_lots, fetch_lots_on_page
-from scripts.cloud_browser import open_browser, cloud_search_page
+from scripts.cloud_browser import CrawlWorkerError, cloud_search_page
 from connect import connect, require_config
 from rows import (MSC_PRICE_COLUMNS, MSC_TENDER_COLUMNS, VSS_COLUMNS,
                   build_msc_price_row, build_msc_tender_row, build_vss_row)
@@ -86,17 +87,42 @@ def crawl_vss(conn, start, end):
     return sent
 
 
+GUEST_TENDER_URL = 'https://muasamcong.mof.gov.vn/web/guest/contractor-selection'
+TENDER_SEARCH_HOSTS = {'muasamcong.mof.gov.vn', 'muasamcong.mpi.gov.vn'}
+TENDER_FALLBACK_ERRORS = {'', 'incomplete_cloud_search', 'msc_search_timeout',
+                          'public_source_unavailable', 'worker_connection_unavailable'}
+
+
 def crawl_tenders(conn, start, end):
-    if os.environ.get('CLOUDFLARE_CRAWL_WORKER_URL') or os.environ.get('CLOUDFLARE_BROWSER_ACCOUNT_ID') or os.environ.get('CLOUDFLARE_BROWSER_TOKEN'):
-        return crawl_tender_pages(conn, start, None)
-    from playwright.sync_api import sync_playwright
+    worker = bool(os.environ.get('CLOUDFLARE_CRAWL_WORKER_URL', '').strip())
+    if worker or os.environ.get('CLOUDFLARE_BROWSER_ACCOUNT_ID') or os.environ.get('CLOUDFLARE_BROWSER_TOKEN'):
+        try:
+            return crawl_tender_pages(conn, start, None)
+        except CrawlWorkerError as error:
+            if not worker or error.status not in (502, 503, 504) or error.code not in TENDER_FALLBACK_ERRORS:
+                raise
+            print(f'MSC_BID: Worker unavailable ({error.code or error.status}); replaying the window in the official guest browser.',
+                  flush=True)
+    return crawl_tenders_as_guest(conn, start)
+
+
+def crawl_tenders_as_guest(conn, start):
+    from playwright.sync_api import Error as BrowserError, sync_playwright
+
     with sync_playwright() as runtime:
-        browser = open_browser(runtime)
+        browser = runtime.chromium.launch(headless=True)
         try:
             page = browser.new_page(locale='vi-VN')
-            page.goto(TENDER_PAGE, wait_until='domcontentloaded', timeout=60000)
-            page.wait_for_function('Boolean(' + COMPONENT + ')', timeout=60000)
+            response = page.goto(GUEST_TENDER_URL, wait_until='domcontentloaded', timeout=40000)
+            destination = urlsplit(page.url)
+            if (response is None or not response.ok or destination.scheme != 'https'
+                    or destination.hostname not in TENDER_SEARCH_HOSTS
+                    or destination.path != urlsplit(GUEST_TENDER_URL).path or page.title().strip().lower() == 'error'):
+                raise RuntimeError('Official MSC guest page is unavailable; the scan remains incomplete.')
+            page.wait_for_function('Boolean(' + COMPONENT + ')', timeout=25000)
             return crawl_tender_pages(conn, start, page)
+        except BrowserError as error:
+            raise RuntimeError(f'Official MSC guest browser did not complete the scan ({type(error).__name__}).') from None
         finally:
             browser.close()
 
@@ -107,12 +133,14 @@ def crawl_tender_pages(conn, start, browser_page):
     candidates = []
     deadline = time.monotonic() + 420
     for page_no in range(200):
-        if browser_page is None and time.monotonic() >= deadline:
-            raise RuntimeError('Cloud browser daily time budget reached; catch-up is incomplete.')
+        if time.monotonic() >= deadline:
+            raise RuntimeError('MSC browser time budget reached; catch-up is incomplete.')
         body = tender_payload(page_no)
         def matches(response):
             try:
-                return response.url.split('?')[0] == TENDER_API and same_search(response.request.post_data_json, body)
+                source = urlsplit(response.url)
+                return (source.scheme == 'https' and source.hostname in TENDER_SEARCH_HOSTS
+                        and source.path == urlsplit(TENDER_API).path and same_search(response.request.post_data_json, body))
             except Exception:
                 return False
         if browser_page is None:
@@ -128,6 +156,13 @@ def crawl_tender_pages(conn, start, browser_page):
         if not isinstance(page, dict) or not isinstance(page.get('content'), list) or not isinstance(page.get('totalPages'), int):
             raise ValueError('MSC search response changed; no completeness claim.')
         rows = page['content']
+        returned_page = page.get('currentPage', page.get('number'))
+        if returned_page is not None and str(returned_page) != str(page_no):
+            raise ValueError('MSC returned a different page; catch-up is incomplete.')
+        total_pages = page['totalPages']
+        if (total_pages < 0 or (page_no >= total_pages and (rows or page_no > 0))
+                or (not rows and page_no < total_pages)):
+            raise ValueError('MSC returned inconsistent pagination; catch-up is incomplete.')
         if any(item.get('isMedicine') not in (1, '1', True) for item in rows):
             raise ValueError('MSC returned rows outside the medicine filter.')
         ids = {str(item.get('id') or item.get('notifyId') or '') for item in rows}
@@ -144,7 +179,7 @@ def crawl_tender_pages(conn, start, browser_page):
                     candidates.append((str(item.get('id') or item.get('notifyId')), normalized))
         sent += _flush(conn, 'msc_tenders', MSC_TENDER_COLUMNS, mapped)
         print(f'MSC search page {page_no + 1}: {len(rows)} medicine tenders', flush=True)
-        if page_no + 1 >= page['totalPages']:
+        if page_no + 1 >= total_pages:
             break
         published = [str(item.get('publicDate') or '')[:10] for item in rows]
         if published and all(value and value < start.date().isoformat() for value in published):

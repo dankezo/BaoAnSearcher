@@ -65,7 +65,7 @@ jobs:
       - run: pip install -r "test zone/procurement/requirements.txt"
         if: (matrix.source == 'tenders' || matrix.source == 'ycbg') && contains(env.CRAWL_ONLY, matrix.source)
       - run: python -m playwright install --with-deps chromium
-        if: (matrix.source == 'tenders' || matrix.source == 'ycbg') && contains(env.CRAWL_ONLY, matrix.source) && (matrix.source == 'ycbg' || env.CLOUDFLARE_CRAWL_WORKER_URL == '')
+        if: (matrix.source == 'tenders' || matrix.source == 'ycbg') && contains(env.CRAWL_ONLY, matrix.source)
       - name: Verify YCBG fallback before updating data
         if: matrix.source == 'ycbg' && contains(env.CRAWL_ONLY, matrix.source)
         run: python -m unittest tests.test_ycbg_fallback tests.test_ycbg_cloud tests.test_ycbg tests.test_ycbg_publish -q
